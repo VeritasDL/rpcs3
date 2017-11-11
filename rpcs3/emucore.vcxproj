@@ -388,6 +388,7 @@
     <ClCompile Include="Emu\Cell\SPURecompiler.cpp" />
     <ClCompile Include="Emu\Cell\SPUThread.cpp" />
     <ClCompile Include="Emu\CPU\CPUThread.cpp" />
+    <ClCompile Include="Emu\State.cpp" />
     <ClCompile Include="Emu\VFS.cpp" />
     <ClCompile Include="Emu\Memory\Memory.cpp">
       <ObjectFileName>$(IntDir)OldMemory.obj</ObjectFileName>
@@ -411,6 +412,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\3rdparty\ChunkFile.h" />
     <ClInclude Include="..\3rdparty\stblib\stb_image.h" />
     <ClInclude Include="..\ps3emu_api\ps3emu_api.h" />
     <ClInclude Include="..\Utilities\Atomic.h" />
@@ -656,6 +658,7 @@
     <ClInclude Include="Emu\RSX\rsx_decode.h" />
     <ClInclude Include="Emu\RSX\rsx_trace.h" />
     <ClInclude Include="Emu\RSX\rsx_vertex_data.h" />
+    <ClInclude Include="Emu\State.h" />
     <ClInclude Include="Emu\VFS.h" />
     <ClInclude Include="Emu\GameInfo.h" />
     <ClInclude Include="Emu\IdManager.h" />

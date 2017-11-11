@@ -4,6 +4,8 @@
 
 #include <set>
 
+class PointerWrap;
+
 // SPU Instruction Type
 struct spu_itype
 {
@@ -290,6 +292,8 @@ class SPUDatabase final : spu_itype
 
 	// For internal use
 	spu_function_t* find(const be_t<u32>* data, u64 key, u32 max_size);
+
+	void DoState(PointerWrap& p);
 
 public:
 	SPUDatabase();

@@ -2,6 +2,7 @@
 
 #include "types.h"
 #include "Atomic.h"
+#include "3rdparty/ChunkFile.h"
 
 // Shared mutex.
 class shared_mutex final
@@ -100,6 +101,12 @@ public:
 	{
 		return (m_value.load() % c_one) != 0;
 	}
+
+	void DoState(PointerWrap& p)
+	{
+		p.Do(m_value);
+	}
+
 };
 
 // Simplified shared (reader) lock implementation.

@@ -2,6 +2,7 @@
 
 #include "../Utilities/Thread.h"
 #include "../Utilities/bit_set.h"
+#include "3rdparty/ChunkFile.h"
 
 // Thread state flags
 enum class cpu_flag : u32
@@ -65,6 +66,8 @@ public:
 
 	// Callback for cpu_flag::suspend
 	virtual void cpu_sleep() {}
+
+	virtual void DoState(PointerWrap& p);
 };
 
 inline cpu_thread* get_current_cpu_thread() noexcept

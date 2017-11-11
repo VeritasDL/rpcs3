@@ -21,6 +21,13 @@ spu_function_t* SPUDatabase::find(const be_t<u32>* data, u64 key, u32 max_size)
 	return nullptr;
 }
 
+void SPUDatabase::DoState(PointerWrap& p)
+{
+	m_mutex.DoState(p);
+	// TODO(velo)
+	p.Do(m_db);
+}
+
 SPUDatabase::SPUDatabase()
 {
 	// TODO: load existing database associated with currently running executable
@@ -153,7 +160,7 @@ spu_function_t* SPUDatabase::analyse(const be_t<u32>* ls, u32 entry, u32 max_lim
 
 				// Fix pos value
 				start = pos; pos = pos - 4;
-				
+
 				continue;
 			}
 
@@ -173,7 +180,7 @@ spu_function_t* SPUDatabase::analyse(const be_t<u32>* ls, u32 entry, u32 max_lim
 			limit = pos + 4;
 			break;
 		}
-		
+
 		if (type == BI || type == IRET) // Branch Indirect
 		{
 			blocks.emplace(start);

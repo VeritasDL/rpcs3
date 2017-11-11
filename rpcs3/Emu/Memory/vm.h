@@ -6,6 +6,7 @@
 
 class named_thread;
 class cpu_thread;
+class PointerWrap;
 
 namespace vm
 {
@@ -13,13 +14,20 @@ namespace vm
 	extern u8* const g_exec_addr;
 	extern u8* const g_stat_addr;
 
+	//class block_t;
+	//extern std::vector<std::shared_ptr<block_t>> g_locations;
+
+	// NOTE: vm::get indexes g_location with these, so currently they're hardcoded to work with ps3 locations only
 	enum memory_location_t : uint
 	{
-		main,
+		main = 0,
 		user_space,
 		video,
 		stack,
-		
+		spu,
+		rsx_contexts,
+		main_ext,
+
 		memory_location_max,
 		any = 0xffffffff,
 	};
@@ -54,6 +62,7 @@ namespace vm
 		void test() const;
 
 		~waiter();
+		void DoState(PointerWrap& p);
 	};
 
 	// Address type
@@ -162,6 +171,9 @@ namespace vm
 
 		// Get allocated memory count
 		u32 used();
+
+		// For save states
+		void DoState(PointerWrap& p);
 	};
 
 	// Create new memory block with specified parameters and return it
@@ -191,6 +203,8 @@ namespace vm
 
 		fmt::throw_exception("Not a virtual memory pointer (%p)", real_ptr);
 	}
+
+	void DoState(PointerWrap& p);
 
 	template<typename T>
 	struct cast_impl
@@ -314,7 +328,7 @@ namespace vm
 
 		void init();
 	}
-	
+
 	namespace psv
 	{
 		template<typename T> inline to_le_t<T>* _ptr(u32 addr)

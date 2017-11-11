@@ -183,3 +183,11 @@ std::string cpu_thread::dump() const
 {
 	return fmt::format("Type: %s\n" "State: %s\n", typeid(*this).name(), state.load());
 }
+
+void cpu_thread::DoState(PointerWrap& p)
+{
+	p.Do(g_threads_created);
+	p.Do(g_threads_deleted);
+	p.Do(state);
+	p.Do(id);
+}

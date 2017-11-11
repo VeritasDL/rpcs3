@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "Memory.h"
 #include "Emu/System.h"
 #include "Utilities/mutex.h"
@@ -7,6 +7,7 @@
 #include "Emu/CPU/CPUThread.h"
 #include "Emu/Cell/lv2/sys_memory.h"
 #include "Emu/RSX/GSRender.h"
+#include "3rdparty/ChunkFile.h"
 
 #include <atomic>
 #include <deque>
@@ -130,7 +131,7 @@ namespace vm
 		{
 			cpu = nullptr;
 		}
-		
+
 		g_mutex.lock_shared();
 
 		if (cpu)
@@ -239,6 +240,23 @@ namespace vm
 
 			return (*ptr)[(addr & 0xfff) >> 7];
 		}
+
+		void DoState(PointerWrap& p)
+		{
+			assert(reservations && "DoState called on memory_page that's not filled in. Wasted space!");
+
+			p.Do(flags);
+			p.Do(waiters);
+
+			for (auto i = 0; i < reservations->size(); ++i)
+			{
+				auto& res = reservations[i];
+				for (auto& r : res)
+					p.Do(r);
+			}
+
+			p.DoMarker("memory_page", 0xFE);
+		}
 	};
 
 	// Memory pages
@@ -301,6 +319,17 @@ namespace vm
 		{
 			g_waiters.erase(found);
 		}
+	}
+
+	void waiter::DoState(PointerWrap& p)
+	{
+		// TODO(velo)
+		// p.DoPointer(owner);
+		p.Do(addr);
+		p.Do(size);
+		p.Do(stamp);
+		p.DoArray(static_cast<u8*>(const_cast<void*>(data)), size);
+		p.DoMarker("waiter", 0xCC);
 	}
 
 	void notify(u32 addr, u32 size)
@@ -457,7 +486,7 @@ namespace vm
 				return false;
 			}
 		}
-		
+
 		return true;
 	}
 
@@ -695,6 +724,17 @@ namespace vm
 		return imp_used(lock);
 	}
 
+	void block_t::DoState(PointerWrap& p)
+	{
+		p.Do(addr);
+		p.Do(size);
+		p.Do(flags);
+		// TODO
+		//p.Do(m_map);
+		//p.Do(m_sup);
+		p.DoMarker("block_t", 0xFA);
+	}
+
 	std::shared_ptr<block_t> map(u32 addr, u32 size, u64 flags)
 	{
 		writer_lock lock(0);
@@ -768,7 +808,7 @@ namespace vm
 
 			return nullptr;
 		}
-		
+
 		// search location by address
 		for (auto& block : g_locations)
 		{
@@ -779,6 +819,96 @@ namespace vm
 		}
 
 		return nullptr;
+	}
+
+	void DoState(PointerWrap& p)
+	{
+		//
+		// g_locations
+		//
+		p.DoEachElement(g_locations, [](PointerWrap& pw, std::shared_ptr<vm::block_t> b)
+		{
+			b->DoState(pw);
+			pw.DoMarker("vm::locations::block_t", 0xFD);
+		});
+		p.DoMarker("vm::locations", 0xFC);
+
+		//
+		// g_pages
+		//
+		// (de)serialize each filled page only, not all g_pages
+		u64 page_count = 0;
+
+		switch (p.GetMode())
+		{
+		case PointerWrap::MODE_READ:
+			p.Do(page_count);
+			for (auto& pg : g_pages)
+			{
+				// TODO: 2ghetto4me
+				pg.flags = 0;
+				pg.waiters = 0;
+				if (pg.reservations)
+					for (auto& a : *pg.reservations)
+						a = 0;
+			}
+			for (auto i = 0; i < page_count; ++i)
+			{
+				u64 page_index = 0;
+				p.Do(page_index);
+				g_pages[page_index].DoState(p);
+			}
+			break;
+
+		case PointerWrap::MODE_WRITE:
+		case PointerWrap::MODE_MEASURE:
+		case PointerWrap::MODE_VERIFY:
+			// go through g_pages and find out filled in pages (those that have a reservations/memory_page struct filled in)
+			for (u64 i = 0; i < g_pages.size(); ++i)
+			{
+				auto* page = &g_pages[i];
+				if (page->reservations)
+					++page_count;
+			}
+			// write how many of them were filled in
+			p.Do(page_count);
+
+			// _then_ list them
+			for (u64 i = 0; i < g_pages.size(); ++i)
+			{
+				auto* page = &g_pages[i];
+				if (page->reservations)
+				{
+					p.Do(i);
+					page->DoState(p);
+				}
+			}
+			break;
+		}
+		p.DoMarker("vm::g_pages", 0xEA);
+
+		//
+		// g_mutex
+		//
+		g_mutex.DoState(p);
+		p.DoMarker("vm::g_mutex", 0xEE);
+
+		//
+		// g_waiters
+		//
+		// TODO:
+		for (auto& w : g_waiters)
+			w.DoState(p);
+
+		//
+		// g_tls_locked
+		//
+		// TODO:
+
+		//
+		// g_locks
+		//
+		// TODO:
 	}
 
 	namespace ps3
@@ -802,7 +932,7 @@ namespace vm
 	{
 		void init()
 		{
-			g_locations = 
+			g_locations =
 			{
 				std::make_shared<block_t>(0x81000000, 0x10000000), // RAM
 				std::make_shared<block_t>(0x91000000, 0x2F000000), // user

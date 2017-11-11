@@ -4,6 +4,7 @@
 #include "Emu/CPU/CPUThread.h"
 #include "Emu/Cell/SPUInterpreter.h"
 #include "MFC.h"
+#include "3rdparty/ChunkFile.h"
 
 struct lv2_event_queue;
 struct lv2_spu_group;
@@ -260,6 +261,11 @@ public:
 	{
 		return data.load().count;
 	}
+
+	void DoState(PointerWrap& p)
+	{
+		p.Do(data);
+	}
 };
 
 struct spu_channel_4_t
@@ -349,6 +355,12 @@ public:
 		this->values.raw() = { 0, static_cast<u8>(count), value0, value1, value2 };
 		this->value3 = value3;
 	}
+
+	void DoState(PointerWrap& p)
+	{
+		p.Do(values);
+		p.Do(value3);
+	}
 };
 
 struct spu_int_ctrl_t
@@ -370,6 +382,14 @@ struct spu_int_ctrl_t
 		mask = 0;
 		stat = 0;
 		tag = nullptr;
+	}
+
+	void DoState(PointerWrap& p)
+	{
+		p.Do(mask);
+		p.Do(stat);
+		// TODO(velo)
+		//p.Do(tag->);
 	}
 };
 
@@ -450,7 +470,7 @@ public:
 		{
 		case 0:
 			return this->_u32[3] >> 8 & 0x3;
-		
+
 		case 1:
 			return this->_u32[3] >> 10 & 0x3;
 
@@ -575,7 +595,7 @@ public:
 	std::array<std::pair<u32, std::weak_ptr<lv2_event_queue>>, 32> spuq; // Event Queue Keys for SPU Thread
 	std::weak_ptr<lv2_event_queue> spup[64]; // SPU Ports
 
-	u32 pc = 0; // 
+	u32 pc = 0; //
 	const u32 index; // SPU index
 	const u32 offset; // SPU LS offset
 	lv2_spu_group* const group; // SPU Thread Group
@@ -616,5 +636,80 @@ public:
 	inline to_be_t<T>& _ref(u32 lsa)
 	{
 		return *_ptr<T>(lsa);
+	}
+
+	void DoState(PointerWrap& p) override
+	{
+		cpu_thread::DoState(p);
+		// TODO:
+
+		p.Do(id_base);
+		p.Do(id_step);
+		p.Do(id_count);
+
+		p.Do(gpr);
+		p.Do(fpscr);
+
+		p.Do(ch_mfc_cmd);
+
+		// MFC command queue (consumer: MFC thread)
+		lf_spsc<spu_mfc_cmd, 16> mfc_queue;
+
+		// MFC command proxy queue (consumer: MFC thread)
+		//lf_mpsc<spu_mfc_cmd, 8> mfc_proxy;
+
+		p.Do(rtime);
+		p.Do(rdata);
+		p.Do(raddr);
+
+		p.Do(srr0);
+		p.Do(ch_tag_upd);
+		p.Do(ch_tag_mask);
+		ch_tag_stat.DoState(p);
+		p.Do(ch_stall_mask);
+		ch_stall_stat.DoState(p);
+		ch_atomic_stat.DoState(p);
+
+		ch_in_mbox.DoState(p);
+
+		p.Do(mfc_prxy_mask);
+
+		ch_out_mbox.DoState(p);
+		ch_out_intr_mbox.DoState(p);
+
+		p.Do(snr_config);
+
+		ch_snr1.DoState(p);
+		ch_snr2.DoState(p);
+
+		p.Do(ch_event_mask);
+		p.Do(ch_event_stat);
+
+		p.Do(ch_dec_start_timestamp);
+		p.Do(ch_dec_value);
+
+		p.Do(run_ctrl);
+		p.Do(status);
+		p.Do(npc);
+
+		for (auto& i : int_ctrl)
+			i.DoState(p);
+
+		//std::array<std::pair<u32, std::weak_ptr<lv2_event_queue>>, 32> spuq; // Event Queue Keys for SPU Thread
+		//std::weak_ptr<lv2_event_queue> spup[64]; // SPU Ports
+
+		p.Do(pc);
+		//const  index; // SPU index
+		//const u32 offset; // SPU LS offset
+		//lv2_spu_group* const group; // SPU Thread Group
+
+		//const std::string m_name; // Thread name
+
+		//std::exception_ptr pending_exception;
+
+		//std::array<struct spu_function_t*, 65536> compiled_cache{};
+		std::shared_ptr<class SPUDatabase> spu_db;
+		//std::shared_ptr<class spu_recompiler_base> spu_rec;
+		u32 recursion_level = 0;
 	}
 };

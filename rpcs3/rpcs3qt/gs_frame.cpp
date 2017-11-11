@@ -3,6 +3,7 @@
 #include "Utilities/Config.h"
 #include "Utilities/Timer.h"
 #include "Emu/System.h"
+#include "Emu/State.h"
 
 #include <QKeyEvent>
 #include <QTimer>
@@ -89,6 +90,10 @@ void gs_frame::keyPressEvent(QKeyEvent *keyEvent)
 		case Qt::Key_R:
 			if (keyEvent->modifiers() == Qt::ControlModifier && (!Emu.GetBoot().empty())) { Emu.Stop(); Emu.Load(); return; }
 			break;
+		case Qt::Key_Z:
+			{ State::Save(0); return; }
+		case Qt::Key_X:
+			{ State::Load(0); return; }
 		case Qt::Key_E:
 			if (keyEvent->modifiers() == Qt::ControlModifier)
 			{
