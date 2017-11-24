@@ -12,6 +12,8 @@
 
 #include "rpcs3_version.h"
 
+#include "Emu/RSX/GL/GLGSRender.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -88,6 +90,11 @@ void gs_frame::keyPressEvent(QKeyEvent *keyEvent)
 			break;
 		case Qt::Key_R:
 			if (keyEvent->modifiers() == Qt::ControlModifier && (!Emu.GetBoot().empty())) { Emu.Stop(); Emu.Load(); return; }
+			break;
+		case Qt::Key_V:
+			{
+				g_use_post_process = !g_use_post_process;
+			}
 			break;
 		case Qt::Key_E:
 			if (keyEvent->modifiers() == Qt::ControlModifier)

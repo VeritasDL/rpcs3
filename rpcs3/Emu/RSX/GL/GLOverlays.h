@@ -2,6 +2,8 @@
 
 #include "stdafx.h"
 #include "GLHelpers.h"
+#include "Utilities/File.h"
+#include "Utilities/Timer.h"
 
 namespace gl
 {
@@ -196,6 +198,37 @@ namespace gl
 			glBindTexture(GL_TEXTURE_2D, source);
 
 			overlay_pass::run(w, h, target, true);
+		}
+	};
+
+	struct test_pass : public overlay_pass
+	{
+		float timeElapsed = 0.0;
+		Timer fps_tt;
+
+		test_pass()
+		{
+			auto p = fs::get_config_dir() + "test_overlay.vert";
+			vs_src = fs::file(p, fs::read).to_string();
+
+			p = fs::get_config_dir() + "test_overlay.frag";
+			fs_src = fs::file(p, fs::read).to_string();
+		}
+
+		void run(u16 w, u16 h, GLuint target, GLuint source)
+		{
+			glActiveTexture(GL_TEXTURE31);
+			glBindTexture(GL_TEXTURE_2D, source);
+
+			overlay_pass::run(w, h, target, false);
+
+			timeElapsed += fps_tt.GetElapsedTimeInSec();
+			fps_tt.Start();
+		}
+
+		void bind_resources()
+		{
+			glProgramUniform1f(program_handle.id(), program_handle.uniform_location("iTime"), timeElapsed);
 		}
 	};
 }

@@ -14,6 +14,9 @@
 
 #pragma comment(lib, "opengl32.lib")
 
+
+extern bool g_use_post_process;
+
 namespace gl
 {
 	using vertex_cache = rsx::vertex_cache::default_vertex_cache<rsx::vertex_cache::uploaded_range<GLenum>, GLenum>;
@@ -294,6 +297,7 @@ private:
 
 	gl::text_writer m_text_printer;
 	gl::depth_convert_pass m_depth_converter;
+	gl::test_pass m_test_pass;
 
 	std::mutex queue_guard;
 	std::list<work_item> work_queue;

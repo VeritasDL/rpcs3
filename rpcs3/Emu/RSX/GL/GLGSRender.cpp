@@ -22,8 +22,12 @@ namespace
 	}
 }
 
+bool g_use_post_process;
+
 GLGSRender::GLGSRender() : GSRender()
 {
+
+	g_use_post_process = false;
 	m_shaders_cache.reset(new gl::shader_cache(m_prog_buffer, "opengl", "v1.1"));
 
 	if (g_cfg.video.disable_vertex_cache)
@@ -752,7 +756,7 @@ void GLGSRender::on_init_thread()
 		GLuint handle = 0;
 		auto &query = occlusion_query_data[i];
 		glGenQueries(1, &handle);
-		
+
 		query.driver_handle = (u64)handle;
 		query.pending = false;
 		query.active = false;
@@ -768,6 +772,7 @@ void GLGSRender::on_init_thread()
 	glEnable(GL_CLIP_DISTANCE0 + 5);
 
 	m_depth_converter.create();
+	m_test_pass.create();
 
 	m_gl_texture_cache.initialize();
 	m_thread_id = std::this_thread::get_id();
@@ -838,6 +843,7 @@ void GLGSRender::on_exit()
 	m_text_printer.close();
 	m_gl_texture_cache.destroy();
 	m_depth_converter.destroy();
+	m_test_pass.destroy();
 
 	for (u32 i = 0; i < occlusion_query_count; ++i)
 	{
@@ -1204,6 +1210,13 @@ void GLGSRender::flip(int buffer)
 	// Find the source image
 	rsx::tiled_region buffer_region = get_tiled_address(display_buffers[buffer].offset, CELL_GCM_LOCATION_LOCAL);
 	u32 absolute_address = buffer_region.address + buffer_region.base;
+
+	auto& rt = std::get<1>(m_rtts.m_bound_render_targets[0]);
+
+	if (rt && g_use_post_process)
+	{
+		m_test_pass.run(rt->width(), rt->height(), rt->id(), rt->id());
+	}
 
 	m_flip_fbo.recreate();
 	m_flip_fbo.bind();
