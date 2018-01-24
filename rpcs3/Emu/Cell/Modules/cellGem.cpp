@@ -312,6 +312,37 @@ static bool map_ext_to_ds3_input(const u32 port_no, CellGemExtPortData& ext)
 	return true;
 }
 
+/**
+* \brief Maps Move controller data (digital buttons, and analog Trigger data) to mouse input.
+*        Move Button: Mouse1
+*        Trigger:     Mouse2
+* \param mouse_no Mouse index number to use
+* \param digital_buttons Bitmask filled with CELL_GEM_CTRL_* values
+* \param analog_t Analog value of Move's Trigger.
+* \return true on success, false if mouse mouse_no is invalid
+*/
+static bool map_to_mouse_input(const u32 mouse_no, be_t<u16>& digital_buttons, be_t<u16>& analog_t)
+{
+	const auto handler = fxm::get<MouseHandlerBase>();
+
+	if (handler->GetInfo().status[mouse_no] != CELL_MOUSE_STATUS_CONNECTED)
+	{
+		return false;
+	}
+
+	const MouseData& mouse_data = handler->GetData(mouse_no);
+
+	if (mouse_data.buttons & CELL_MOUSE_BUTTON_1)
+		digital_buttons |= CELL_GEM_CTRL_T;
+
+	if (mouse_data.buttons & CELL_MOUSE_BUTTON_2)
+		digital_buttons |= CELL_GEM_CTRL_MOVE;
+
+	analog_t = mouse_data.buttons & CELL_MOUSE_BUTTON_1 ? 0xFFFF : 0;
+
+	return true;
+}
+
 /**********************
  * cellGem functions  *
  **********************/
@@ -420,6 +451,8 @@ s32 cellGemEnd()
 		return CELL_GEM_ERROR_UNINITIALIZED;
 	}
 
+	fxm::remove<MouseHandlerBase>();
+
 	return CELL_OK;
 }
 
@@ -510,21 +543,38 @@ s32 cellGemGetImageState(u32 gem_num, vm::ptr<CellGemImageState> image_state)
 
 	std::memset(image_state.get_ptr(), 0, sizeof(CellGemImageState));
 
-	if (g_cfg.io.move == move_handler::fake)
+	if (g_cfg.io.move == move_handler::fake &&
+		g_cfg.io.mouse == mouse_handler::basic)
 	{
 		auto shared_data = fxm::get_always<gem_camera_shared>();
 
+		const auto handler = fxm::get<MouseHandlerBase>();
+		auto& mouse = handler->GetMice().at(0);
+
+		f32 x_pos = mouse.x_pos;
+		f32 y_pos = mouse.y_pos;
+
+		// Only game this seems to work on is PAIN, others use different functions
+		static constexpr auto aspect_ratio = 1.2;
+
+		static constexpr auto screen_offset_x = 400.0;
+		static constexpr auto screen_offset_y = screen_offset_x * aspect_ratio;
+
+		static constexpr auto screen_scale = 3.0;
+
 		image_state->frame_timestamp = shared_data->frame_timestamp.load();
-		image_state->timestamp = image_state->frame_timestamp + 10; // arbitrarily define 10 usecs of frame processing
+		image_state->timestamp = image_state->frame_timestamp + 10;		// arbitrarily define 10 usecs of frame processing
+		image_state->u = screen_offset_x / screen_scale + x_pos / screen_scale;
+		image_state->v = screen_offset_y / screen_scale + y_pos / screen_scale * aspect_ratio;
+		// below line is for debugging screen coords above
+		// cellGem.error("xpos: %07.2f  ypos: %07.2f  u: %07.2f  v: %07.2f", x_pos, y_pos, image_state->u.value(), image_state->v.value());
 		image_state->visible = true;
-		image_state->u = Emu.GetCallbacks().get_mouse_handler()->GetMice().at(0).x_pos;	// horizontal screen position in pixels
-		image_state->v = Emu.GetCallbacks().get_mouse_handler()->GetMice().at(0).y_pos;	// vertical screen position in pixels
-		image_state->r = 20;	// size of sphere on screen in pixels
+		image_state->r = 10;
 		image_state->r_valid = true;
-		image_state->distance = 2 * 1000;		// 2 meters away from camera
+		image_state->distance = 2 * 1000;	// 2 meters away from camera
 		// TODO
-		image_state->projectionx = 0.5;
-		image_state->projectiony = 0.5;
+		image_state->projectionx = 1;
+		image_state->projectiony = 1;
 	}
 
 	return CELL_OK;
@@ -551,6 +601,11 @@ s32 cellGemGetInertialState(u32 gem_num, u32 state_flag, u64 timestamp, vm::ptr<
 	{
 		map_to_ds3_input(gem_num, inertial_state->pad.digitalbuttons, inertial_state->pad.analog_T);
 		map_ext_to_ds3_input(gem_num, inertial_state->ext);
+
+		if (g_cfg.io.mouse == mouse_handler::basic)
+		{
+			map_to_mouse_input(gem_num, inertial_state->pad.digitalbuttons, inertial_state->pad.analog_T);
+		}
 
 		inertial_state->timestamp = gem->timer.GetElapsedTimeInMicroSec();
 	}
@@ -661,6 +716,11 @@ s32 cellGemGetState(u32 gem_num, u32 flag, u64 time_parameter, vm::ptr<CellGemSt
 		map_to_ds3_input(gem_num, gem_state->pad.digitalbuttons, gem_state->pad.analog_T);
 		map_ext_to_ds3_input(gem_num, gem_state->ext);
 
+		if (g_cfg.io.mouse == mouse_handler::basic)
+		{
+			map_to_mouse_input(gem_num, gem_state->pad.digitalbuttons, gem_state->pad.analog_T);
+		}
+
 		gem_state->tracking_flags = CELL_GEM_TRACKING_FLAG_POSITION_TRACKED |
 									CELL_GEM_TRACKING_FLAG_VISIBLE;
 		gem_state->timestamp = gem->timer.GetElapsedTimeInMicroSec();
@@ -722,6 +782,15 @@ s32 cellGemInit(vm::cptr<CellGemAttribute> attribute)
 	for (auto gem_num = 0; gem_num < CELL_GEM_MAX_NUM; gem_num++)
 	{
 		gem->reset_controller(gem_num);
+	}
+
+	if (g_cfg.io.move == move_handler::fake &&
+		g_cfg.io.mouse == mouse_handler::basic)
+	{
+		// init mouse handler
+		const auto handler = fxm::import_always<MouseHandlerBase>(Emu.GetCallbacks().get_mouse_handler);
+
+		handler->Init(std::min(attribute->max_connect.value(), static_cast<u32>(CELL_GEM_MAX_NUM)));
 	}
 
 	// TODO: is this correct?
