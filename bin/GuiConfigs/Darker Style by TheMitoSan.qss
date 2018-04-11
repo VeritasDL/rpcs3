@@ -262,6 +262,7 @@ QLabel#thumbnail_icon_color {
 
 /* Set Log colors */
 QTextEdit#log_frame {
+	font-family: Consolas;
 	background-color: #000; /* Black */
 }
 QLabel#log_level_always {

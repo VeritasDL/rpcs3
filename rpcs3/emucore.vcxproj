@@ -191,7 +191,9 @@
     <ClCompile Include="Emu\Cell\Modules\cellGame.cpp" />
     <ClCompile Include="Emu\Cell\Modules\cellGameExec.cpp" />
     <ClCompile Include="Emu\Cell\Modules\cellGcmSys.cpp" />
-    <ClCompile Include="Emu\Cell\Modules\cellGem.cpp" />
+    <ClCompile Include="Emu\Cell\Modules\cellGem.cpp">
+      <Optimization Condition="'$(Configuration)|$(Platform)'=='Release - LLVM|x64'">Disabled</Optimization>
+    </ClCompile>
     <ClCompile Include="Emu\Cell\Modules\cellGifDec.cpp" />
     <ClCompile Include="Emu\Cell\Modules\cellHttp.cpp" />
     <ClCompile Include="Emu\Cell\Modules\cellHttpUtil.cpp" />

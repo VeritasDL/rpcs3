@@ -6,7 +6,12 @@
 #include "Emu/System.h"
 #include "Emu/Cell/PPUModule.h"
 #include "pad_thread.h"
-#include "Utilities/Timer.h"
+
+#include "psmove.h"
+#include "psmove_tracker.h"
+#include "psmove_fusion.h"
+
+#include <climits>
 
 logs::channel cellGem("cellGem");
 
@@ -32,6 +37,26 @@ struct gem_t
 		{
 			return std::max(0.0f, std::min(f, 1.0f));
 		}
+
+		bool is_black() const
+		{
+			return r == 0.0f && g == 0.0f && b == 0.0f;
+		}
+	};
+
+	struct PSMoveDeleter
+	{
+		void operator()(PSMove* p)
+		{
+			psmove_disconnect(p);
+		}
+	};
+	struct PSMoveTrackerDeleter
+	{
+		void operator()(PSMoveTracker* p)
+		{
+			psmove_tracker_free(p);
+		}
 	};
 
 	struct gem_controller
@@ -48,10 +73,25 @@ struct gem_t
 		gem_color sphere_rgb;           // RGB color of the sphere LED
 		u32 hue;                        // tracking hue of the motion controller
 
+		// PSMoveAPI per-controller data
+		struct
+		{
+			std::unique_ptr<PSMove, PSMoveDeleter> handle;
+			std::string serial;								// unique identifier (Bluetooth MAC address)
+			bool enable_orientation;						// whether `psmove_enable_orientation` has been called and succeeded
+		} psmove;
+
 		gem_controller() :
 			status(CELL_GEM_STATUS_DISCONNECTED),
 			enabled_filtering(false), rumble(0), sphere_rgb() {}
 	};
+
+	// PSMoveAPI data
+	struct
+	{
+		std::unique_ptr<PSMoveTracker, PSMoveTrackerDeleter> tracker;
+		s32 connected_tracker_controllers;
+	} psmove;
 
 	CellGemAttribute attribute;
 	CellGemVideoConvertAttribute vc_attribute;
@@ -70,44 +110,47 @@ struct gem_t
 		return controllers[gem_num].status == CELL_GEM_STATUS_READY;
 	}
 
-	void reset_controller(u32 gem_num)
-	{
-		switch (g_cfg.io.move)
-		{
-		default:
-		case move_handler::null:
-		{
-			connected_controllers = 0;
-
-			controllers[gem_num].status = CELL_GEM_STATUS_DISCONNECTED;
-			controllers[gem_num].port = 0;
-			break;
-		}
-
-		case move_handler::fake:
-		{
-			// fake one connected controller
-			connected_controllers = 1;
-
-			if (gem_num < connected_controllers)
-			{
-				controllers[gem_num].status = CELL_GEM_STATUS_READY;
-				controllers[gem_num].port = 7u - gem_num;
-			}
-			else
-			{
-				controllers[gem_num].status = CELL_GEM_STATUS_DISCONNECTED;
-				controllers[gem_num].port = 0;
-			}
-			break;
-		}
-		}
-	}
+	void reset_controller(gsl::not_null<gem_t*> gem, u32 gem_num);
 };
 
 // ************************
 // * HLE helper functions *
 // ************************
+
+void gem_t::reset_controller(gsl::not_null<gem_t*> gem, u32 gem_num)
+{
+	switch (g_cfg.io.move)
+	{
+	default:
+	case move_handler::null:
+	{
+		connected_controllers = 0;
+		break;
+	}
+	case move_handler::fake:
+	{
+		connected_controllers = 1;
+		break;
+	}
+	case move_handler::move:
+	{
+		connected_controllers = gem->connected_controllers;
+		break;
+	}
+	}
+
+	// Assign status and port number
+	if (gem_num < connected_controllers)
+	{
+		controllers[gem_num].status = CELL_GEM_STATUS_READY;
+		controllers[gem_num].port = 7u - gem_num;
+	}
+	else
+	{
+		controllers[gem_num].status = CELL_GEM_STATUS_DISCONNECTED;
+		controllers[gem_num].port = 0;
+	}
+}
 
 template <>
 void fmt_class_string<move_handler>::format(std::string& out, u64 arg)
@@ -118,6 +161,7 @@ void fmt_class_string<move_handler>::format(std::string& out, u64 arg)
 		{
 		case move_handler::null: return "Null";
 		case move_handler::fake: return "Fake";
+		case move_handler::move: return "PSMove";
 		}
 
 		return unknown;
@@ -134,6 +178,255 @@ static bool check_gem_num(const u32 gem_num)
 	return gem_num >= 0 && gem_num < CELL_GEM_MAX_NUM;
 }
 
+std::pair<u32, u32> get_format_resolution(CellGemVideoConvertFormatEnum format)
+{
+	std::pair<u32, u32> res;
+	switch (format)
+	{
+	case CELL_GEM_RGBA_640x480:
+	case CELL_GEM_YUV_640x480:
+	case CELL_GEM_YUV422_640x480:
+	case CELL_GEM_YUV411_640x480:
+	case CELL_GEM_BAYER_RESTORED:
+		return{ 640, 480 };
+	case CELL_GEM_RGBA_320x240:
+	case CELL_GEM_BAYER_RESTORED_RGGB:
+	case CELL_GEM_BAYER_RESTORED_RASTERIZED:
+		return{ 320, 240 };
+	case CELL_GEM_NO_VIDEO_OUTPUT:
+	default:
+		return{ 0, 0 };
+	}
+}
+
+namespace move
+{
+
+namespace psmoveapi
+{
+
+static void init(gsl::not_null<gem_t*> gem)
+{
+	if (!psmove_init(PSMOVE_CURRENT_VERSION)) {
+		fmt::throw_exception("Couldn't initialize PSMoveAPI");
+		// TODO: Don't die
+	}
+
+	// const auto g_psmove = fxm::make<psmoveapi_thread>();
+
+	gem->connected_controllers = psmove_count_connected();
+
+	for (auto id = 0; id < gem->connected_controllers; ++id)
+	{
+		PSMove* controller_handle = psmove_connect_by_id(id);
+
+		if (controller_handle)
+		{
+			const std::string serial = psmove_get_serial(controller_handle);
+
+			auto& gem_controller = gem->controllers[id];
+
+			gem_controller.psmove.serial = serial;
+			gem_controller.psmove.handle.reset(controller_handle);
+
+			// g_psmove->register_controller(id, connected_controller);
+
+			psmove_set_orientation_fusion_type(controller_handle,
+				PSMoveOrientation_Fusion_Type::OrientationFusion_ComplementaryMARG);
+			psmove_enable_orientation(controller_handle, PSMove_True);
+			gem_controller.psmove.enable_orientation = psmove_has_orientation(controller_handle);
+		}
+	}
+}
+
+							// TODO: In forcegrgb: if tracker: maybe do psmove_tracker_enable_with_color
+
+
+namespace tracker
+{
+	static void init(gsl::not_null<gem_t*> gem)
+	{
+		PSMoveTrackerSettings settings;
+		psmove_tracker_settings_set_default(&settings);
+		settings.color_mapping_max_age = 0;
+		settings.exposure_mode = Exposure_LOW;
+
+		auto shared_data = fxm::get_always<gem_camera_shared>();
+
+		settings.camera_mirror = static_cast<PSMove_Bool>(shared_data->attr.load()[CELL_CAMERA_MIRRORFLAG].v1);
+
+		std::tie(settings.camera_frame_width, settings.camera_frame_height) =
+			get_format_resolution(gem->vc_attribute.output_format);
+
+		// settings.camera_frame_rate = gem->vc_attribute
+		settings.camera_auto_white_balance = static_cast<PSMove_Bool>(gem->vc_attribute.conversion_flags & CELL_GEM_AUTO_WHITE_BALANCE);
+		settings.camera_gain = gem->vc_attribute.gain;
+
+		// TODO: settings
+
+		PSMoveTracker* tracker = psmove_tracker_new_with_settings(&settings);
+		if (!tracker)
+		{
+			fmt::throw_exception("Couldn't initialize PSMoveAPI Tracker");
+			// TODO: Don't die
+		}
+
+		const auto connected = psmove_tracker_count_connected();
+		gem->psmove.connected_tracker_controllers = connected;
+
+		for (auto id = 0; id < connected; ++id)
+		{
+			auto* handle = gem->controllers[id].psmove.handle.get();
+			if (handle)
+			{
+				psmove_tracker_set_auto_update_leds(tracker, handle, PSMove_True);
+				psmove_tracker_set_exposure(tracker, PSMoveTracker_Exposure::Exposure_MEDIUM);
+			}
+		}
+		gem->psmove.tracker.reset(tracker);
+	}
+
+	void enable(gsl::not_null<gem_t*> gem, u32 gem_num)
+	{
+		const auto& controller = gem->controllers[gem_num];
+		const auto handle = controller.psmove.handle.get();
+		const auto color = controller.sphere_rgb;
+
+		PSMoveTracker_Status enable_status;
+
+		// enable tracker for controller
+		for (;;)
+		{
+			PSMoveTracker_Status tracker_status;
+
+			if (color.is_black())
+			{
+				tracker_status = psmove_tracker_enable(gem->psmove.tracker.get(), handle);
+			}
+			else
+			{
+				tracker_status = psmove_tracker_enable_with_color(gem->psmove.tracker.get(), handle,
+					color.r * 255, color.g * 255, color.b * 255);
+			}
+
+			if (tracker_status == Tracker_CALIBRATED)
+			{
+				LOG_ERROR(HLE, "PSMoveAPI: Calibrated");	// TODO: remove
+				break;
+			}
+			switch (tracker_status)
+			{
+			case Tracker_NOT_CALIBRATED: LOG_ERROR(HLE, "PSMoveAPI: Controller not registered with tracker");  break;
+			case Tracker_CALIBRATION_ERROR: LOG_ERROR(HLE, "PSMoveAPI: Calibration failed (check lighting, visibility)");  break;
+			case Tracker_TRACKING: LOG_ERROR(HLE, "PSMoveAPI: Calibrated and successfully tracked in the camera");  break;
+			default:;
+			}
+		}
+	}
+
+	void disable(gsl::not_null<gem_t*> gem, u32 gem_num)
+	{
+		const auto& handle = gem->controllers[gem_num].psmove.handle.get();
+
+		psmove_tracker_disable(gem->psmove.tracker.get(), handle);
+	}
+
+	void update(gsl::not_null<gem_t*> gem)
+	{
+		const auto tracker = gem->psmove.tracker.get();
+
+		// TODO: Run in cellCamera?
+		psmove_tracker_update_image(tracker);
+
+		const auto connected = gem->psmove.connected_tracker_controllers;
+		for (auto id = 0; id < connected; ++id)
+		{
+			const auto& handle = gem->controllers[id].psmove.handle.get();
+
+			psmove_tracker_update(tracker, handle);
+		}
+	}
+} // namespace tracker
+
+bool poll(PSMove* controller_handle)
+{
+	bool poll_success = false;
+
+	// consume all buffered data
+	while (psmove_poll(controller_handle)) {
+		poll_success = true;
+	}
+
+	return poll_success;
+}
+
+bool poll(const gem_t::gem_controller& controller)
+{
+	return move::psmoveapi::poll(controller.psmove.handle.get());
+}
+
+void update_rumble(gem_t::gem_controller& controller)
+{
+	const auto  handle = controller.psmove.handle.get();
+
+	psmove_set_rumble(handle, controller.rumble);
+	psmove_update_leds(handle);
+
+}
+
+void update_color(const gem_t::gem_controller& controller)
+{
+	const auto color = controller.sphere_rgb;
+	const auto handle = controller.psmove.handle.get();
+
+	psmove_set_leds(handle, color.r * 255, color.g * 255, color.b * 255);
+	psmove_update_leds(handle);
+}
+
+/*
+void psmoveapi_thread::on_task()
+{
+	while (fxm::check<camera_thread>() && !Emu.IsStopped())
+	{
+		std::chrono::steady_clock::time_point frame_start = std::chrono::steady_clock::now();
+
+		if (Emu.IsPaused())
+		{
+			std::this_thread::sleep_for(1ms);
+			continue;
+		}
+
+		{
+			semaphore_lock lock(mutex_poll);
+
+			for (auto controller : m_controllers)
+			{
+				const auto handle = controller.second;
+
+				move::psmoveapi::poll(handle);
+			}
+		}
+
+		//std::this_thread::sleep_for(10ms);
+
+		const std::chrono::microseconds frame_target_time{ static_cast<u32>(1000000.0 / 90) };
+
+		std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+
+		std::chrono::microseconds frame_processing_time = std::chrono::duration_cast<std::chrono::microseconds>(now - frame_start);
+
+		if (frame_processing_time < frame_target_time)
+		{
+			std::chrono::microseconds frame_idle_time = frame_target_time - frame_processing_time;
+			std::this_thread::sleep_for(frame_idle_time);
+		}
+	}
+}
+*/
+
+} // namespace psmoveapi
+
+namespace map {
 
 /**
  * \brief Maps Move controller data (digital buttons, and analog Trigger data) to DS3 pad input.
@@ -143,7 +436,7 @@ static bool check_gem_num(const u32 gem_num)
  * \param analog_t Analog value of Move's Trigger. Currently mapped to R2.
  * \return true on success, false if port_no controller is invalid
  */
-static bool map_to_ds3_input(const u32 port_no, be_t<u16>& digital_buttons, be_t<u16>& analog_t)
+static bool ds3_input_to_pad(const u32 port_no, be_t<u16>& digital_buttons, be_t<u16>& analog_t)
 {
 	const auto handler = fxm::get<pad_thread>();
 
@@ -243,7 +536,7 @@ static bool map_to_ds3_input(const u32 port_no, be_t<u16>& digital_buttons, be_t
  * \param ext External data to modify
  * \return true on success, false if port_no controller is invalid
  */
-static bool map_ext_to_ds3_input(const u32 port_no, CellGemExtPortData& ext)
+static bool ds3_input_to_ext(const u32 port_no, CellGemExtPortData& ext)
 {
 	const auto handler = fxm::get<pad_thread>();
 
@@ -280,6 +573,96 @@ static bool map_ext_to_ds3_input(const u32 port_no, CellGemExtPortData& ext)
 	return true;
 }
 
+static bool psmove_input_to_pad(const gem_t::gem_controller& controller, be_t<u16>& digital_buttons, be_t<u16>& analog_t)
+{
+	const auto handle = controller.psmove.handle.get();
+	const auto buttons = psmove_get_buttons(handle);
+	const auto trigger = psmove_get_trigger(handle);
+
+	memset(&digital_buttons, 0, sizeof(digital_buttons));
+
+	if (buttons & Btn_MOVE)
+		digital_buttons |= CELL_GEM_CTRL_MOVE;
+	if (buttons & Btn_T)
+		digital_buttons |= CELL_GEM_CTRL_T;
+
+	if (buttons & Btn_CROSS)
+		digital_buttons |= CELL_GEM_CTRL_CROSS;
+	if (buttons & Btn_CIRCLE)
+		digital_buttons |= CELL_GEM_CTRL_CIRCLE;
+	if (buttons & Btn_SQUARE)
+		digital_buttons |= CELL_GEM_CTRL_SQUARE;
+	if (buttons & Btn_TRIANGLE)
+		digital_buttons |= CELL_GEM_CTRL_TRIANGLE;
+	if (buttons & Btn_SELECT)
+		digital_buttons |= CELL_GEM_CTRL_SELECT;
+	if (buttons & Btn_START)
+		digital_buttons |= CELL_GEM_CTRL_START;
+
+	analog_t = trigger * float(USHRT_MAX) / float(UCHAR_MAX);
+
+	return true;
+}
+static bool psmove_input_to_gem(const gem_t::gem_controller& controller, vm::ptr<CellGemState>& gem_state)
+{
+	const auto handle = controller.psmove.handle.get();
+
+	if (!psmove_has_calibration(handle))
+	{
+		fmt::throw_exception("You need to calibrate your Move Motion controller!");
+	}
+
+	float w, x, y, z;
+	psmove_get_orientation(handle, &w, &x, &y, &z);
+	gem_state->quat[0] = x;
+	gem_state->quat[1] = y;
+	gem_state->quat[2] = z;
+	gem_state->quat[3] = w;
+
+	// gem_state->
+
+	return false;
+}
+
+static bool psmove_input_to_inertial(const gem_t::gem_controller& controller, vm::ptr<CellGemInertialState>& inertial_state)
+{
+	const auto handle = controller.psmove.handle.get();
+
+	if (!psmove_has_calibration(handle))
+	{
+		fmt::throw_exception("You need to calibrate your Move Motion controller!");
+	}
+
+	float ax, ay, az;
+	psmove_get_accelerometer_frame(handle, Frame_SecondHalf, &ax, &ay, &az);
+	inertial_state->accelerometer[0] = ax;
+	inertial_state->accelerometer[1] = az;
+	inertial_state->accelerometer[2] = ay;
+	inertial_state->accelerometer[3] = 0;
+
+	float gx, gy, gz;
+	psmove_get_gyroscope_frame(handle, Frame_SecondHalf, &gx, &gy, &gz);
+	inertial_state->gyro[0] = gx;
+	inertial_state->gyro[1] = gz;
+	inertial_state->gyro[2] = gy;
+	inertial_state->gyro[3] = 0;
+
+	auto ac_b = inertial_state->accelerometer_bias;
+	ac_b[0] = ac_b[1] = ac_b[2] = ac_b[3] = 0;
+
+	auto gr_b = inertial_state->gyro_bias;
+	gr_b[0] = gr_b[1] = gr_b[2] = gr_b[3] = 0;
+
+	//LOG_FATAL(GENERAL, "Accel: { x: %+01.3f y: %+01.3f z: %+01.3f w: %+01.3f }  Gyro: { x: %+01.3f y: %+01.3f z: %+01.3f w: %+01.3f }  ",
+	//	inertial_state->accelerometer[0], inertial_state->accelerometer[1], inertial_state->accelerometer[2], inertial_state->accelerometer[3],
+	//	inertial_state->gyro[0], inertial_state->gyro[1], inertial_state->gyro[2], inertial_state->gyro[3]);
+
+	return false;
+}
+
+} // namespace map
+} // namespace move
+
 // *********************
 // * cellGem functions *
 // *********************
@@ -299,10 +682,15 @@ s32 cellGemCalibrate(u32 gem_num)
 		return CELL_GEM_ERROR_INVALID_PARAMETER;
 	}
 
-	if (g_cfg.io.move == move_handler::fake)
+	// if (g_cfg.io.move == move_handler::fake)
 	{
 		gem->controllers[gem_num].calibrated_magnetometer = true;
 		gem->status_flags = CELL_GEM_FLAG_CALIBRATION_OCCURRED | CELL_GEM_FLAG_CALIBRATION_SUCCEEDED;
+	}
+
+	if (g_cfg.io.move == move_handler::move)
+	{
+		move::psmoveapi::tracker::enable(gem.get(), gem_num);
 	}
 
 	return CELL_OK;
@@ -436,7 +824,13 @@ s32 cellGemForceRGB(u32 gem_num, float r, float g, float b)
 		return CELL_GEM_ERROR_INVALID_PARAMETER;
 	}
 
-	gem->controllers[gem_num].sphere_rgb = gem_t::gem_color(r, g, b);
+	auto& controller = gem->controllers[gem_num];
+	controller.sphere_rgb = gem_t::gem_color(r, g, b);
+
+	if (g_cfg.io.move == move_handler::move)
+	{
+		move::psmoveapi::update_color(controller);
+	}
 
 	return CELL_OK;
 }
@@ -455,6 +849,11 @@ s32 cellGemGetAllTrackableHues(vm::ptr<u8> hues)
 	if (!gem)
 	{
 		return CELL_GEM_ERROR_UNINITIALIZED;
+	}
+
+	if (!hues)
+	{
+		return CELL_GEM_ERROR_INVALID_PARAMETER;
 	}
 
 	for (size_t i = 0; i < 360; i++)
@@ -558,6 +957,30 @@ s32 cellGemGetImageState(u32 gem_num, vm::ptr<CellGemImageState> image_state)
 		image_state->projectionx = 1;
 		image_state->projectiony = 1;
 	}
+	else if (g_cfg.io.move == move_handler::move)
+	{
+		const auto shared_data = fxm::get_always<gem_camera_shared>();
+		const auto tracker = gem->psmove.tracker.get();
+		const auto handle = gem->controllers[gem_num].psmove.handle.get();
+
+		s32 width, height;
+		psmove_tracker_get_size(tracker, &width, &height);
+
+		float x, y, radius;
+		const auto age = psmove_tracker_get_position(tracker, handle, &x, &y, &radius) * 1000;  // ms -> us
+		const auto distance = psmove_tracker_distance_from_radius(tracker, radius) * 10;  // cm -> mm
+
+		image_state->frame_timestamp = shared_data->frame_timestamp.load();
+		image_state->timestamp = image_state->frame_timestamp + age;
+		image_state->visible = true;
+		image_state->u = x  * width;
+		image_state->v = y * height;
+		image_state->r = radius;
+		image_state->r_valid = true;
+		image_state->distance = distance;
+		image_state->projectionx = 1;
+		image_state->projectiony = 1;
+	}
 
 	return CELL_OK;
 }
@@ -577,17 +1000,27 @@ s32 cellGemGetInertialState(u32 gem_num, u32 state_flag, u64 timestamp, vm::ptr<
 		return CELL_GEM_ERROR_INVALID_PARAMETER;
 	}
 
+	// TODO(velocity): Abstract with gem state func
 	if (g_cfg.io.move == move_handler::fake)
 	{
-		map_to_ds3_input(gem_num, inertial_state->pad.digitalbuttons, inertial_state->pad.analog_T);
-		map_ext_to_ds3_input(gem_num, inertial_state->ext);
-
-		inertial_state->timestamp = gem->timer.GetElapsedTimeInMicroSec();
-
-		inertial_state->counter = gem->inertial_counter++;
-
-		inertial_state->accelerometer[0] = 10;
+		move::map::ds3_input_to_pad(gem_num, inertial_state->pad.digitalbuttons, inertial_state->pad.analog_T);
+		move::map::ds3_input_to_ext(gem_num, inertial_state->ext);
 	}
+	else if (g_cfg.io.move == move_handler::move)
+	{
+		auto& handle = gem->controllers[gem_num];
+
+		move::psmoveapi::poll(handle);
+
+		move::map::psmove_input_to_pad(handle, inertial_state->pad.digitalbuttons, inertial_state->pad.analog_T);
+		move::map::psmove_input_to_inertial(handle, inertial_state);
+	}
+
+	// TODO: handle timestamp arg by storing previous states
+
+	// TODO: should this be in if above?
+	inertial_state->timestamp = gem->timer.GetElapsedTimeInMicroSec();
+	inertial_state->counter = gem->inertial_counter++;
 
 	return CELL_OK;
 }
@@ -643,7 +1076,7 @@ s32 cellGemGetRGB(u32 gem_num, vm::ptr<float> r, vm::ptr<float> g, vm::ptr<float
 		return CELL_GEM_ERROR_UNINITIALIZED;
 	}
 
-	if (!check_gem_num(gem_num) | !r || !g || !b )
+	if (!check_gem_num(gem_num) || !r || !g || !b )
 	{
 		return CELL_GEM_ERROR_INVALID_PARAMETER;
 	}
@@ -693,16 +1126,31 @@ s32 cellGemGetState(u32 gem_num, u32 flag, u64 time_parameter, vm::ptr<CellGemSt
 
 	if (g_cfg.io.move == move_handler::fake)
 	{
-		map_to_ds3_input(gem_num, gem_state->pad.digitalbuttons, gem_state->pad.analog_T);
-		map_ext_to_ds3_input(gem_num, gem_state->ext);
+		move::map::ds3_input_to_pad(gem_num, gem_state->pad.digitalbuttons, gem_state->pad.analog_T);
+		move::map::ds3_input_to_ext(gem_num, gem_state->ext);
 
 		gem_state->tracking_flags = CELL_GEM_TRACKING_FLAG_POSITION_TRACKED | CELL_GEM_TRACKING_FLAG_VISIBLE;
-		gem_state->timestamp = gem->timer.GetElapsedTimeInMicroSec();
+	}
+	else if (g_cfg.io.move == move_handler::move)
+	{
+		auto& handle = gem->controllers[gem_num];
 
-		gem_state->quat[3] = 1.0;
-		return CELL_OK;
+		move::psmoveapi::poll(handle);
+
+		move::map::psmove_input_to_pad(handle, gem_state->pad.digitalbuttons, gem_state->pad.analog_T);
+		move::map::psmove_input_to_gem(handle, gem_state);
+
+		// TODO(velocity)
+		gem_state->tracking_flags = CELL_GEM_TRACKING_FLAG_POSITION_TRACKED | CELL_GEM_TRACKING_FLAG_VISIBLE;
 	}
 
+	if (g_cfg.io.move == move_handler::fake || g_cfg.io.move == move_handler::move)
+	{
+		gem_state->timestamp = gem->timer.GetElapsedTimeInMicroSec();
+		gem_state->quat[3] = 1.0;
+
+		return CELL_OK;
+	}
 	return CELL_GEM_NOT_CONNECTED;
 }
 
@@ -770,12 +1218,14 @@ s32 cellGemHSVtoRGB(f32 h, f32 s, f32 v, vm::ptr<f32> r, vm::ptr<f32> g, vm::ptr
 s32 cellGemInit(vm::cptr<CellGemAttribute> attribute)
 {
 	cellGem.warning("cellGemInit(attribute=*0x%x)", attribute);
-	const auto gem = fxm::make<gem_t>();
 
-	if (!gem)
-	{
-		return CELL_GEM_ERROR_ALREADY_INITIALIZED;
-	}
+	const auto gem = fxm::make_always<gem_t>();
+	//const auto gem = fxm::make<gem_t>();
+
+	//if (!gem)
+	//{
+	//	return CELL_GEM_ERROR_ALREADY_INITIALIZED;
+	//}
 
 	if (!attribute || !attribute->spurs_addr || attribute->max_connect > CELL_GEM_MAX_NUM)
 	{
@@ -784,9 +1234,15 @@ s32 cellGemInit(vm::cptr<CellGemAttribute> attribute)
 
 	gem->attribute = *attribute;
 
+	if (g_cfg.io.move == move_handler::move)
+	{
+		// Initialize psmoveapi
+		move::psmoveapi::init(gem.get());
+	}
+
 	for (auto gem_num = 0; gem_num < CELL_GEM_MAX_NUM; gem_num++)
 	{
-		gem->reset_controller(gem_num);
+		gem->reset_controller(gem.get(), gem_num);
 	}
 
 	// TODO: is this correct?
@@ -814,6 +1270,11 @@ s32 cellGemInvalidateCalibration(s32 gem_num)
 	{
 		gem->controllers[gem_num].calibrated_magnetometer = false;
 		// TODO: gem->status_flags
+	}
+
+	if (g_cfg.io.move == move_handler::move)
+	{
+		move::psmoveapi::tracker::disable(gem.get(), gem_num);
 	}
 
 	return CELL_OK;
@@ -847,6 +1308,11 @@ s32 cellGemPrepareCamera(s32 max_exposure, f32 image_quality)
 
 	// TODO: prepare camera
 
+	if (g_cfg.io.move == move_handler::move)
+	{
+		move::psmoveapi::tracker::init(gem.get());
+	}
+
 	return CELL_OK;
 }
 
@@ -866,6 +1332,7 @@ s32 cellGemPrepareVideoConvert(vm::cptr<CellGemVideoConvertAttribute> vc_attribu
 	}
 
 	const auto vc = *vc_attribute;
+	gem->vc_attribute = vc;
 
 	if (!vc_attribute || vc.version == 0 || vc.output_format == 0 ||
 		vc.conversion_flags & CELL_GEM_COMBINE_PREVIOUS_INPUT_FRAME && !vc.buffer_memory)
@@ -877,8 +1344,6 @@ s32 cellGemPrepareVideoConvert(vm::cptr<CellGemVideoConvertAttribute> vc_attribu
 	{
 		return CELL_GEM_ERROR_INVALID_ALIGNMENT;
 	}
-
-	gem->vc_attribute = vc;
 
 	return CELL_OK;
 }
@@ -926,7 +1391,7 @@ s32 cellGemReset(u32 gem_num)
 		return CELL_GEM_ERROR_INVALID_PARAMETER;
 	}
 
-	gem->reset_controller(gem_num);
+	gem->reset_controller(gem.get(), gem_num);
 
 	// TODO: is this correct?
 	gem->timer.Start();
@@ -949,7 +1414,13 @@ s32 cellGemSetRumble(u32 gem_num, u8 rumble)
 		return CELL_GEM_ERROR_INVALID_PARAMETER;
 	}
 
-	gem->controllers[gem_num].rumble = rumble;
+	auto& controller = gem->controllers[gem_num];
+	controller.rumble = rumble;
+
+	if (g_cfg.io.move == move_handler::move)
+	{
+		move::psmoveapi::update_rumble(controller);
+	}
 
 	return CELL_OK;
 }
@@ -1006,6 +1477,11 @@ s32 cellGemUpdateFinish()
 	if (!gem)
 	{
 		return CELL_GEM_ERROR_UNINITIALIZED;
+	}
+
+	if (g_cfg.io.move == move_handler::move)
+	{
+		move::psmoveapi::tracker::update(gem.get());
 	}
 
 	return CELL_OK;

@@ -5,7 +5,9 @@
 #include "Utilities/sema.h"
 #include "Utilities/Thread.h"
 
+#include <array>
 #include <map>
+#include <atomic>
 
 
 // Error Codes
@@ -351,6 +353,17 @@ struct CellCameraReadEx
 	vm::bptr<u8> pbuf;
 };
 
+// ***************
+// * HLE helpers *
+// ***************
+
+struct attr_t
+{
+	u32 v1, v2;
+};
+
+using CameraAttributes = std::array<attr_t, 500>;
+
 class camera_thread final : public named_thread
 {
 private:
@@ -396,11 +409,7 @@ public:
 
 	CellCameraInfoEx info;
 
-	struct attr_t
-	{
-		u32 v1, v2;
-	};
-	attr_t attr[500]{};
+	CameraAttributes attr;
 
 	lv2_memory_container container;
 	atomic_t<u32> frame_num;
@@ -412,5 +421,7 @@ public:
 /// Shared data between cellGem and cellCamera
 struct gem_camera_shared
 {
-	atomic_t<s64> frame_timestamp;    // latest read timestamp from cellCamera (cellCameraRead(Ex))
+	atomic_t<s64> frame_timestamp{ 0 };		// latest read timestamp from cellCamera (cellCameraRead(Ex))
+	atomic_t<u32> frame_rate{ 0 };
+	std::atomic<CameraAttributes> attr{};			// NOTE: we only populate this once on init
 };
