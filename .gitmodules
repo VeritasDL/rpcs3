@@ -42,3 +42,10 @@
 	path = 3rdparty/libpng
 	url = https://github.com/glennrp/libpng.git
 	ignore = dirty
+[submodule "3rdparty/psmoveapi"]
+	path = 3rdparty/psmoveapi
+	url = https://github.com/thp/psmoveapi.git
+[submodule "3rdparty/opencv"]
+	path = 3rdparty/opencv
+	url = https://github.com/opencv/opencv/
+	branch = 2.4
