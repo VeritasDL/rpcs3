@@ -367,6 +367,23 @@ private:
 public:
 	void on_init(const std::shared_ptr<void>&) override;
 	void send_attach_state(bool attached);
+	void set_attr(s32 attrib, u32 arg1, u32 arg2);
+
+	/**
+	 * \brief Sets up notify event queue supplied and immediately sends an ATTACH event to it
+	 * \param key Event queue key to add
+	 * \param source Event source port
+	 * \param flag Event flag (CELL_CAMERA_EFLAG_*)
+	 * \return True on success, false if camera_thead hasn't been initialized
+	 */
+	void add_queue(u64 key, u64 source, u64 flag);
+
+	/**
+	 * \brief Unsets/removes event queue specified
+	 * \param key Event queue key to remove
+	 * \return True on success, false if camera_thead hasn't been initialized
+	 */
+	void remove_queue(u64 key);
 
 	std::map<u64, notify_event_data> notify_data_map;
 
