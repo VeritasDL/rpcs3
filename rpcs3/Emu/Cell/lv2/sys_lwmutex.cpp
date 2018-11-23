@@ -1,6 +1,8 @@
 ﻿#include "stdafx.h"
 #include "sys_lwmutex.h"
 
+#include "Emu/Memory/vm.h"
+#include "Emu/System.h"
 #include "Emu/IdManager.h"
 
 #include "Emu/Cell/ErrorCodes.h"
@@ -12,7 +14,7 @@ error_code _sys_lwmutex_create(ppu_thread& ppu, vm::ptr<u32> lwmutex_id, u32 pro
 {
 	ppu.state += cpu_flag::wait;
 
-	sys_lwmutex.warning(u8"_sys_lwmutex_create(lwmutex_id=*0x%x, protocol=0x%x, control=*0x%x, has_name=0x%x, name=0x%llx (“%s”))", lwmutex_id, protocol, control, has_name, name, lv2_obj::name64(std::bit_cast<be_t<u64>>(name)));
+	//sys_lwmutex.warning(u8"_sys_lwmutex_create(lwmutex_id=*0x%x, protocol=0x%x, control=*0x%x, has_name=0x%x, name=0x%llx (“%s”))", lwmutex_id, protocol, control, has_name, name, lv2_obj::name64(std::bit_cast<be_t<u64>>(name)));
 
 	if (protocol != SYS_SYNC_FIFO && protocol != SYS_SYNC_RETRY && protocol != SYS_SYNC_PRIORITY)
 	{
@@ -28,6 +30,9 @@ error_code _sys_lwmutex_create(ppu_thread& ppu, vm::ptr<u32> lwmutex_id, u32 pro
 	if (const u32 id = idm::make<lv2_obj, lv2_lwmutex>(protocol, control, name))
 	{
 		*lwmutex_id = id;
+
+		sys_lwmutex.warning("_sys_lwmutex_create(lwmutex_id=*0x%x[0x%x], protocol=0x%x, control=*0x%x, has_name=0x%x, name=0x%llx)", lwmutex_id, id, protocol, control, has_name, name);
+
 		return CELL_OK;
 	}
 
