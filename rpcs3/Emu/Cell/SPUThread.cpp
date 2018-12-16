@@ -24,6 +24,10 @@
 #include "Emu/Cell/SPURecompiler.h"
 #include "Emu/Cell/RawSPUThread.h"
 
+#include "Crypto/sha1.h"
+#include "Crypto/utils.h"
+
+
 #include <cmath>
 #include <cfenv>
 #include <atomic>
@@ -1086,6 +1090,66 @@ std::string spu_thread::dump_misc() const
 	}
 
 	return ret;
+}
+
+void spu_thread::dump_thread()
+{
+	spu_thread *cpu = this;
+
+	sha1_context sha;
+	sha1_starts(&sha);
+	u8 sha1_hash[20];
+
+	sha1_update(&sha, (uchar *)vm::g_base_addr + cpu->offset, 256 * 1024);
+
+	sha1_finish(&sha, sha1_hash);
+
+	// Format patch name
+	std::string hash("SPU-0000000000000000000000000000000000000000");
+	for (u32 i = 0; i < sizeof(sha1_hash); i++)
+	{
+		constexpr auto pal = "0123456789abcdef";
+		hash[4 + i * 2] = pal[sha1_hash[i] >> 4];
+		hash[5 + i * 2] = pal[sha1_hash[i] & 15];
+	}
+
+	std::string filename;
+	filename = cpu->get_name() + "-DUMP-" + hash + ".SPU";
+
+	std::string path(fs::get_config_dir() + "data/" + Emu.GetTitleID() + "/" + filename);
+
+	if (fs::is_file(path))
+	{
+		LOG_NOTICE(LOADER, "Image %s already exists", filename);
+		return;
+	}
+
+	sys_spu_segment daseg;
+	u32 type = swap32(0);
+	u32 entry_point = swap32(0);
+	u32 nsegs = swap32(1);
+
+	daseg.addr = 0;
+	daseg.ls = 0;
+	daseg.type = SYS_SPU_SEGMENT_TYPE_COPY;
+	daseg.size = 1024 * 256;
+
+	if (fs::file out{ path, fs::rewrite })
+	{
+		out.write("SPU", 3);
+
+		out.write(&type, sizeof(u32));
+		out.write(&entry_point, sizeof(u32));
+		out.write(&nsegs, sizeof(s32));
+
+		out.write(&daseg, sizeof(sys_spu_segment));
+		out.write((uchar *)vm::g_base_addr + cpu->offset, 256 * 1024);
+		LOG_SUCCESS(LOADER, "Saved spu program to %s", filename);
+	}
+	else
+	{
+		LOG_ERROR(LOADER, "Error creating %s", path);
+	}
 }
 
 void spu_thread::cpu_init()
