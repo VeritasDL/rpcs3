@@ -16,6 +16,9 @@
 #include "Emu/Cell/SPUThread.h"
 #include "Emu/CPU/CPUThread.h"
 #include "Emu/CPU/CPUDisAsm.h"
+#include "Emu/Cell/lv2/sys_spu.h"
+#include "Crypto/utils.h"
+#include "Crypto/sha1.h"
 
 #include <QKeyEvent>
 #include <QScrollBar>
@@ -75,6 +78,7 @@ debugger_frame::debugger_frame(std::shared_ptr<gui_settings> settings, QWidget *
 	m_btn_step = new QPushButton(tr("Step"), this);
 	m_btn_step_over = new QPushButton(tr("Step Over"), this);
 	m_btn_run = new QPushButton(RunString, this);
+	m_btn_dmpspu = new QPushButton(tr("Dump SPU"), this);
 
 	EnableButtons(false);
 
@@ -85,6 +89,7 @@ debugger_frame::debugger_frame(std::shared_ptr<gui_settings> settings, QWidget *
 	hbox_b_main->addWidget(m_btn_step);
 	hbox_b_main->addWidget(m_btn_step_over);
 	hbox_b_main->addWidget(m_btn_run);
+	hbox_b_main->addWidget(m_btn_dmpspu);
 	hbox_b_main->addWidget(m_choice_units);
 	hbox_b_main->addStretch();
 
@@ -160,6 +165,7 @@ debugger_frame::debugger_frame(std::shared_ptr<gui_settings> settings, QWidget *
 		m_choice_units->clearFocus();
 	});
 
+	connect(m_btn_dmpspu, &QAbstractButton::clicked, this, &debugger_frame::DumpSpu);
 	connect(m_choice_units, static_cast<void (QComboBox::*)(int)>(&QComboBox::activated), this, &debugger_frame::UpdateUI);
 	connect(m_choice_units, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, &debugger_frame::OnSelectUnit);
 	connect(this, &QDockWidget::visibilityChanged, this, &debugger_frame::EnableUpdateTimer);
@@ -648,4 +654,67 @@ void debugger_frame::EnableButtons(bool enable)
 	m_btn_step->setEnabled(enable);
 	m_btn_step_over->setEnabled(enable);
 	m_btn_run->setEnabled(enable);
+}
+
+void debugger_frame::DumpSpu()
+{
+	const auto cpu = static_cast<spu_thread *>(this->cpu.lock().get());
+
+	if (cpu)
+	{
+		sha1_context sha;
+		sha1_starts(&sha);
+		u8 sha1_hash[20];
+
+		sha1_update(&sha, (uchar *)vm::g_base_addr + cpu->offset, 256 * 1024);
+
+		sha1_finish(&sha, sha1_hash);
+
+		// Format patch name
+		std::string hash("SPU-0000000000000000000000000000000000000000");
+		for (u32 i = 0; i < sizeof(sha1_hash); i++)
+		{
+			constexpr auto pal = "0123456789abcdef";
+			hash[4 + i * 2] = pal[sha1_hash[i] >> 4];
+			hash[5 + i * 2] = pal[sha1_hash[i] & 15];
+		}
+
+		std::string filename;
+		filename = cpu->get_name() + "-DUMP-" + hash + ".SPU";
+
+		std::string path(fs::get_config_dir() + "data/" + Emu.GetTitleID() + "/" + filename);
+
+		if (fs::is_file(path))
+		{
+			LOG_NOTICE(LOADER, "Image %s already exists", filename);
+			return;
+		}
+
+		sys_spu_segment daseg;
+		u32 type = swap32(0);
+		u32 entry_point = swap32(0);
+		u32 nsegs = swap32(1);
+
+		daseg.addr = 0;
+		daseg.ls = 0;
+		daseg.type = SYS_SPU_SEGMENT_TYPE_COPY;
+		daseg.size = 1024 * 256;
+
+		if (fs::file out{ path, fs::rewrite })
+		{
+			out.write("SPU", 3);
+
+			out.write(&type, sizeof(u32));
+			out.write(&entry_point, sizeof(u32));
+			out.write(&nsegs, sizeof(s32));
+
+			out.write(&daseg, sizeof(sys_spu_segment));
+			out.write((uchar *)vm::g_base_addr + cpu->offset, 256 * 1024);
+			LOG_SUCCESS(LOADER, "Saved spu program to %s", filename);
+		}
+		else
+		{
+			LOG_ERROR(LOADER, "Error creating %s", path);
+		}
+	}
 }
