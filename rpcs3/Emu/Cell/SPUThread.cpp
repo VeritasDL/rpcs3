@@ -1100,7 +1100,7 @@ void spu_thread::dump_thread()
 	sha1_starts(&sha);
 	u8 sha1_hash[20];
 
-	sha1_update(&sha, (uchar *)vm::g_base_addr + cpu->offset, 256 * 1024);
+	sha1_update(&sha, static_cast<const uchar *>(vm::g_base_addr + cpu->offset), 256 * 1024);
 
 	sha1_finish(&sha, sha1_hash);
 
@@ -1143,7 +1143,7 @@ void spu_thread::dump_thread()
 		out.write(&nsegs, sizeof(s32));
 
 		out.write(&daseg, sizeof(sys_spu_segment));
-		out.write((uchar *)vm::g_base_addr + cpu->offset, 256 * 1024);
+		out.write(vm::g_base_addr + cpu->offset, 256 * 1024);
 		LOG_SUCCESS(LOADER, "Saved spu program to %s", filename);
 	}
 	else
