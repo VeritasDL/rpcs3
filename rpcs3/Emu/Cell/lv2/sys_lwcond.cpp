@@ -23,6 +23,7 @@ error_code _sys_lwcond_create(ppu_thread& ppu, vm::ptr<u32> lwcond_id, u32 lwmut
 		protocol = mutex.protocol;
 	}))
 	{
+		sys_lwcond.warning("_sys_lwcond_create(lwcond_id=*0x%x, lwmutex_id=0x%x, control=*0x%x, name=0x%llx, arg5=0x%x)", lwcond_id, lwmutex_id, control, name, arg5);
 		return CELL_ESRCH;
 	}
 
@@ -34,10 +35,12 @@ error_code _sys_lwcond_create(ppu_thread& ppu, vm::ptr<u32> lwcond_id, u32 lwmut
 
 	if (const u32 id = idm::make<lv2_obj, lv2_lwcond>(name, lwmutex_id, protocol, control))
 	{
+		sys_lwcond.warning("_sys_lwcond_create(lwcond_id=*0x%x(0x%x), lwmutex_id=0x%x, control=*0x%x, name=0x%llx, arg5=0x%x)", lwcond_id, id, lwmutex_id, control, name, arg5);
 		*lwcond_id = id;
 		return CELL_OK;
 	}
 
+	sys_lwcond.warning("_sys_lwcond_create(lwcond_id=*0x%x, lwmutex_id=0x%x, control=*0x%x, name=0x%llx, arg5=0x%x)", lwcond_id, lwmutex_id, control, name, arg5);
 	return CELL_EAGAIN;
 }
 
