@@ -1,4 +1,6 @@
-﻿#include "stdafx.h"
+﻿#pragma optimize("", off)
+
+#include "stdafx.h"
 #include "sys_net.h"
 
 #include "Emu/System.h"
@@ -79,7 +81,9 @@ void fmt_class_string<sys_net_error>::format(std::string& out, u64 arg)
 	});
 }
 
+
 // Error helper functions
+#pragma optimize("", off)
 static sys_net_error get_last_error(bool is_blocking, int native_error = 0)
 {
 	// Convert the error code for socket functions to a one for sys_net
@@ -109,12 +113,12 @@ static sys_net_error get_last_error(bool is_blocking, int native_error = 0)
 		ERROR_CASE(EALREADY);
 		ERROR_CASE(ENOTCONN);
 		ERROR_CASE(ECONNRESET);
-	default: sys_net.error("Unknown/illegal socket error: %d", native_error);
+	default: sys_net.fatal("Unknown/illegal socket error: %d", native_error);
 	}
 
 	if (name && result != SYS_NET_EWOULDBLOCK && result != SYS_NET_EINPROGRESS)
 	{
-		sys_net.error("Socket error %s", name);
+		sys_net.fatal("Socket error %s", name);
 	}
 
 	if (is_blocking && result == SYS_NET_EWOULDBLOCK)
@@ -432,12 +436,11 @@ error_code sys_net_bnet_bind(ppu_thread& ppu, s32 s, vm::cptr<sys_net_sockaddr> 
 {
 	vm::temporary_unlock(ppu);
 
-	sys_net.warning("sys_net_bnet_bind(s=%d, addr=*0x%x, addrlen=%u)", s, addr, addrlen);
-
-	if (addr->sa_family != SYS_NET_AF_INET)
+	if (addr->sa_family != SYS_NET_AF_INET && addr->sa_family != SYS_NET_AF_UNSPEC)
 	{
-		sys_net.error("sys_net_bnet_bind(s=%d): unsupported sa_family (%d)", s, addr->sa_family);
+		sys_net.fatal("sys_net_bnet_bind(s=%d): unsupported sa_family (%d)", s, addr->sa_family);
 		return -SYS_NET_EAFNOSUPPORT;
+		// addr->sa_family = SYS_NET_AF_LOCAL;
 	}
 
 	const auto psa_in = vm::_ptr<const sys_net_sockaddr_in>(addr.addr());
@@ -447,6 +450,8 @@ error_code sys_net_bnet_bind(ppu_thread& ppu, s32 s, vm::cptr<sys_net_sockaddr> 
 	name.sin_port        = htons(psa_in->sin_port);
 	name.sin_addr.s_addr = htonl(psa_in->sin_addr);
 	::socklen_t namelen  = sizeof(name);
+
+	sys_net.fatal("sys_net_bnet_bind(s=%d, addr=*0x%x, addrlen=%u) port: %d addr: %d", s, addr, addrlen, name.sin_port, name.sin_addr.s_addr);
 
 	const auto sock = idm::check<lv2_socket>(s, [&](lv2_socket& sock) -> sys_net_error
 	{
@@ -683,7 +688,7 @@ error_code sys_net_bnet_getsockname(ppu_thread& ppu, s32 s, vm::ptr<sys_net_sock
 {
 	vm::temporary_unlock(ppu);
 
-	sys_net.warning("sys_net_bnet_getsockname(s=%d, addr=*0x%x, paddrlen=*0x%x)", s, addr, paddrlen);
+	sys_net.fatal("sys_net_bnet_getsockname(s=%d, addr=*0x%x, paddrlen=*0x%x)", s, addr, paddrlen);
 
 	const auto sock = idm::check<lv2_socket>(s, [&](lv2_socket& sock) -> sys_net_error
 	{
@@ -708,8 +713,18 @@ error_code sys_net_bnet_getsockname(ppu_thread& ppu, s32 s, vm::ptr<sys_net_sock
 			paddr->sin_port   = ntohs(reinterpret_cast<struct sockaddr_in*>(&native_addr)->sin_port);
 			paddr->sin_addr   = ntohl(reinterpret_cast<struct sockaddr_in*>(&native_addr)->sin_addr.s_addr);
 			paddr->sin_zero   = 0;
+
+			sys_net.fatal("sys_net_bnet_getsockname success, len: %d port: %d addr: %d", paddr->sin_len, paddr->sin_port, paddr->sin_addr);
 			return {};
 		}
+		vm::ptr<sys_net_sockaddr_in> paddr = vm::cast(addr.addr());
+
+		// paddr->sin_len = sizeof(sys_net_sockaddr_in);
+		// paddr->sin_family = SYS_NET_AF_INET;
+		// paddr->sin_port = ntohs(5555);
+		// paddr->sin_addr = ntohl(0xC0A80108);
+		// paddr->sin_zero = 0;
+		// return {};
 
 		return get_last_error(false);
 	});
@@ -1490,16 +1505,16 @@ error_code sys_net_bnet_socket(ppu_thread& ppu, s32 family, s32 type, s32 protoc
 {
 	vm::temporary_unlock(ppu);
 
-	sys_net.warning("sys_net_bnet_socket(family=%d, type=%d, protocol=%d)", family, type, protocol);
+	sys_net.fatal("sys_net_bnet_socket(family=%d, type=%d, protocol=%d)", family, type, protocol);
 
 	if (family != SYS_NET_AF_INET && family != SYS_NET_AF_UNSPEC)
 	{
-		sys_net.error("sys_net_bnet_socket(): unknown family (%d)", family);
+		sys_net.fatal("sys_net_bnet_socket(): unknown family (%d)", family);
 	}
 
 	if (type != SYS_NET_SOCK_STREAM && type != SYS_NET_SOCK_DGRAM && type != SYS_NET_SOCK_DGRAM_P2P)
 	{
-		sys_net.error("sys_net_bnet_socket(): unsupported type (%d)", type);
+		sys_net.fatal("sys_net_bnet_socket(): unsupported type (%d)", type);
 		return -SYS_NET_EPROTONOSUPPORT;
 	}
 
@@ -1537,6 +1552,7 @@ error_code sys_net_bnet_socket(ppu_thread& ppu, s32 family, s32 type, s32 protoc
 	{
 		return -SYS_NET_EMFILE;
 	}
+	sys_net.fatal("Created socket %d",s);
 
 	return not_an_error(s);
 }
@@ -1950,6 +1966,8 @@ error_code sys_net_infoctl(ppu_thread& ppu, s32 cmd, vm::ptr<void> arg)
 	vm::temporary_unlock(ppu);
 
 	sys_net.todo("sys_net_infoctl(cmd=%d, arg=*0x%x)", cmd, arg);
+	// if (cmd==53)
+		// return 0x70;
 	return CELL_OK;
 }
 

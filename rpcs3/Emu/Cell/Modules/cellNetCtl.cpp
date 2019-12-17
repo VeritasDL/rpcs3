@@ -145,6 +145,58 @@ error_code cellNetCtlAddHandler(vm::ptr<cellNetCtlHandler> handler, vm::ptr<void
 	return CELL_OK;
 }
 
+#include <stdio.h>
+#include <Windows.h>
+#include <Iphlpapi.h>
+#include <Assert.h>
+#pragma comment(lib, "iphlpapi.lib")
+
+#pragma optimize("", off)
+char* getMAC() {
+	PIP_ADAPTER_INFO AdapterInfo;
+	DWORD dwBufLen = sizeof(IP_ADAPTER_INFO);
+	char* mac_addr = (char*)malloc(18);
+
+	AdapterInfo = (IP_ADAPTER_INFO*)malloc(sizeof(IP_ADAPTER_INFO));
+	if (AdapterInfo == NULL) {
+		printf("Error allocating memory needed to call GetAdaptersinfo\n");
+		free(mac_addr);
+		return NULL; // it is safe to call free(NULL)
+	}
+
+	// Make an initial call to GetAdaptersInfo to get the necessary size into the dwBufLen variable
+	if (GetAdaptersInfo(AdapterInfo, &dwBufLen) == ERROR_BUFFER_OVERFLOW) {
+		free(AdapterInfo);
+		AdapterInfo = (IP_ADAPTER_INFO*)malloc(dwBufLen);
+		if (AdapterInfo == NULL) {
+			printf("Error allocating memory needed to call GetAdaptersinfo\n");
+			free(mac_addr);
+			return NULL;
+		}
+	}
+
+	if (GetAdaptersInfo(AdapterInfo, &dwBufLen) == NO_ERROR) {
+		// Contains pointer to current adapter info
+		PIP_ADAPTER_INFO pAdapterInfo = AdapterInfo;
+		do {
+			// technically should look at pAdapterInfo->AddressLength
+			//   and not assume it is 6.
+			sprintf(mac_addr, "%02X:%02X:%02X:%02X:%02X:%02X",
+				pAdapterInfo->Address[0], pAdapterInfo->Address[1],
+				pAdapterInfo->Address[2], pAdapterInfo->Address[3],
+				pAdapterInfo->Address[4], pAdapterInfo->Address[5]);
+				cellNetCtl.fatal("Address: %s, mac: %s\n", pAdapterInfo->IpAddressList.IpAddress.String, mac_addr);
+			// print them all, return the last one.
+			if (strcmp(pAdapterInfo->IpAddressList.IpMask.String, "255.255.255.0") == 0)
+				return mac_addr;
+
+			pAdapterInfo = pAdapterInfo->Next;
+		} while (pAdapterInfo);
+	}
+	free(AdapterInfo);
+	return mac_addr; // caller must free.
+}
+
 error_code cellNetCtlDelHandler(s32 hid)
 {
 	cellNetCtl.todo("cellNetCtlDelHandler(hid=0x%x)", hid);
@@ -180,6 +232,28 @@ error_code cellNetCtlGetInfo(s32 code, vm::ptr<CellNetCtlInfo> info)
 	{
 		// dummy values set
 		std::memset(info->ether_addr.data, 0xFF, sizeof(info->ether_addr.data));
+		// char* mac = getMAC();
+		// cellNetCtl.fatal("getMAC returned %s (not an error)", mac);
+
+		info->ether_addr.data[0] = 0xBC;
+		info->ether_addr.data[1] = 0xEE;
+		info->ether_addr.data[2] = 0x7B;
+		info->ether_addr.data[3] = 0x74;
+		info->ether_addr.data[4] = 0xF7;
+		info->ether_addr.data[5] = 0x71;
+
+		// info->ether_addr.data[0] = 0x00;
+		// info->ether_addr.data[1] = 0xD8;
+		// info->ether_addr.data[2] = 0x61;
+		// info->ether_addr.data[3] = 0xC0;
+		// info->ether_addr.data[4] = 0xED;
+		// info->ether_addr.data[5] = 0xBD;
+		// info->ether_addr.data[0] = mac[0];
+		// info->ether_addr.data[1] = mac[1];
+		// info->ether_addr.data[2] = mac[2];
+		// info->ether_addr.data[3] = mac[3];
+		// info->ether_addr.data[4] = mac[4];
+		// info->ether_addr.data[5] = mac[5];
 		return CELL_OK;
 	}
 
@@ -205,6 +279,7 @@ error_code cellNetCtlGetInfo(s32 code, vm::ptr<CellNetCtlInfo> info)
 		}
 		else
 		{
+			// strcpy_trunc(info->ip_address, "192.168.1.8");
 			strcpy_trunc(info->ip_address, g_cfg.net.ip_address);
 		}
 	}
@@ -313,6 +388,10 @@ error_code cellNetCtlGetNatInfo(vm::ptr<CellNetCtlNatInfo> natInfo)
 	{
 		return CELL_NET_CTL_ERROR_INVALID_SIZE;
 	}
+
+	natInfo->upnp_status = 2;
+	natInfo->nat_type = 2;
+	natInfo->mapped_addr = 0xC0A80101;
 
 	return CELL_OK;
 }
