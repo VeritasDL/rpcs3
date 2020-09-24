@@ -1,0 +1,67 @@
+name: Build
+on: [push, pull_request]
+#hopefully this works
+
+jobs:
+
+- job: Windows_Build
+  variables:
+    COMPILER: msvc
+    QT_VER: '5.14.2'
+    QT_DATE: '202003291224'
+    QTDIR: C:\Qt\$(QT_VER)\msvc2017_64
+    VULKAN_VER: '1.2.148.1'
+    VULKAN_SDK_SHA: '5dbeafbc75c334811720fb50bd6ed7c9afd42afd31cad6be0b84cd8383aa9472'
+    VULKAN_SDK: C:\VulkanSDK\$(VULKAN_VER)
+    CACHE_DIR: ./cache
+
+  pool:
+    vmImage: "windows-latest"
+
+  steps:
+    - bash: .ci/get_keys-windows.sh
+      displayName: Get Cache Keys
+
+    - task: Cache@2
+      inputs:
+        key: $(Agent.OS) | $(COMPILER) | "$(QT_VER)" | $(VULKAN_SDK_SHA) | llvm.lock | glslang.lock
+        path: $(CACHE_DIR)
+        restoreKeys: |
+          $(Agent.OS) | $(COMPILER)
+      displayName: Cache
+
+    - bash: .ci/setup-windows.sh
+      displayName: Download and unpack dependencies
+
+    - bash: .ci/export-azure-vars.sh
+      displayName: Export Variables
+
+    - task: MSBuild@1
+      inputs:
+        solution: './Vulkan/spirv-tools-build/spirv-tools-build.vcxproj'
+        maximumCpuCount: true
+        platform: x64
+        configuration: 'Release'
+      displayName: Compile SPIRV-Tools
+
+    - task: VSBuild@1
+      inputs:
+        solution: 'rpcs3.sln'
+        maximumCpuCount: true
+        platform: x64
+        configuration: 'Release - LLVM'
+        msbuildArgs: '/p:VCToolsVersion=14.25.28610'
+      displayName: Compile RPCS3
+
+    - bash: .ci/deploy-windows.sh
+      displayName: Pack up build artifacts
+
+    - publish: $(Build.ArtifactStagingDirectory)
+      condition: succeeded()
+      artifact: RPCS3 for Windows
+
+    - bash: .ci/github-upload-windows.sh
+      condition: and(ne(variables['Build.Reason'], 'PullRequest'), eq(variables['Build.Repository.Name'], 'RPCS3/rpcs3'), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+      displayName: Push build to GitHub
+      env:
+        RPCS3_TOKEN: $(RPCS3-Token)
