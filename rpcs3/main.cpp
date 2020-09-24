@@ -43,6 +43,7 @@ DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResoluti
 #include "Emu/System.h"
 #include <thread>
 #include <charconv>
+#include <Crypto\unself.cpp>
 
 inline std::string sstr(const QString& _in) { return _in.toStdString(); }
 
@@ -174,6 +175,7 @@ const char* arg_stylesheet = "stylesheet";
 const char* arg_config     = "config";
 const char* arg_error      = "error";
 const char* arg_updating   = "updating";
+const char* arg_decrypt    = "decrypt"; //RTC_Hijack: add decrypt command line arg
 
 int find_arg(std::string arg, int& argc, char* argv[])
 {
@@ -186,6 +188,7 @@ int find_arg(std::string arg, int& argc, char* argv[])
 
 QCoreApplication* createApplication(int& argc, char* argv[])
 {
+	
 	if (find_arg(arg_headless, argc, argv))
 		return new headless_application(argc, argv);
 
@@ -425,6 +428,7 @@ int main(int argc, char** argv)
 	parser.addOption(config_option);
 	parser.addOption(QCommandLineOption(arg_error, "For internal usage."));
 	parser.addOption(QCommandLineOption(arg_updating, "For internal usage."));
+	parser.addOption(QCommandLineOption(arg_decrypt, "Automatically decrypt a chosen self file.")); //RTC_Hijack: Describe decryption arg
 	parser.process(app->arguments());
 
 	// Don't start up the full rpcs3 gui if we just want the version or help.
@@ -491,31 +495,56 @@ int main(int argc, char** argv)
 	}
 
 	if (const QStringList args = parser.positionalArguments(); !args.isEmpty())
-	{
-		sys_log.notice("Booting application from command line: %s", args.at(0).toStdString());
-
-		// Propagate command line arguments
-		std::vector<std::string> argv;
-
-		if (args.length() > 1)
+	{	//RTC_Hijack: Hopefully this will make rpcs3 automatically decrypt a selected elf
+		if (find_arg(arg_decrypt, argc, argv))
 		{
-			argv.emplace_back();
+			std::string path;
+			path = sstr(QFileInfo(args.at(0)).absoluteFilePath());
 
-			for (int i = 1; i < args.length(); i++)
+
+			fs::file selectedElf(path);
+
+			if (selectedElf.read<u32>() == "SCE\0"_u32)
 			{
-				const std::string arg = args[i].toStdString();
-				argv.emplace_back(arg);
-				sys_log.notice("Optional command line argument %d: %s", i, arg);
+				Emu.SetForceBoot(true);
+				Emu.Stop();
+				selectedElf = decrypt_self(std::move(selectedElf));
+				if (fs::file new_file{path, fs::rewrite})
+				{
+					new_file.write(selectedElf.to_string());
+				}
+
+			return 0;
 			}
 		}
-
-		// Ugly workaround
-		QTimer::singleShot(2, [config_override_path, path = sstr(QFileInfo(args.at(0)).absoluteFilePath()), argv = std::move(argv)]() mutable
+		else
+		//RTC_Hijack end
 		{
-			Emu.argv = std::move(argv);
-			Emu.SetForceBoot(true);
-			Emu.BootGame(path, "", true);
-		});
+			sys_log.notice("Booting application from command line: %s", args.at(0).toStdString());
+
+			// Propagate command line arguments
+			std::vector<std::string> argv;
+
+			if (args.length() > 1)
+			{
+				argv.emplace_back();
+
+				for (int i = 1; i < args.length(); i++)
+				{
+					const std::string arg = args[i].toStdString();
+					argv.emplace_back(arg);
+					sys_log.notice("Optional command line argument %d: %s", i, arg);
+				}
+			}
+
+			// Ugly workaround
+			QTimer::singleShot(2, [config_override_path, path = sstr(QFileInfo(args.at(0)).absoluteFilePath()), argv = std::move(argv)]() mutable {
+				Emu.argv = std::move(argv);
+				Emu.SetForceBoot(true);
+				Emu.BootGame(path, "", true);
+			});
+		}
+
 	}
 
 	// run event loop (maybe only needed for the gui application)
