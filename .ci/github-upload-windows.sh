@@ -16,7 +16,7 @@ generate_post_data()
 EOF
 }
 
-repo_full_name="RPCS3/rpcs3-binaries-win"
+repo_full_name="ChrisNonyminus/RPCS3"
 
 curl -s \
     -H "Authorization: token ${RPCS3_TOKEN}" \
