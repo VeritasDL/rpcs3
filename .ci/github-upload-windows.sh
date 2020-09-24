@@ -16,7 +16,7 @@ generate_post_data()
 EOF
 }
 
-repo_full_name="ChrisNonyminus/RPCS3"
+repo_full_name="ChrisNonyminus/RPCS3" #RTC_Hijack: deploy builds in fork
 
 curl -s \
     -H "Authorization: token ${RPCS3_TOKEN}" \
