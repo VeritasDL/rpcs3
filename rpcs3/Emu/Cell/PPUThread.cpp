@@ -1047,11 +1047,11 @@ void ppu_trap(ppu_thread& ppu, u64 addr)
 	{
 		//RTC_Hijack: comment out the ppu trap handler. Probably won't break anything, but I thought nuking dosbox-x's error handlers wouldn't break anything and Duke3D proved me wrong
 		/*fmt::throw_exception("PPU Trap!" HERE)*/;
-		//RTC_Hijack end
 	}
 
-	ppu_log.error("PPU Trap: Stubbing %d instructions %s.", std::abs(static_cast<s32>(add) / 4), add >> 31 ? "backwards" : "forwards");
-	ppu.cia += add; // Skip instructions, hope for valid code (interprter may be invoked temporarily)
+	//ppu_log.error("PPU Trap: Stubbing %d instructions %s.", std::abs(static_cast<s32>(add) / 4), add >> 31 ? "backwards" : "forwards");
+	//ppu.cia += add; // Skip instructions, hope for valid code (interprter may be invoked temporarily)
+	//RTC_Hijack end
 }
 
 [[noreturn]] static void ppu_error(ppu_thread& ppu, u64 addr, u32 op)
