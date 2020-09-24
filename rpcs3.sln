@@ -160,6 +160,7 @@ Global
 		{30A05C4D-F5FD-421C-A864-17A64BDEAA75}.Release|x64.ActiveCfg = Release|x64
 		{30A05C4D-F5FD-421C-A864-17A64BDEAA75}.Release|x64.Build.0 = Release|x64
 		{EB33566E-DA7F-4D28-9077-88C0B7C77E35}.Debug - LLVM|x64.ActiveCfg = Release|x64
+		{EB33566E-DA7F-4D28-9077-88C0B7C77E35}.Debug - LLVM|x64.Build.0 = Release|x64
 		{EB33566E-DA7F-4D28-9077-88C0B7C77E35}.Debug - MemLeak|x64.ActiveCfg = Release|x64
 		{EB33566E-DA7F-4D28-9077-88C0B7C77E35}.Debug - MemLeak|x64.Build.0 = Release|x64
 		{EB33566E-DA7F-4D28-9077-88C0B7C77E35}.Debug|x64.ActiveCfg = Release|x64
@@ -192,6 +193,7 @@ Global
 		{8F85B6CC-250F-4ACA-A617-E820A74E3E3C}.Debug - MemLeak|x64.ActiveCfg = Debug|x64
 		{8F85B6CC-250F-4ACA-A617-E820A74E3E3C}.Debug|x64.ActiveCfg = Debug|x64
 		{8F85B6CC-250F-4ACA-A617-E820A74E3E3C}.Release - LLVM|x64.ActiveCfg = Release|x64
+		{8F85B6CC-250F-4ACA-A617-E820A74E3E3C}.Release - LLVM|x64.Build.0 = Release|x64
 		{8F85B6CC-250F-4ACA-A617-E820A74E3E3C}.Release|x64.ActiveCfg = Release|x64
 		{3EE5F075-B546-42C4-B6A8-E3CCEF38B78D}.Debug - LLVM|x64.ActiveCfg = Debug - LLVM|x64
 		{3EE5F075-B546-42C4-B6A8-E3CCEF38B78D}.Debug - LLVM|x64.Build.0 = Debug - LLVM|x64
@@ -287,6 +289,7 @@ Global
 		{4CBD3DDD-5555-49A4-A44D-DD3D8CB516A1}.Debug - MemLeak|x64.ActiveCfg = Debug|x64
 		{4CBD3DDD-5555-49A4-A44D-DD3D8CB516A1}.Debug|x64.ActiveCfg = Debug|x64
 		{4CBD3DDD-5555-49A4-A44D-DD3D8CB516A1}.Release - LLVM|x64.ActiveCfg = Release|x64
+		{4CBD3DDD-5555-49A4-A44D-DD3D8CB516A1}.Release - LLVM|x64.Build.0 = Release|x64
 		{4CBD3DDD-5555-49A4-A44D-DD3D8CB516A1}.Release|x64.ActiveCfg = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution

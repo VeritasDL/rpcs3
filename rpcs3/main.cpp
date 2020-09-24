@@ -43,7 +43,7 @@ DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResoluti
 #include "Emu/System.h"
 #include <thread>
 #include <charconv>
-#include <Crypto\unself.cpp>
+#include <Crypto\unself.cpp> //RTC_Hijack: include unself.cpp so decryption via command line is possible
 
 inline std::string sstr(const QString& _in) { return _in.toStdString(); }
 
