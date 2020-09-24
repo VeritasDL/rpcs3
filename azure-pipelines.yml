@@ -1,3 +1,5 @@
+- name: Azure Pipelines Action
+  uses: Azure/pipelines@v1
 trigger:
   branches:
     include:
