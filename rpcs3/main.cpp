@@ -566,7 +566,11 @@ int main(int argc, char** argv)
 				"Game name: " + game.name + "\nGame serial: " + game.serial + "\nGame version: " + game.version
 			);*/
 			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
-			std::string outputText = "Game name: " + game.name + "\n\nGame serial: " + game.serial + "\n\nGame version: " + game.app_ver + "\n\nGame type: " + game.category + "\n\nGame folder path: " + game.path + "\n\nPath of folder containing the USRDIR folder: " + sfo_dir + "\n\nEBOOT.BIN path: " + sfo_dir + "/USRDIR/EBOOT.BIN";
+			std::string outputText = "Game name: " + game.name + "\n\nGame serial: " + game.serial + "\n\nGame version: " + game.app_ver + "\n\nGame type: " + game.category + "\n\nGame folder path: " + game.path + "\n\nPath of folder containing the USRDIR folder: " + sfo_dir;
+			if (game.category != "GD")
+			{
+				outputText = outputText + "\n\nEBOOT.BIN path: " + sfo_dir + "/USRDIR/EBOOT.BIN";
+			}
 			file << outputText;
 
 			return 0;
