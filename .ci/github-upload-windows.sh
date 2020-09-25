@@ -23,10 +23,6 @@ curl -s \
     -H "Accept: application/vnd.github.v3+json" \
     --data "$(generate_post_data)" "https://api.github.com/repos/$repo_full_name/releases" >> release.json
 
-cat release.json
-id=$(grep '"id"' release.json | cut -d ':' -f2 | head -n1 | awk '{$1=$1;print}')
-id=${id%?}
-echo ${id:?}
 
 upload_file()
 {

@@ -44,6 +44,8 @@ DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResoluti
 #include <thread>
 #include <charconv>
 #include <Crypto\unself.cpp> //RTC_Hijack: include unself.cpp so decryption via command line is possible
+#include <Emu\GameInfo.h> //RTC_Hijack: Include game info header
+#include "Loader/PSF.h" //RTC_Hijack: include PSF
 
 inline std::string sstr(const QString& _in) { return _in.toStdString(); }
 
@@ -176,6 +178,7 @@ const char* arg_config     = "config";
 const char* arg_error      = "error";
 const char* arg_updating   = "updating";
 const char* arg_decrypt    = "decrypt"; //RTC_Hijack: add decrypt command line arg
+const char* arg_getgameinfo = "getgameinfo"; //RTC_Hijack: add command line arg to get a game's info
 
 int find_arg(std::string arg, int& argc, char* argv[])
 {
@@ -429,6 +432,7 @@ int main(int argc, char** argv)
 	parser.addOption(QCommandLineOption(arg_error, "For internal usage."));
 	parser.addOption(QCommandLineOption(arg_updating, "For internal usage."));
 	parser.addOption(QCommandLineOption(arg_decrypt, "Automatically decrypt a chosen self file.")); //RTC_Hijack: Describe decryption arg
+	parser.addOption(QCommandLineOption(arg_getgameinfo, "Automatically output a game's serial number.")); //RTC_Hijack: Describe --getgameinfo
 	parser.process(app->arguments());
 
 	// Don't start up the full rpcs3 gui if we just want the version or help.
@@ -495,7 +499,7 @@ int main(int argc, char** argv)
 	}
 
 	if (const QStringList args = parser.positionalArguments(); !args.isEmpty())
-	{	//RTC_Hijack: Hopefully this will make rpcs3 automatically decrypt a selected elf
+	{	//RTC_Hijack: Implement arguments for file decryption and gameinfo getting
 		if (find_arg(arg_decrypt, argc, argv))
 		{
 			std::string path;
@@ -517,7 +521,43 @@ int main(int argc, char** argv)
 			return 0;
 			}
 		}
-		else
+		else if (find_arg(arg_getgameinfo, argc, argv))
+		{
+			//god my code is ugly but hopefully it'll do
+			std::string dir = (sstr(QFileInfo(args.at(0)).absoluteFilePath())) + "/../.."; //assume the user will select the EBOOT, and thus, hopefully, the program shall go two folders up to the game's root directory
+			sys_log.notice("Game Directory: %s", dir);
+			const std::string sfo_dir = Emulator::GetSfoDirFromGamePath(dir, Emu.GetUsr());
+			const fs::file sfo_file(sfo_dir + "/PARAM.SFO");
+			if (!sfo_file)
+			{
+				sys_log.notice("ERROR: Could note find SFO file! Attempted filename location: %s", (sfo_dir +"/PARAM.SFO"));
+				return 0;
+			}
+			sys_log.notice("Attempted SFO file location: %s", (sfo_dir + "/PARAM.SFO"));
+			GameInfo game;
+			const auto psf = psf::load_object(sfo_file);
+			game.path                = dir;
+			game.icon_path           = sfo_dir + "/ICON0.PNG";
+			game.serial              = std::string(psf::get_string(psf, "TITLE_ID", ""));
+			game.name                = std::string(psf::get_string(psf, "TITLE"));
+			game.app_ver             = std::string(psf::get_string(psf, "APP_VER"));
+			game.version             = std::string(psf::get_string(psf, "VERSION"));
+			game.category            = std::string(psf::get_string(psf, "CATEGORY"));
+			game.fw                  = std::string(psf::get_string(psf, "PS3_SYSTEM_VER"));
+			game.parental_lvl        = psf::get_integer(psf, "PARENTAL_LEVEL", 0);
+			game.resolution          = psf::get_integer(psf, "RESOLUTION", 0);
+			game.sound_format        = psf::get_integer(psf, "SOUND_FORMAT", 0);
+			game.bootable            = psf::get_integer(psf, "BOOTABLE", 0);
+			game.attr                = psf::get_integer(psf, "ATTRIBUTE", 0);
+			std::string serialnumber = game.serial;
+			fs::file outputText{(dir + "/gameinfo.txt"), fs::write};
+			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
+			outputText.write
+			("Game name: " + game.name + "\nGame serial: " + game.serial + "\nGame version: "+ game.version
+			);
+
+			return 0;
+		}else
 		//RTC_Hijack end
 		{
 			sys_log.notice("Booting application from command line: %s", args.at(0).toStdString());
