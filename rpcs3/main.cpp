@@ -552,11 +552,14 @@ int main(int argc, char** argv)
 			game.bootable            = psf::get_integer(psf, "BOOTABLE", 0);
 			game.attr                = psf::get_integer(psf, "ATTRIBUTE", 0);
 			std::string serialnumber = game.serial;
-			//fs::file outputText(dir + "/gameinfo.txt");
-			std::ofstream out(dir + "/gameinfo.txt");
+			/*std::ofstream out(dir + "/gameinfo.txt");
 			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
 			std::string outputText = "Game name: " + game.name + "\nGame serial: " + game.serial + "\nGame version: " + game.version;
-			out << outputText;
+			out << outputText;*/
+			fs::file outputText{(dir + "/gameinfo.txt"), fs::create};
+			outputText.open();
+			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
+			outputText.write("Game name: " + game.name + "\nGame serial: " + game.serial + "\nGame version: " + game.version);
 
 			return 0;
 		}else
