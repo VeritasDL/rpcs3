@@ -557,11 +557,17 @@ int main(int argc, char** argv)
 			std::string outputText = "Game name: " + game.name + "\nGame serial: " + game.serial + "\nGame version: " + game.version;
 			out << outputText;*/
 			std::ofstream file(dir + "\\gameinfo.txt");
-			file.close();
+			/*file.close();
 			fs::file outputText(dir + "/gameinfo.txt");
 			
 			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
-			outputText.write("Game name: " + game.name + "\nGame serial: " + game.serial + "\nGame version: " + game.version);
+			outputText.write
+			(
+				"Game name: " + game.name + "\nGame serial: " + game.serial + "\nGame version: " + game.version
+			);*/
+			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
+			std::string outputText = "Game name: " + game.name + "\nGame serial: " + game.serial + "\nGame version: " + game.version;
+			file << outputText;
 
 			return 0;
 		}else
