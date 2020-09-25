@@ -1512,59 +1512,59 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 
 		if (cpu->id_type() != 1)
 		{
+			//RTC_Hijack: Comment out access violation code. Hopefully this won't break anythin
 			if (!access_violation_recovered)
 			{
-				vm_log.notice("\n%s", cpu->dump_all());
-				vm_log.error("Access violation %s location 0x%x (%s)", is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory");
+				//vm_log.notice("\n%s", cpu->dump_all());
+				//vm_log.error("Access violation %s location 0x%x (%s)", is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory");
 			}
 
 			// TODO:
 			// RawSPU: Send appropriate interrupt
 			// SPUThread: Send sys_spu exception event
-			cpu->state += cpu_flag::dbg_pause;
+			//cpu->state += cpu_flag::dbg_pause;
 
 			if (cpu->check_state() && !hack_alloc())
 			{
-				std::terminate();
+				//std::terminate();
 			}
-
 			return true;
 		}
 		else
 		{
 			if (auto last_func = static_cast<ppu_thread*>(cpu)->current_function)
 			{
-				ppu_log.fatal("Function aborted: %s", last_func);
+				//ppu_log.fatal("Function aborted: %s", last_func);
 			}
 
-			lv2_obj::sleep(*cpu);
+			//lv2_obj::sleep(*cpu);
 		}
 	}
 
-	Emu.Pause();
+	//Emu.Pause();
 
 	if (cpu && !access_violation_recovered)
 	{
-		vm_log.notice("\n%s", cpu->dump_all());
+		//vm_log.notice("\n%s", cpu->dump_all());
 	}
 
 	// Note: a thread may access violate more than once after hack_alloc recovery
 	// Do not log any further access violations in this case.
 	if (!access_violation_recovered)
 	{
-		vm_log.fatal("Access violation %s location 0x%x (%s)", is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory");
+		//vm_log.fatal("Access violation %s location 0x%x (%s)", is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory");
 	}
 
 	while (Emu.IsPaused())
 	{
-		thread_ctrl::wait();
+		//thread_ctrl::wait();
 	}
 
 	if (Emu.IsStopped() && !hack_alloc())
 	{
-		std::terminate();
+		//std::terminate();
 	}
-
+	//	RTC_Hijack end
 	return true;
 }
 
