@@ -550,11 +550,10 @@ int main(int argc, char** argv)
 			game.bootable            = psf::get_integer(psf, "BOOTABLE", 0);
 			game.attr                = psf::get_integer(psf, "ATTRIBUTE", 0);
 			std::string serialnumber = game.serial;
-			fs::file outputText(dir + "/gameinfo.txt");
+			fs::file outputText{(dir + "/gameinfo.txt"), fs::create};
 			if (!outputText)
 			{
-				outputText.open();
-				fs::create;
+				
 			}
 			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
 			outputText.write
