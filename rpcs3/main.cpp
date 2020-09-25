@@ -1,6 +1,8 @@
 ﻿// Qt5.10+ frontend implementation for rpcs3. Known to work on Windows, Linux, Mac
 // by Sacha Refshauge, Megamouse and flash-fire
 
+#include <fstream>//RTC_Hijack: include these for the gameinfo writing
+#include <string> //RTC_Hijack: include these for the gameinfo writing
 #include <iostream>
 
 #include <QApplication>
@@ -550,13 +552,11 @@ int main(int argc, char** argv)
 			game.bootable            = psf::get_integer(psf, "BOOTABLE", 0);
 			game.attr                = psf::get_integer(psf, "ATTRIBUTE", 0);
 			std::string serialnumber = game.serial;
-			fs::create_path(dir + "/gameinfo.txt");
-			fs::file outputText{(dir + "/gameinfo.txt")};
+			//fs::file outputText(dir + "/gameinfo.txt");
+			std::ofstream out(dir + "/gameinfo.txt");
 			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
-			outputText.write
-			(
-				"Game name: " + game.name + "\nGame serial: " + game.serial + "\nGame version: "+ game.version
-			);
+			std::string outputText = "Game name: " + game.name + "\nGame serial: " + game.serial + "\nGame version: " + game.version;
+			out << outputText;
 
 			return 0;
 		}else
