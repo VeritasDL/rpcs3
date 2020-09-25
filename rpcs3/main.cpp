@@ -533,7 +533,7 @@ int main(int argc, char** argv)
 				sys_log.notice("ERROR: Could note find SFO file! Attempted filename location: %s", (sfo_dir +"/PARAM.SFO"));
 				return 0;
 			}
-			sys_log.notice("SFO file location: %s", (sfo_dir + "/PARAM.SFO"));
+			sys_log.notice("SFO file location: %s", (sfo_dir + "/PS3_GAME/PARAM.SFO"));
 			GameInfo game;
 			const auto psf = psf::load_object(sfo_file);
 			game.path                = dir;
@@ -550,7 +550,12 @@ int main(int argc, char** argv)
 			game.bootable            = psf::get_integer(psf, "BOOTABLE", 0);
 			game.attr                = psf::get_integer(psf, "ATTRIBUTE", 0);
 			std::string serialnumber = game.serial;
-			fs::file outputText{(dir + "/gameinfo.txt"), fs::write};
+			fs::file outputText(dir + "/gameinfo.txt");
+			if (!outputText)
+			{
+				outputText.open();
+				fs::create;
+			}
 			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
 			outputText.write
 			("Game name: " + game.name + "\nGame serial: " + game.serial + "\nGame version: "+ game.version
