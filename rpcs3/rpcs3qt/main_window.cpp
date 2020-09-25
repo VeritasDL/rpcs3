@@ -222,7 +222,7 @@ void main_window::Init()
 #if defined(_WIN32) || defined(__linux__)
 	if (const auto update_value = m_gui_settings->GetValue(gui::m_check_upd_start).toString(); update_value != "false")
 	{
-		m_updater.check_for_updates(true, update_value != "true", this);
+		//m_updater.check_for_updates(true, update_value != "true", this);
 	}
 #endif
 }
@@ -1778,7 +1778,7 @@ void main_window::CreateConnects()
 			QMessageBox::warning(this, tr("Auto-updater"), tr("Please stop the emulation before trying to update."));
 			return;
 		}
-		m_updater.check_for_updates(false, false, this);
+		//m_updater.check_for_updates(false, false, this);
 	});
 
 	connect(ui->aboutAct, &QAction::triggered, [this]
