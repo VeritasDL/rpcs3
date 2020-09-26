@@ -48,6 +48,7 @@ DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResoluti
 #include <Crypto\unself.cpp> //RTC_Hijack: include unself.cpp so decryption via command line is possible
 #include <Emu\GameInfo.h> //RTC_Hijack: Include game info header
 #include "Loader/PSF.h" //RTC_Hijack: include PSF
+#include <filesystem> //RTC_Hijack: include filesystem for reading filepaths
 
 inline std::string sstr(const QString& _in) { return _in.toStdString(); }
 
@@ -567,6 +568,32 @@ int main(int argc, char** argv)
 			);*/
 			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
 			std::string outputText = "NAME$$" + game.name + "\nSERIAL$$" + game.serial + "\nVERSION$$" + game.app_ver + "\nTYPE$$" + game.category + "\nPATH$$" + game.path + "\nUSRDIRPATH$$" + sfo_dir + "\nEBOOTPATH$$" + sfo_dir + "/USRDIR/EBOOT.BIN";
+			std::filesystem::path PATH(dir);
+			std::filesystem::path USRDIRLOCATION(sfo_dir);
+			std::filesystem::path EBOOTLOCATION(sfo_dir + "/USRDIR");
+			
+			int i = 0;
+			while (i < 256)//	This may be excessive and you may say there can't possibly be a game with this much elfs and sprxs, but I consider MGS4 having over 150 elfs to be excessive
+			{
+
+				for (const auto& USRDIR : std::filesystem::recursive_directory_iterator(EBOOTLOCATION))
+				{ 
+					 //	try to find subdirectories and gather filepaths of selfs and sprxs from them
+					std::string elfpath;
+					if (USRDIR.path().extension() == ".self" || USRDIR.path().extension() == ".sprx" || USRDIR.path().extension() == ".elf" || USRDIR.path().extension() == ".prx")
+					{
+						if (elfpath != USRDIR.path().string())
+						{
+							i++;
+							elfpath    = USRDIR.path().string();
+							if (outputText.find(elfpath) == std::string::npos)
+							{
+								outputText = outputText + "\nNONBINEXECUTABLE" + std::to_string(i) + "$$" + elfpath;
+							}
+						}
+					}
+				}
+			}
 			file << outputText;
 
 			return 0;
