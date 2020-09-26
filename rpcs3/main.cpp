@@ -568,7 +568,7 @@ int main(int argc, char** argv)
 			);*/
 			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
 			std::string outputText = "NAME$$" + game.name + "\nSERIAL$$" + game.serial + "\nVERSION$$" + game.app_ver + "\nTYPE$$" + game.category + "\nPATH$$" + game.path + "\nUSRDIRPATH$$" + sfo_dir + "\nEBOOTPATH$$" + sfo_dir + "/USRDIR/EBOOT.BIN";
-			std::filesystem::path PATH(dir);
+			/*std::filesystem::path PATH(dir);
 			std::filesystem::path USRDIRLOCATION(sfo_dir);
 			std::filesystem::path EBOOTLOCATION(sfo_dir + "/USRDIR");
 			
@@ -593,7 +593,7 @@ int main(int argc, char** argv)
 						}
 					}
 				}
-			}
+			}*/
 			file << outputText;
 
 			return 0;
