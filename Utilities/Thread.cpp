@@ -1515,12 +1515,16 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 
 			return true;
 		}
-
+		//	RTC_Hijack: Comment out access violation code and pray that I don't have to manually re-add this hijack again
+		if (!access_violation_recovered)
+		{
+			access_violation_recovered = true; //trick rpcs3 into thinking there is no access violation, will probably break shit
+		}
 		if (cpu->id_type() != 1)
-		{//RTC_Hijack: Comment out access violation code and pray that I don't have to manually re-add this hijack again
+		{
 			if (!access_violation_recovered)
 			{
-				//	vm_log.notice("\n%s", cpu->dump_all());
+				vm_log.notice("\n%s", cpu->dump_all());
 				//vm_log.error("Access violation %s location 0x%x (%s)", is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory");
 			}
 
@@ -1546,6 +1550,10 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 		}
 	}
 
+	if (!access_violation_recovered)
+	{
+		access_violation_recovered = true; //	trick rpcs3 into thinking there is no access violation, will probably break shit
+	}
 	//	Emu.Pause();
 
 	if (cpu && !access_violation_recovered)
@@ -1557,7 +1565,7 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 	// Do not log any further access violations in this case.
 	if (!access_violation_recovered)
 	{
-		//vm_log.fatal("Access violation %s location 0x%x (%s)", is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory");
+		/*vm_log.fatal("Access violation %s location 0x%x (%s)", is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory")*/;
 	}
 
 	while (Emu.IsPaused())
@@ -1607,13 +1615,14 @@ static LONG exception_handler(PEXCEPTION_POINTERS pExp) noexcept
 
 static LONG exception_filter(PEXCEPTION_POINTERS pExp) noexcept
 {
+	//RTC_Hijack: comment this annoying fatal error handler out for now
 	std::string msg = fmt::format("Unhandled Win32 exception 0x%08X.\n", pExp->ExceptionRecord->ExceptionCode);
 
 	if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
 	{
-		const auto cause = pExp->ExceptionRecord->ExceptionInformation[0] != 0 ? "writing" : "reading";
+		//const auto cause = pExp->ExceptionRecord->ExceptionInformation[0] != 0 ? "writing" : "reading";
 
-		fmt::append(msg, "Segfault %s location %p at %p.\n", cause, pExp->ExceptionRecord->ExceptionInformation[1], pExp->ExceptionRecord->ExceptionAddress);
+		//fmt::append(msg, "Segfault %s location %p at %p.\n", cause, pExp->ExceptionRecord->ExceptionInformation[1], pExp->ExceptionRecord->ExceptionAddress);
 	}
 	else
 	{
@@ -1694,12 +1703,13 @@ static LONG exception_filter(PEXCEPTION_POINTERS pExp) noexcept
 
 	// TODO: print registers and the callstack
 
-	sys_log.fatal("\n%s", msg);
+	//sys_log.fatal("\n%s", msg);
 
 	if (!IsDebuggerPresent())
 	{
-		report_fatal_error(msg);
+		//report_fatal_error(msg);
 	}
+	//	RTC_Hijack end
 
 	return EXCEPTION_CONTINUE_SEARCH;
 }
