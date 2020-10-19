@@ -7,7 +7,11 @@
 	VFS.cpp
 	GDB.cpp
 	title.cpp
+	perf_meter.cpp
 )
+
+# prevent WolfSSL from warning about not having harden options
+add_compile_definitions(WC_NO_HARDEN)
 
 target_link_libraries(rpcs3_emu
 	PRIVATE
@@ -443,6 +447,7 @@ if(TARGET 3rdparty_vulkan)
 		RSX/VK/VKMemAlloc.cpp
 		RSX/VK/VKPresent.cpp
 		RSX/VK/VKProgramPipeline.cpp
+		RSX/VK/VKQueryPool.cpp
 		RSX/VK/VKRenderPass.cpp
 		RSX/VK/VKResolveHelper.cpp
 		RSX/VK/VKResourceManager.cpp
