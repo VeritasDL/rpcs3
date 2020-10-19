@@ -64,7 +64,7 @@ class ppu_thread : public cpu_thread
 public:
 	static const u32 id_base = 0x01000000; // TODO (used to determine thread type)
 	static const u32 id_step = 1;
-	static const u32 id_count = 2048;
+	static const u32 id_count = 100;
 	static constexpr std::pair<u32, u32> id_invl_range = {12, 12};
 
 	virtual std::string dump_all() const override;
@@ -193,8 +193,7 @@ public:
 
 	u32 raddr{0}; // Reservation addr
 	u64 rtime{0};
-	u64 rdata{0}; // Reservation data
-	alignas(64) std::byte full_rdata[128]{}; // Full reservation data
+	alignas(64) std::byte rdata[128]{}; // Reservation data
 	bool use_full_rdata{};
 
 	atomic_t<s32> prio{0}; // Thread priority (0..3071)
