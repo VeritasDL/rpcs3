@@ -298,6 +298,7 @@ void Emulator::Init()
 
 	make_path_verbose(fs::get_cache_dir() + "shaderlog/");
 	make_path_verbose(fs::get_config_dir() + "captures/");
+	make_path_verbose(fs::get_cache_dir() + "spu_progs/");
 
 	// Initialize patch engine
 	g_fxo->init<patch_engine>()->append_global_patches();
@@ -1629,7 +1630,11 @@ game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool
 
 		if ((m_force_boot || g_cfg.misc.autostart) && IsReady())
 		{
-			Run(true);
+			if (ppu_exec == elf_error::ok)
+			{
+				Run(true);
+			}
+
 			m_force_boot = false;
 		}
 		else if (IsPaused())
@@ -1673,14 +1678,12 @@ void Emulator::Run(bool start_playtime)
 
 	ConfigureLogs();
 
-	auto on_select = [](u32, cpu_thread& cpu)
+	// Run main thread
+	idm::check<named_thread<ppu_thread>>(ppu_thread::id_base, [](cpu_thread& cpu)
 	{
 		cpu.state -= cpu_flag::stop;
 		cpu.notify();
-	};
-
-	idm::select<named_thread<ppu_thread>>(on_select);
-	idm::select<named_thread<spu_thread>>(on_select);
+	});
 
 	if (g_cfg.misc.prevent_display_sleep)
 	{
@@ -1846,10 +1849,6 @@ void Emulator::Stop(bool restart)
 
 	vm::close();
 
-#ifdef LLVM_AVAILABLE
-	extern void jit_finalize();
-	jit_finalize();
-#endif
 	jit_runtime::finalize();
 
 	if (restart)
