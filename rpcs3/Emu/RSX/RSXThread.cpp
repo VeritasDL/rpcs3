@@ -14,15 +14,15 @@
 #include "Overlays/overlay_perf_metrics.h"
 #include "Utilities/date_time.h"
 #include "Utilities/span.h"
-#include "Utilities/asm.h"
 #include "Utilities/StrUtil.h"
 
 #include <cereal/archives/binary.hpp>
 
+#include "util/asm.hpp"
+
 #include <sstream>
 #include <thread>
 #include <unordered_set>
-#include <exception>
 #include <cfenv>
 
 class GSRender;
@@ -559,41 +559,6 @@ namespace rsx
 
 				thread_ctrl::wait_for(100);
 			}
-		});
-
-		g_fxo->init<named_thread>("RSX Decompiler Thread", [this]
-		{
-			const auto shadermode = g_cfg.video.shadermode.get();
-
-			if (shadermode != shader_mode::async_recompiler && shadermode != shader_mode::async_with_interpreter)
-			{
-				// Die
-				return;
-			}
-
-			on_decompiler_init();
-
-			if (g_cfg.core.thread_scheduler_enabled)
-			{
-				thread_ctrl::set_thread_affinity_mask(thread_ctrl::get_affinity_mask(thread_class::rsx));
-			}
-
-			while (!Emu.IsStopped() && !m_rsx_thread_exiting)
-			{
-				if (!on_decompiler_task())
-				{
-					if (Emu.IsPaused())
-					{
-						std::this_thread::sleep_for(1ms);
-					}
-					else
-					{
-						std::this_thread::sleep_for(500us);
-					}
-				}
-			}
-
-			on_decompiler_exit();
 		});
 
 		// Raise priority above other threads
@@ -1518,10 +1483,8 @@ namespace rsx
 			framebuffer_status_valid = true;
 		}
 
-		region.x1 = rsx::apply_resolution_scale(x1, false);
-		region.x2 = rsx::apply_resolution_scale(x2, true);
-		region.y1 = rsx::apply_resolution_scale(y1, false);
-		region.y2 = rsx::apply_resolution_scale(y2, true);
+		std::tie(region.x1, region.y1) = rsx::apply_resolution_scale<false>(x1, y1);
+		std::tie(region.x2, region.y2) = rsx::apply_resolution_scale<true>(x2, y2);
 
 		return true;
 	}
@@ -1781,10 +1744,10 @@ namespace rsx
 
 		const auto [program_offset, program_location] = method_registers.shader_program_address();
 
-		result.addr = vm::base(rsx::get_address(program_offset, program_location, HERE));
-		current_fp_metadata = program_hash_util::fragment_program_utils::analyse_fragment_program(result.addr);
+		result.data = vm::base(rsx::get_address(program_offset, program_location, HERE));
+		current_fp_metadata = program_hash_util::fragment_program_utils::analyse_fragment_program(result.get_data());
 
-		result.addr = (static_cast<u8*>(result.addr) + current_fp_metadata.program_start_offset);
+		result.data = (static_cast<u8*>(result.get_data()) + current_fp_metadata.program_start_offset);
 		result.offset = program_offset + current_fp_metadata.program_start_offset;
 		result.ucode_length = current_fp_metadata.program_ucode_length;
 		result.total_length = result.ucode_length + current_fp_metadata.program_start_offset;
@@ -2397,6 +2360,7 @@ namespace rsx
 			}
 		}
 
+		rsx::reservation_lock<true> lock(sink, 16);
 		vm::_ref<atomic_t<CellGcmReportData>>(sink).store({ timestamp(), value, 0});
 	}
 
@@ -3258,6 +3222,7 @@ namespace rsx
 				break;
 			}
 
+			rsx::reservation_lock<true> lock(sink, 16);
 			vm::_ref<atomic_t<CellGcmReportData>>(sink).store({ timestamp, value, 0});
 		}
 

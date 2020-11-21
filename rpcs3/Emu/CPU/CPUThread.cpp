@@ -10,9 +10,9 @@
 #include "Emu/Cell/SPUThread.h"
 #include "Emu/perf_meter.hpp"
 
+#include "util/asm.hpp"
 #include <thread>
 #include <unordered_map>
-#include <numeric>
 #include <map>
 
 DECLARE(cpu_thread::g_threads_created){0};
@@ -22,7 +22,12 @@ DECLARE(cpu_thread::g_suspend_counter){0};
 LOG_CHANNEL(profiler);
 LOG_CHANNEL(sys_log, "SYS");
 
-static thread_local u64 s_tls_thread_slot = -1;
+static thread_local u32 s_tls_thread_slot = -1;
+
+// Suspend counter stamp
+static thread_local u64 s_tls_sctr = -1;
+
+extern thread_local void(*g_tls_log_control)(const char* fmt, u64 progress);
 
 template <>
 void fmt_class_string<cpu_flag>::format(std::string& out, u64 arg)
@@ -34,6 +39,7 @@ void fmt_class_string<cpu_flag>::format(std::string& out, u64 arg)
 		case cpu_flag::stop: return "STOP";
 		case cpu_flag::exit: return "EXIT";
 		case cpu_flag::wait: return "w";
+		case cpu_flag::temp: return "t";
 		case cpu_flag::pause: return "p";
 		case cpu_flag::suspend: return "s";
 		case cpu_flag::ret: return "ret";
@@ -245,39 +251,35 @@ using cpu_profiler = named_thread<cpu_prof>;
 
 thread_local cpu_thread* g_tls_current_cpu_thread = nullptr;
 
-struct cpu_counter
+// Total number of CPU threads
+static atomic_t<u64, 64> s_cpu_counter{0};
+
+// List of posted tasks for suspend_all
+static atomic_t<cpu_thread::suspend_work*> s_cpu_work[128]{};
+
+// Linked list of pushed tasks for suspend_all
+static atomic_t<cpu_thread::suspend_work*> s_pushed{};
+
+// Lock for suspend_all operations
+static shared_mutex s_cpu_lock;
+
+// Bit allocator for threads which need to be suspended
+static atomic_t<u128> s_cpu_bits{};
+
+// List of active threads which need to be suspended
+static atomic_t<cpu_thread*> s_cpu_list[128]{};
+
+namespace cpu_counter
 {
-	// For synchronizing suspend_all operation
-	alignas(64) shared_mutex cpu_suspend_lock;
-
-	// Workload linked list
-	alignas(64) atomic_t<cpu_thread::suspend_work*> cpu_suspend_work{};
-
-	// Semaphore for global thread array (global counter)
-	alignas(64) atomic_t<u32> cpu_array_sema{0};
-
-	// Semaphore subdivision for each array slot (64 x N in total)
-	alignas(64) atomic_t<u64> cpu_array_bits[3]{};
-
-	// Copy of array bits for internal use
-	alignas(64) u64 cpu_copy_bits[3]{};
-
-	// All registered threads
-	atomic_t<cpu_thread*> cpu_array[sizeof(cpu_array_bits) * 8]{};
-
-	u64 add(cpu_thread* _this, bool restore = false) noexcept
+	void add(cpu_thread* _this) noexcept
 	{
-		u64 array_slot = -1;
+		std::lock_guard lock(s_cpu_lock);
 
-		if (!restore && !cpu_array_sema.try_inc(sizeof(cpu_counter::cpu_array_bits) * 8))
-		{
-			sys_log.fatal("Too many threads.");
-			return array_slot;
-		}
+		u32 id = -1;
 
-		for (u32 i = 0;; i = (i + 1) % ::size32(cpu_array_bits))
+		for (u64 i = 0;; i++)
 		{
-			const auto [bits, ok] = cpu_array_bits[i].fetch_op([](u64& bits) -> u64
+			const auto [bits, ok] = s_cpu_bits.fetch_op([](u128& bits)
 			{
 				if (~bits) [[likely]]
 				{
@@ -292,95 +294,97 @@ struct cpu_counter
 			if (ok) [[likely]]
 			{
 				// Get actual slot number
-				array_slot = i * 64 + std::countr_one(bits);
+				id = utils::ctz128(~bits);
 
 				// Register thread
-				if (cpu_array[array_slot].compare_and_swap_test(nullptr, _this)) [[likely]]
+				if (s_cpu_list[id].compare_and_swap_test(nullptr, _this)) [[likely]]
 				{
 					break;
 				}
 
-				sys_log.fatal("Unexpected slot registration failure (%u).", array_slot);
-				cpu_array_bits[array_slot / 64] &= ~(1ull << (array_slot % 64));
+				sys_log.fatal("Unexpected slot registration failure (%u).", id);
+				id = -1;
 				continue;
 			}
+
+			if (i > 50)
+			{
+				sys_log.fatal("Too many threads.");
+				return;
+			}
+
+			busy_wait(300);
 		}
 
-		if (!restore)
-		{
-			// First time (thread created)
-			_this->state += cpu_flag::wait;
-			cpu_suspend_lock.lock_unlock();
-		}
-
-		return array_slot;
+		s_tls_thread_slot = id;
 	}
 
-	void remove(cpu_thread* _this, u64 slot) noexcept
+	static void remove_cpu_bit(u32 bit)
+	{
+		s_cpu_bits.atomic_op([=](u128& val)
+		{
+			val &= ~(u128{1} << (bit % 128));
+		});
+	}
+
+	void remove(cpu_thread* _this) noexcept
 	{
 		// Unregister and wait if necessary
-		_this->state += cpu_flag::wait;
+		verify(HERE), _this->state & cpu_flag::wait;
 
-		std::lock_guard lock(cpu_suspend_lock);
+		u32 slot = s_tls_thread_slot;
 
-		if (!cpu_array[slot].compare_and_swap_test(_this, nullptr))
+		if (slot >= std::size(s_cpu_list))
+		{
+			sys_log.fatal("Index out of bounds (%u)." HERE, slot);
+			return;
+		}
+
+		std::lock_guard lock(s_cpu_lock);
+
+		if (!s_cpu_list[slot].compare_and_swap_test(_this, nullptr))
 		{
 			sys_log.fatal("Inconsistency for array slot %u", slot);
 			return;
 		}
 
-		cpu_array_bits[slot / 64] &= ~(1ull << (slot % 64));
-		cpu_array_sema--;
+		remove_cpu_bit(slot);
+
+		s_tls_thread_slot = -1;
 	}
 
-	// Remove temporarily
-	void remove(cpu_thread* _this) noexcept
+	template <typename F>
+	u128 for_all_cpu(/*mutable*/ u128 copy, F func) noexcept
 	{
-		// Unregister temporarily (called from check_state)
-		const u64 index = s_tls_thread_slot;
-
-		if (index >= std::size(cpu_array))
+		for (u128 bits = copy; bits; bits &= bits - 1)
 		{
-			sys_log.fatal("Index out of bounds (%u).", index);
-			return;
-		}
+			const u32 index = utils::ctz128(bits);
 
-		if (cpu_array[index].load() == _this && cpu_array[index].compare_and_swap_test(_this, nullptr))
-		{
-			cpu_array_bits[index / 64] &= ~(1ull << (index % 64));
-			return;
-		}
-
-		sys_log.fatal("Thread not found in cpu_array (%s).", _this->get_name());
-	}
-};
-
-template <bool UseCopy = false, typename F>
-void for_all_cpu(F func) noexcept
-{
-	const auto ctr = g_fxo->get<cpu_counter>();
-
-	for (u32 i = 0; i < ::size32(ctr->cpu_array_bits); i++)
-	{
-		for (u64 bits = (UseCopy ? ctr->cpu_copy_bits[i] : ctr->cpu_array_bits[i].load()); bits; bits &= bits - 1)
-		{
-			const u64 index = i * 64 + std::countr_zero(bits);
-
-			if (cpu_thread* cpu = ctr->cpu_array[index].load())
+			if (cpu_thread* cpu = s_cpu_list[index].load())
 			{
-				if constexpr (std::is_invocable_v<F, cpu_thread*, u64>)
+				if constexpr (std::is_invocable_v<F, cpu_thread*, u32>)
 				{
-					func(cpu, index);
+					if (!func(cpu, index))
+						copy &= ~(u128{1} << index);
 					continue;
 				}
 
 				if constexpr (std::is_invocable_v<F, cpu_thread*>)
 				{
-					func(cpu);
+					if (!func(cpu))
+						copy &= ~(u128{1} << index);
 					continue;
 				}
+
+				sys_log.fatal("cpu_counter::for_all_cpu: bad callback");
+			}
+			else
+			{
+				copy &= ~(u128{1} << index);
 			}
 		}
+
+		return copy;
 	}
 }
 
@@ -412,7 +416,7 @@ void cpu_thread::operator()()
 		}
 	}
 
-	while (!g_fxo->get<cpu_counter>() && !g_fxo->get<cpu_profiler>())
+	while (!g_fxo->get<cpu_profiler>())
 	{
 		// Can we have a little race, right? First thread is started concurrently with g_fxo->init()
 		std::this_thread::sleep_for(1ms);
@@ -438,23 +442,55 @@ void cpu_thread::operator()()
 	}
 
 	// Register thread in g_cpu_array
-	s_tls_thread_slot = g_fxo->get<cpu_counter>()->add(this);
+	s_cpu_counter++;
 
-	if (s_tls_thread_slot == umax)
+	atomic_wait_engine::set_notify_callback([](const void*, u64 progress)
 	{
-		return;
-	}
+		static thread_local bool wait_set = false;
+
+		cpu_thread* _cpu = get_current_cpu_thread();
+
+		// Wait flag isn't set asynchronously so this should be thread-safe
+		if (progress == 0 && !(_cpu->state & cpu_flag::wait))
+		{
+			// Operation just started and syscall is imminent
+			_cpu->state += cpu_flag::wait + cpu_flag::temp;
+			wait_set = true;
+			return;
+		}
+
+		if (progress == umax && std::exchange(wait_set, false))
+		{
+			// Operation finished: need to clean wait flag
+			verify(HERE), !_cpu->check_state();
+			return;
+		}
+	});
+
+	g_tls_log_control = [](const char* fmt, u64 progress)
+	{
+		static thread_local bool wait_set = false;
+
+		cpu_thread* _cpu = get_current_cpu_thread();
+
+		if (progress == 0 && !(_cpu->state & cpu_flag::wait))
+		{
+			_cpu->state += cpu_flag::wait + cpu_flag::temp;
+			wait_set = true;
+			return;
+		}
+
+		if (progress == umax && std::exchange(wait_set, false))
+		{
+			verify(HERE), !_cpu->check_state();
+			return;
+		}
+	};
 
 	static thread_local struct thread_cleanup_t
 	{
-		cpu_thread* _this;
+		cpu_thread* _this = nullptr;
 		std::string name;
-
-		thread_cleanup_t(cpu_thread* _this)
-			: _this(_this)
-			, name(thread_ctrl::get_name())
-		{
-		}
 
 		void cleanup()
 		{
@@ -468,7 +504,18 @@ void cpu_thread::operator()()
 				ptr->compare_and_swap(_this, nullptr);
 			}
 
-			g_fxo->get<cpu_counter>()->remove(_this, s_tls_thread_slot);
+			atomic_wait_engine::set_notify_callback(nullptr);
+
+			g_tls_log_control = [](const char*, u64){};
+
+			if (s_tls_thread_slot != umax)
+			{
+				cpu_counter::remove(_this);
+			}
+
+			s_cpu_counter--;
+
+			g_tls_current_cpu_thread = nullptr;
 
 			_this = nullptr;
 		}
@@ -481,7 +528,10 @@ void cpu_thread::operator()()
 				cleanup();
 			}
 		}
-	} cleanup{this};
+	} cleanup;
+
+	cleanup._this = this;
+	cleanup.name = thread_ctrl::get_name();
 
 	// Check thread status
 	while (!(state & (cpu_flag::exit + cpu_flag::dbg_global_stop)) && thread_ctrl::state() != thread_state::aborting)
@@ -525,14 +575,9 @@ cpu_thread::cpu_thread(u32 id)
 
 bool cpu_thread::check_state() noexcept
 {
-	if (state & cpu_flag::dbg_pause)
-	{
-		g_fxo->get<gdb_server>()->pause_from(this);
-	}
-
 	bool cpu_sleep_called = false;
+	bool cpu_can_stop = true;
 	bool escape, retval;
-	u64 susp_ctr = -1;
 
 	while (true)
 	{
@@ -541,17 +586,41 @@ bool cpu_thread::check_state() noexcept
 		{
 			bool store = false;
 
-			// Easy way obtain suspend counter
-			if (flags & cpu_flag::pause && !(flags & cpu_flag::wait))
+			if (flags & cpu_flag::pause)
 			{
-				susp_ctr = g_suspend_counter;
+				// Save value before state is saved and cpu_flag::wait is observed
+				if (s_tls_sctr == umax)
+				{
+					u64 ctr = g_suspend_counter;
+
+					if (flags & cpu_flag::wait)
+					{
+						if ((ctr & 3) == 2)
+						{
+							s_tls_sctr = ctr;
+						}
+					}
+					else
+					{
+						s_tls_sctr = ctr;
+					}
+				}
 			}
 			else
 			{
-				susp_ctr = -1;
+				s_tls_sctr = -1;
 			}
 
-			if (flags & cpu_flag::signal)
+			if (flags & cpu_flag::temp) [[unlikely]]
+			{
+				// Sticky flag, indicates check_state() is not allowed to return true
+				flags -= cpu_flag::temp;
+				flags -= cpu_flag::wait;
+				cpu_can_stop = false;
+				store = true;
+			}
+
+			if (cpu_can_stop && flags & cpu_flag::signal)
 			{
 				flags -= cpu_flag::signal;
 				cpu_sleep_called = false;
@@ -561,8 +630,8 @@ bool cpu_thread::check_state() noexcept
 			// Atomically clean wait flag and escape
 			if (!(flags & (cpu_flag::exit + cpu_flag::dbg_global_stop + cpu_flag::ret + cpu_flag::stop)))
 			{
-				// Check pause flags which hold thread inside check_state
-				if (flags & (cpu_flag::pause + cpu_flag::suspend + cpu_flag::dbg_global_pause + cpu_flag::dbg_pause + cpu_flag::memory))
+				// Check pause flags which hold thread inside check_state (ignore suspend on cpu_flag::temp)
+				if (flags & (cpu_flag::pause + cpu_flag::dbg_global_pause + cpu_flag::dbg_pause + cpu_flag::memory + (cpu_can_stop ? cpu_flag::suspend : cpu_flag::pause)))
 				{
 					if (!(flags & cpu_flag::wait))
 					{
@@ -584,17 +653,18 @@ bool cpu_thread::check_state() noexcept
 			}
 			else
 			{
-				if (!(flags & cpu_flag::wait))
+				if (cpu_can_stop && !(flags & cpu_flag::wait))
 				{
 					flags += cpu_flag::wait;
 					store = true;
 				}
 
-				retval = true;
+				retval = cpu_can_stop;
 			}
 
-			if (flags & cpu_flag::dbg_step)
+			if (cpu_can_stop && flags & cpu_flag::dbg_step)
 			{
+				// Can't process dbg_step if we only paused temporarily
 				flags += cpu_flag::dbg_pause;
 				flags -= cpu_flag::dbg_step;
 				store = true;
@@ -606,17 +676,17 @@ bool cpu_thread::check_state() noexcept
 
 		if (escape)
 		{
-			if (s_tls_thread_slot == umax)
+			if (s_tls_thread_slot == umax && !retval)
 			{
 				// Restore thread in the suspend list
-				std::lock_guard lock(g_fxo->get<cpu_counter>()->cpu_suspend_lock);
-				s_tls_thread_slot = g_fxo->get<cpu_counter>()->add(this, true);
+				cpu_counter::add(this);
 			}
 
+			verify(HERE), cpu_can_stop || !retval;
 			return retval;
 		}
 
-		if (!cpu_sleep_called && state0 & cpu_flag::suspend)
+		if (cpu_can_stop && !cpu_sleep_called && state0 & cpu_flag::suspend)
 		{
 			cpu_sleep();
 			cpu_sleep_called = true;
@@ -624,16 +694,19 @@ bool cpu_thread::check_state() noexcept
 			if (s_tls_thread_slot != umax)
 			{
 				// Exclude inactive threads from the suspend list (optimization)
-				std::lock_guard lock(g_fxo->get<cpu_counter>()->cpu_suspend_lock);
-				g_fxo->get<cpu_counter>()->remove(this);
-				s_tls_thread_slot = -1;
+				cpu_counter::remove(this);
 			}
 
 			continue;
 		}
 
-		if (state0 & (cpu_flag::suspend + cpu_flag::dbg_global_pause + cpu_flag::dbg_pause))
+		if (state0 & ((cpu_can_stop ? cpu_flag::suspend : cpu_flag::dbg_pause) + cpu_flag::dbg_global_pause + cpu_flag::dbg_pause))
 		{
+			if (state0 & cpu_flag::dbg_pause)
+			{
+				g_fxo->get<gdb_server>()->pause_from(this);
+			}
+
 			thread_ctrl::wait();
 		}
 		else
@@ -647,17 +720,27 @@ bool cpu_thread::check_state() noexcept
 			// If only cpu_flag::pause was set, wait on suspend counter instead
 			if (state0 & cpu_flag::pause)
 			{
-				// Hard way
-				if (susp_ctr == umax)
-				{
-					g_fxo->get<cpu_counter>()->cpu_suspend_lock.lock_unlock();
-					continue;
-				}
-
 				// Wait for current suspend_all operation
-				while (busy_wait(), g_suspend_counter == susp_ctr)
+				for (u64 i = 0;; i++)
 				{
-					g_suspend_counter.wait(susp_ctr);
+					u64 ctr = g_suspend_counter;
+
+					if (ctr >> 2 == s_tls_sctr >> 2)
+					{
+						if (i < 20 || ctr & 1)
+						{
+							busy_wait(300);
+						}
+						else
+						{
+							g_suspend_counter.wait(ctr, -4);
+						}
+					}
+					else
+					{
+						s_tls_sctr = -1;
+						break;
+					}
 				}
 			}
 		}
@@ -740,24 +823,15 @@ std::string cpu_thread::dump_misc() const
 	return fmt::format("Type: %s\n" "State: %s\n", typeid(*this).name(), state.load());
 }
 
-bool cpu_thread::suspend_work::push(cpu_thread* _this, bool cancel_if_not_suspended) noexcept
+bool cpu_thread::suspend_work::push(cpu_thread* _this) noexcept
 {
 	// Can't allow pre-set wait bit (it'd be a problem)
 	verify(HERE), !_this || !(_this->state & cpu_flag::wait);
 
-	// Value must be reliable because cpu_flag::wait hasn't been observed only (but not if pause is set)
-	const u64 susp_ctr = g_suspend_counter;
-
-	// cpu_counter object
-	const auto ctr = g_fxo->get<cpu_counter>();
-
-	// Try to push workload
-	auto& queue = ctr->cpu_suspend_work;
-
 	do
 	{
 		// Load current head
-		next = queue.load();
+		next = s_pushed.load();
 
 		if (!next && cancel_if_not_suspended) [[unlikely]]
 		{
@@ -768,11 +842,11 @@ bool cpu_thread::suspend_work::push(cpu_thread* _this, bool cancel_if_not_suspen
 		if (!_this && next)
 		{
 			// If _this == nullptr, it only works if this is the first workload pushed
-			ctr->cpu_suspend_lock.lock_unlock();
+			s_cpu_lock.lock_unlock();
 			continue;
 		}
 	}
-	while (!queue.compare_and_swap_test(next, this));
+	while (!s_pushed.compare_and_swap_test(next, this));
 
 	if (!next)
 	{
@@ -780,56 +854,68 @@ bool cpu_thread::suspend_work::push(cpu_thread* _this, bool cancel_if_not_suspen
 		perf_meter<"SUSPEND"_u64> perf0;
 
 		// First thread to push the work to the workload list pauses all threads and processes it
-		std::lock_guard lock(ctr->cpu_suspend_lock);
+		std::lock_guard lock(s_cpu_lock);
+
+		u128 copy = s_cpu_bits.load();
 
 		// Try to prefetch cpu->state earlier
-		for_all_cpu([&](cpu_thread* cpu)
+		copy = cpu_counter::for_all_cpu(copy, [&](cpu_thread* cpu)
 		{
 			if (cpu != _this)
 			{
 				_m_prefetchw(&cpu->state);
+				return true;
 			}
+
+			return false;
 		});
 
-		// Copy of thread bits
-		decltype(ctr->cpu_copy_bits) copy2{};
+		// Initialization (first increment)
+		g_suspend_counter += 2;
 
-		for (u32 i = 0; i < ::size32(ctr->cpu_copy_bits); i++)
-		{
-			copy2[i] = ctr->cpu_copy_bits[i] = ctr->cpu_array_bits[i].load();
-		}
+		// Copy snapshot for finalization
+		u128 copy2 = copy;
 
-		for_all_cpu([&](cpu_thread* cpu, u64 index)
+		copy = cpu_counter::for_all_cpu(copy, [&](cpu_thread* cpu, u32 index)
 		{
-			if (cpu == _this || cpu->state.fetch_add(cpu_flag::pause) & cpu_flag::wait)
+			if (cpu->state.fetch_add(cpu_flag::pause) & cpu_flag::wait)
 			{
 				// Clear bits as long as wait flag is set
-				ctr->cpu_copy_bits[index / 64] &= ~(1ull << (index % 64));
+				return false;
 			}
 
-			if (cpu == _this)
-			{
-				copy2[index / 64] &= ~(1ull << (index % 64));
-			}
+			return true;
 		});
 
-		while (std::accumulate(std::begin(ctr->cpu_copy_bits), std::end(ctr->cpu_copy_bits), u64{0}, std::bit_or()))
+		while (copy)
 		{
 			// Check only CPUs which haven't acknowledged their waiting state yet
-			for_all_cpu<true>([&](cpu_thread* cpu, u64 index)
+			copy = cpu_counter::for_all_cpu(copy, [&](cpu_thread* cpu, u32 index)
 			{
 				if (cpu->state & cpu_flag::wait)
 				{
-					ctr->cpu_copy_bits[index / 64] &= ~(1ull << (index % 64));
+					return false;
 				}
+
+				return true;
 			});
+
+			if (!copy)
+			{
+				break;
+			}
+
+			_mm_pause();
 		}
 
-		// Extract queue and reverse element order (FILO to FIFO) (TODO: maybe leave order as is?)
-		auto* head = queue.exchange(nullptr);
+		// Second increment: all threads paused
+		g_suspend_counter++;
 
-		s8 min_prio = head->prio;
-		s8 max_prio = head->prio;
+		// Extract queue and reverse element order (FILO to FIFO) (TODO: maybe leave order as is?)
+		auto* head = s_pushed.exchange(nullptr);
+
+		u8 min_prio = head->prio;
+		u8 max_prio = head->prio;
 
 		if (auto* prev = head->next)
 		{
@@ -843,18 +929,26 @@ bool cpu_thread::suspend_work::push(cpu_thread* _this, bool cancel_if_not_suspen
 				head = std::exchange(prev, pre2);
 
 				// Fill priority range
-				min_prio = std::min<s8>(min_prio, head->prio);
-				max_prio = std::max<s8>(max_prio, head->prio);
+				min_prio = std::min<u8>(min_prio, head->prio);
+				max_prio = std::max<u8>(max_prio, head->prio);
 			}
 			while (prev);
 		}
 
-		for_all_cpu<true>([&](cpu_thread* cpu)
+		// Execute prefetch hint(s)
+		for (auto work = head; work; work = work->next)
+		{
+			for (u32 i = 0; i < work->prf_size; i++)
+			{
+				_m_prefetchw(work->prf_list[0]);
+			}
+		}
+
+		cpu_counter::for_all_cpu(copy2, [&](cpu_thread* cpu)
 		{
 			_m_prefetchw(&cpu->state);
+			return true;
 		});
-
-		_m_prefetchw(&g_suspend_counter);
 
 		// Execute all stored workload
 		for (s32 prio = max_prio; prio >= min_prio; prio--)
@@ -870,29 +964,22 @@ bool cpu_thread::suspend_work::push(cpu_thread* _this, bool cancel_if_not_suspen
 			}
 		}
 
-		// Finalization
-		g_suspend_counter++;
+		// Finalization (last increment)
+		verify(HERE), g_suspend_counter++ & 1;
 
-		// Exact bitset for flag pause removal
-		std::memcpy(ctr->cpu_copy_bits, copy2, sizeof(copy2));
-
-		for_all_cpu<true>([&](cpu_thread* cpu)
+		cpu_counter::for_all_cpu(copy2, [&](cpu_thread* cpu)
 		{
 			cpu->state -= cpu_flag::pause;
+			return true;
 		});
 	}
 	else
 	{
 		// Seems safe to set pause on self because wait flag hasn't been observed yet
-		_this->state += cpu_flag::pause + cpu_flag::wait;
-
-		// Subscribe for notification broadcast
-		while (busy_wait(), g_suspend_counter == susp_ctr)
-		{
-			g_suspend_counter.wait(susp_ctr);
-		}
-
+		s_tls_sctr = g_suspend_counter;
+		_this->state += cpu_flag::pause + cpu_flag::wait + cpu_flag::temp;
 		_this->check_state();
+		s_tls_sctr = -1;
 		return true;
 	}
 
@@ -910,8 +997,6 @@ void cpu_thread::stop_all() noexcept
 	}
 	else
 	{
-		std::lock_guard lock(g_fxo->get<cpu_counter>()->cpu_suspend_lock);
-
 		auto on_stop = [](u32, cpu_thread& cpu)
 		{
 			cpu.state += cpu_flag::dbg_global_stop;
@@ -924,14 +1009,12 @@ void cpu_thread::stop_all() noexcept
 
 	sys_log.notice("All CPU threads have been signaled.");
 
-	while (g_fxo->get<cpu_counter>()->cpu_array_sema)
+	while (s_cpu_counter)
 	{
-		std::this_thread::sleep_for(10ms);
+		std::this_thread::sleep_for(1ms);
 	}
 
 	sys_log.notice("All CPU threads have been stopped. [+: %u]", +g_threads_created);
-
-	std::lock_guard lock(g_fxo->get<cpu_counter>()->cpu_suspend_lock);
 
 	g_threads_deleted -= g_threads_created.load();
 	g_threads_created = 0;

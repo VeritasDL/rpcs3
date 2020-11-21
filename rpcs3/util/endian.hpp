@@ -1,4 +1,5 @@
-﻿#pragma once
+﻿#ifndef ENDIAN_HPP_GUARD
+#define ENDIAN_HPP_GUARD
 
 #include <cstdint>
 #include "Utilities/types.h"
@@ -13,19 +14,19 @@ namespace stx
 {
 	static_assert(std::endian::native == std::endian::little || std::endian::native == std::endian::big);
 
+#ifdef _MSC_VER
 	template<class T, std::size_t... N>
-	constexpr T bswap_impl(T i, std::index_sequence<N...>)
+	static constexpr T bswap_impl(T i, std::index_sequence<N...>)
 	{
-		return static_cast<T>(((((i >> (N * 8)) & T{UINT8_MAX}) <<
-				((sizeof(T) - 1 - N) * 8)) | ...));
+		return static_cast<T>(((((i >> (N * 8)) & T{UINT8_MAX}) << ((sizeof(T) - 1 - N) * 8)) | ...));
 	};
 
 	template<class T, class U = typename std::make_unsigned<T>::type>
-	constexpr U bswap(T i)
+	static constexpr U bswap(T i)
 	{
 		return bswap_impl<U>(i, std::make_index_sequence<sizeof(T)>{});
 	}
-
+#endif
 
 	template <typename T, std::size_t Align = alignof(T), std::size_t Size = sizeof(T)>
 	struct se_storage
@@ -53,14 +54,14 @@ namespace stx
 
 		static constexpr std::uint16_t swap(std::uint16_t src) noexcept
 		{
+#if defined(__GNUG__)
+			return __builtin_bswap16(src);
+#else
 			if (std::is_constant_evaluated())
 			{
 				return stx::bswap(src);
 			}
 
-#if defined(__GNUG__)
-			return __builtin_bswap16(src);
-#else
 			return _byteswap_ushort(src);
 #endif
 		}
@@ -73,14 +74,14 @@ namespace stx
 
 		static constexpr std::uint32_t swap(std::uint32_t src) noexcept
 		{
+#if defined(__GNUG__)
+			return __builtin_bswap32(src);
+#else
 			if (std::is_constant_evaluated())
 			{
 				return stx::bswap(src);
 			}
 
-#if defined(__GNUG__)
-			return __builtin_bswap32(src);
-#else
 			return _byteswap_ulong(src);
 #endif
 		}
@@ -93,14 +94,14 @@ namespace stx
 
 		static constexpr std::uint64_t swap(std::uint64_t src) noexcept
 		{
+#if defined(__GNUG__)
+			return __builtin_bswap64(src);
+#else
 			if (std::is_constant_evaluated())
 			{
 				return stx::bswap(src);
 			}
 
-#if defined(__GNUG__)
-			return __builtin_bswap64(src);
-#else
 			return _byteswap_uint64(src);
 #endif
 		}
@@ -491,3 +492,5 @@ public:
 		}
 	};
 }
+
+#endif // ENDIAN_HPP_GUARD

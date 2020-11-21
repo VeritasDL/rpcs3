@@ -1,12 +1,12 @@
 ﻿#include "stdafx.h"
 #include "Emu/Cell/PPUModule.h"
 
-#include "Utilities/VirtualMemory.h"
 #include "Utilities/bin_patch.h"
 #include "Utilities/StrUtil.h"
 #include "Crypto/sha1.h"
 #include "Crypto/unself.h"
 #include "Loader/ELF.h"
+#include "Emu/System.h"
 #include "Emu/VFS.h"
 
 #include "Emu/Cell/PPUOpcodes.h"
@@ -25,7 +25,6 @@
 
 LOG_CHANNEL(ppu_loader);
 
-extern void ppu_initialize_syscalls();
 extern std::string ppu_get_function_name(const std::string& _module, u32 fnid);
 extern std::string ppu_get_variable_name(const std::string& _module, u32 vnid);
 extern void ppu_register_range(u32 addr, u32 size);
@@ -130,8 +129,6 @@ static void ppu_initialize_modules(ppu_linkage_info* link)
 	{
 		return;
 	}
-
-	ppu_initialize_syscalls();
 
 	const std::initializer_list<const ppu_static_module*> registered
 	{
@@ -749,7 +746,7 @@ static void ppu_check_patch_spu_images(const ppu_segment& seg)
 				if (!name.empty())
 				{
 					fmt::append(dump, "\n\tSPUNAME: '%s'", name);
-				}	
+				}
 			}
 		}
 

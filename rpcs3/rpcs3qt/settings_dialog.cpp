@@ -342,16 +342,22 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 			}
 		}
 	}
-	const int res_index = ui->resBox->findData("1280x720");
-	if (res_index >= 0)
+	for (int i = 0; i < ui->resBox->count(); i++)
 	{
-		// Rename the default resolution for users
-		ui->resBox->setItemText(res_index, tr("1280x720 (Recommended)", "Resolution"));
+		const QVariantList var_list = ui->resBox->itemData(i).toList();
+		ASSERT(var_list.size() == 2 && var_list[0].canConvert<QString>());
 
-		// Set the current selection to the default if the original setting wasn't valid
-		if (saved_index_removed)
+		if (var_list[0].toString() == "1280x720")
 		{
-			ui->resBox->setCurrentIndex(res_index);
+			// Rename the default resolution for users
+			ui->resBox->setItemText(i, tr("1280x720 (Recommended)", "Resolution"));
+
+			// Set the current selection to the default if the original setting wasn't valid
+			if (saved_index_removed)
+			{
+				ui->resBox->setCurrentIndex(i);
+			}
+			break;
 		}
 	}
 
@@ -386,6 +392,11 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 		}
 	}
 
+	// Comboboxes
+	m_emu_settings->EnhanceComboBox(ui->shaderCompilerThreads, emu_settings_type::ShaderCompilerNumThreads, true);
+	SubscribeTooltip(ui->gb_shader_compiler_threads, tooltips.settings.shader_compiler_threads);
+	ui->shaderCompilerThreads->setItemText(ui->shaderCompilerThreads->findData(0), tr("Auto", "Number of Shader Compiler Threads"));
+
 	// Checkboxes: main options
 	m_emu_settings->EnhanceCheckBox(ui->dumpColor, emu_settings_type::WriteColorBuffers);
 	SubscribeTooltip(ui->dumpColor, tooltips.settings.dump_color);
@@ -418,7 +429,7 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	connect(ui->strictModeRendering, &QCheckBox::clicked, this, onStrictRenderingMode);
 
 	// Radio buttons
-	
+
 	SubscribeTooltip(ui->rb_legacy_recompiler, tooltips.settings.legacy_shader_recompiler);
 	SubscribeTooltip(ui->rb_async_recompiler, tooltips.settings.async_shader_recompiler);
 	SubscribeTooltip(ui->rb_async_with_shader_interpreter, tooltips.settings.async_with_shader_interpreter);
@@ -834,6 +845,9 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 
 	m_emu_settings->EnhanceComboBox(ui->sysLangBox, emu_settings_type::Language, false, false, 0, true);
 	SubscribeTooltip(ui->gb_sysLang, tooltips.settings.system_language);
+
+	m_emu_settings->EnhanceComboBox(ui->console_region, emu_settings_type::LicenseArea, false, false, 0, true);
+	SubscribeTooltip(ui->gb_console_region, tooltips.settings.license_area);
 
 	m_emu_settings->EnhanceComboBox(ui->keyboardType, emu_settings_type::KeyboardType, false, false, 0, true);
 	SubscribeTooltip(ui->gb_keyboardType, tooltips.settings.keyboard_type);
@@ -1742,6 +1756,9 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 
 	m_emu_settings->EnhanceCheckBox(ui->hookStFunc, emu_settings_type::HookStaticFuncs);
 	SubscribeTooltip(ui->hookStFunc, tooltips.settings.hook_static_functions);
+
+	m_emu_settings->EnhanceCheckBox(ui->perfReport, emu_settings_type::PerformanceReport);
+	SubscribeTooltip(ui->perfReport, tooltips.settings.enable_performance_report);
 
 	// Comboboxes
 

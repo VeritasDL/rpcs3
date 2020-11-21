@@ -11,16 +11,21 @@ namespace gl
 	capabilities g_driver_caps;
 	const fbo screen{};
 
-	thread_local bool tls_primary_context_thread = false;
+	static thread_local bool s_tls_primary_context_thread = false;
 
-	void set_primary_context_thread()
+	void set_primary_context_thread(bool value)
 	{
-		tls_primary_context_thread = true;
+		s_tls_primary_context_thread = value;
 	}
 
 	bool is_primary_context_thread()
 	{
-		return tls_primary_context_thread;
+		return s_tls_primary_context_thread;
+	}
+
+	void flush_command_queue(fence& fence_obj)
+	{
+		fence_obj.check_signaled();
 	}
 
 	GLenum draw_mode(rsx::primitive_type in)

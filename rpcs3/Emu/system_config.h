@@ -4,6 +4,7 @@
 #include "Utilities/Config.h"
 
 enum CellNetCtlState : s32;
+enum CellSysutilLicenseArea : s32;
 enum CellSysutilLang : s32;
 enum CellKbMappingType : s32;
 
@@ -65,6 +66,8 @@ struct cfg_root : cfg::node
 		cfg::_bool hle_lwmutex{ this, "HLE lwmutex" }; // Force alternative lwmutex/lwcond implementation
 		cfg::uint64 spu_llvm_lower_bound{ this, "SPU LLVM Lower Bound" };
 		cfg::uint64 spu_llvm_upper_bound{ this, "SPU LLVM Upper Bound", 0xffffffffffffffff };
+		cfg::uint64 tx_limit1_ns{this, "TSX Transaction First Limit", 800}; // In nanoseconds
+		cfg::uint64 tx_limit2_ns{this, "TSX Transaction Second Limit", 2000}; // In nanoseconds
 
 		cfg::_int<10, 3000> clocks_scale{ this, "Clocks scale", 100, true }; // Changing this from 100 (percentage) may affect game speed in unexpected ways
 		cfg::_enum<sleep_timers_accuracy_level> sleep_timers_accuracy{ this, "Sleep Timers Accuracy",
@@ -149,6 +152,7 @@ struct cfg_root : cfg::node
 		cfg::_int<50, 800> resolution_scale_percent{ this, "Resolution Scale", 100 };
 		cfg::_int<0, 16> anisotropic_level_override{ this, "Anisotropic Filter Override", 0, true };
 		cfg::_int<1, 1024> min_scalable_dimension{ this, "Minimum Scalable Dimension", 16 };
+		cfg::_int<0, 16> shader_compiler_threads_count{ this, "Shader Compiler Threads", 0 };
 		cfg::_int<0, 30000000> driver_recovery_timeout{ this, "Driver Recovery Timeout", 1000000, true };
 		cfg::_int<0, 16667> driver_wakeup_delay{ this, "Driver Wake-Up Delay", 1, true };
 		cfg::_int<1, 1800> vblank_rate{ this, "Vblank Rate", 60, true }; // Changing this from 60 may affect game speed in unexpected ways
@@ -251,6 +255,7 @@ struct cfg_root : cfg::node
 	{
 		node_sys(cfg::node* _this) : cfg::node(_this, "System") {}
 
+		cfg::_enum<CellSysutilLicenseArea> license_area{ this, "License Area", CellSysutilLicenseArea{1} }; // CELL_SYSUTIL_LICENSE_AREA_A
 		cfg::_enum<CellSysutilLang> language{ this, "Language", CellSysutilLang{1} }; // CELL_SYSUTIL_LANG_ENGLISH_US
 		cfg::_enum<CellKbMappingType> keyboard_type{ this, "Keyboard Type", CellKbMappingType{0} }; // CELL_KB_MAPPING_101 = US
 		cfg::_enum<enter_button_assign> enter_button_assignment{ this, "Enter button assignment", enter_button_assign::cross };

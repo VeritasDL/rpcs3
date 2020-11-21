@@ -74,8 +74,6 @@ public:
 	virtual std::string dump_misc() const override;
 	virtual void cpu_task() override final;
 	virtual void cpu_sleep() override;
-	virtual void cpu_mem() override;
-	virtual void cpu_unmem() override;
 	virtual ~ppu_thread() override;
 
 	ppu_thread(const ppu_thread_params&, std::string_view name, u32 prio, int detached = 0);
@@ -218,6 +216,12 @@ public:
 
 	// Thread name
 	stx::atomic_cptr<std::string> ppu_tname;
+
+	u64 last_ftsc = 0;
+	u64 last_ftime = 0;
+	u32 last_faddr = 0;
+	u64 last_fail = 0;
+	u64 last_succ = 0;
 
 	be_t<u64>* get_stack_arg(s32 i, u64 align = alignof(u64));
 	void exec_task();

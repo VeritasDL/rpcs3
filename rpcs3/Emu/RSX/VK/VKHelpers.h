@@ -1,7 +1,6 @@
 ﻿#pragma once
 
 #include "stdafx.h"
-#include <exception>
 #include <string>
 #include <functional>
 #include <vector>
@@ -15,12 +14,13 @@
 #include <X11/Xutil.h>
 #endif
 
-#include "Emu/RSX/GSRender.h"
 #include "VulkanAPI.h"
 #include "VKCommonDecompiler.h"
 #include "../GCM.h"
 #include "../Common/ring_buffer_helper.h"
 #include "../Common/TextureUtils.h"
+#include "../display.h"
+#include "../rsx_utils.h"
 
 #include "3rdparty/GPUOpen/include/vk_mem_alloc.h"
 
@@ -706,7 +706,7 @@ private:
 			vkGetPhysicalDeviceMemoryProperties(pdev, &memory_properties);
 			get_physical_device_features(allow_extensions);
 
-			rsx_log.notice("Found vulkan-compatible GPU: '%s' running on driver %s", get_name(), get_driver_version());
+			rsx_log.always("Found vulkan-compatible GPU: '%s' running on driver %s", get_name(), get_driver_version());
 
 			if (get_driver_vendor() == driver_vendor::RADV &&
 				get_name().find("LLVM 8.0.0") != umax)
@@ -714,6 +714,22 @@ private:
 				// Serious driver bug causing black screens
 				// See https://bugs.freedesktop.org/show_bug.cgi?id=110970
 				rsx_log.fatal("RADV drivers have a major driver bug with LLVM 8.0.0 resulting in no visual output. Upgrade to LLVM version 8.0.1 or greater to avoid this issue.");
+			}
+			else if (get_driver_vendor() == driver_vendor::NVIDIA)
+			{
+#ifdef _WIN32
+				// SPIRV bugs were fixed in 452.28 for windows
+				const u32 threshold_version = (452u >> 22) | (28 >> 14);
+#else
+				// SPIRV bugs were fixed in 450.56 for linux/BSD
+				const u32 threshold_version = (450u >> 22) | (56 >> 14);
+#endif
+				const auto current_version = props.driverVersion & ~0x3fffu; // Clear patch and revision fields
+				if (current_version < threshold_version)
+				{
+					rsx_log.error("Your current NVIDIA graphics driver version %s has known issues and is unsupported. Update to the latest NVIDIA driver.",
+						get_driver_version());
+				}
 			}
 
 			if (get_chip_class() == chip_class::AMD_vega)
@@ -738,7 +754,7 @@ private:
 					return driver_vendor::AMD;
 				}
 
-				if (gpu_name.find("NVIDIA") != umax || gpu_name.find("GeForce") != umax)
+				if (gpu_name.find("NVIDIA") != umax || gpu_name.find("GeForce") != umax || gpu_name.find("Quadro") != umax)
 				{
 					return driver_vendor::NVIDIA;
 				}
@@ -2861,7 +2877,7 @@ public:
 #endif
 		bool createInstance(const char *app_name, bool fast = false)
 		{
-			//Initialize a vulkan instance
+			// Initialize a vulkan instance
 			VkApplicationInfo app = {};
 
 			app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -2871,7 +2887,7 @@ public:
 			app.engineVersion = 0;
 			app.apiVersion = VK_API_VERSION_1_0;
 
-			//Set up instance information
+			// Set up instance information
 
 			std::vector<const char *> extensions;
 			std::vector<const char *> layers;

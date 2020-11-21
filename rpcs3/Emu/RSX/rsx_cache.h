@@ -1,5 +1,4 @@
 ﻿#pragma once
-#include "Utilities/VirtualMemory.h"
 #include "Utilities/hash.h"
 #include "Utilities/File.h"
 #include "Utilities/lockless.h"
@@ -14,6 +13,9 @@
 #include "rsx_utils.h"
 #include <thread>
 #include <chrono>
+
+
+#include "util/vm.hpp"
 
 namespace rsx
 {
@@ -643,7 +645,7 @@ namespace rsx
 
 			if (!fs::is_file(fp_name))
 			{
-				fs::file(fp_name, fs::rewrite).write(fp.addr, fp.ucode_length);
+				fs::file(fp_name, fs::rewrite).write(fp.get_data(), fp.ucode_length);
 			}
 
 			if (!fs::is_file(vp_name))
@@ -698,7 +700,7 @@ namespace rsx
 			{
 				std::lock_guard<std::mutex> lock(fpd_mutex);
 				fragment_program_data[program_hash] = data;
-				fp.addr                             = fragment_program_data[program_hash].data();
+				fp.data = fragment_program_data[program_hash].data();
 			}
 			fp.ucode_length = ::size32(data);
 

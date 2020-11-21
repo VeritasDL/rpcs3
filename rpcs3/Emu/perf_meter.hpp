@@ -31,6 +31,12 @@ protected:
 	// Accumulate values from a thread
 	void push(u64 ns[66]) noexcept;
 
+	// Register TLS storage for stats
+	static void add(u64 ns[66], const char* name) noexcept;
+
+	// Unregister TLS storage and drain its data
+	static void remove(u64 ns[66], const char* name) noexcept;
+
 public:
 	perf_stat_base() noexcept = default;
 
@@ -39,6 +45,9 @@ public:
 	perf_stat_base& operator =(const perf_stat_base&) = delete;
 
 	~perf_stat_base() {}
+
+	// Collect all data, report it, and clean
+	static void report() noexcept;
 };
 
 // Object that prints event length stats at the end
@@ -50,26 +59,20 @@ class perf_stat final : public perf_stat_base
 		// Local non-atomic values for increments
 		u64 m_log[66]{};
 
+		perf_stat_local() noexcept
+		{
+			perf_stat_base::add(m_log, perf_name<ShortName>.data());
+		}
+
 		~perf_stat_local()
 		{
-			// Update on thread exit
-			if (m_log[0])
-			{
-				if (auto* pfs = g_fxo->get<perf_stat>())
-				{
-					pfs->perf_stat_base::push(m_log);
-				}
-			}
+			perf_stat_base::remove(m_log, perf_name<ShortName>.data());
 		}
+
 	} g_tls_perf_stat;
 
 public:
-	~perf_stat()
-	{
-		perf_stat_base::print(perf_name<ShortName>.data());
-	}
-
-	void push(u64 ns) noexcept
+	static void push(u64 ns) noexcept
 	{
 		auto& data = g_tls_perf_stat.m_log;
 		data[0] += ns != 0;
@@ -83,18 +86,17 @@ template <auto ShortName, auto... SubEvents>
 class perf_meter
 {
 	// Initialize array (possibly only 1 element) with timestamp
-	u64 m_timestamps[1 + sizeof...(SubEvents)] = {__rdtsc()};
+	u64 m_timestamps[1 + sizeof...(SubEvents)];
 
 public:
-	SAFE_BUFFERS perf_meter() noexcept
+	SAFE_BUFFERS FORCE_INLINE perf_meter() noexcept
 	{
-		m_timestamps[0] = __rdtsc();
-		std::memset(m_timestamps + 1, 0, sizeof(m_timestamps) - sizeof(u64));
+		restart();
 	}
 
 	// Copy first timestamp
 	template <auto SN, auto... S>
-	SAFE_BUFFERS perf_meter(const perf_meter<SN, S...>& r) noexcept
+	SAFE_BUFFERS FORCE_INLINE perf_meter(const perf_meter<SN, S...>& r) noexcept
 	{
 		m_timestamps[0] = r.get();
 		std::memset(m_timestamps + 1, 0, sizeof(m_timestamps) - sizeof(u64));
@@ -147,9 +149,16 @@ public:
 	}
 
 	// Disable this counter
-	SAFE_BUFFERS void reset() noexcept
+	SAFE_BUFFERS FORCE_INLINE void reset() noexcept
 	{
 		m_timestamps[0] = 0;
+	}
+
+	// Re-initialize first timestamp
+	SAFE_BUFFERS FORCE_INLINE void restart() noexcept
+	{
+		m_timestamps[0] = __rdtsc();
+		std::memset(m_timestamps + 1, 0, sizeof(m_timestamps) - sizeof(u64));
 	}
 
 	SAFE_BUFFERS ~perf_meter()
@@ -172,12 +181,12 @@ public:
 		const f64 diff = (end_time - m_timestamps[0]) * 1. / utils::get_tsc_freq();
 
 		// Register perf stat in nanoseconds
-		g_fxo->get<perf_stat<ShortName>>()->push(static_cast<u64>(diff * 1000'000'000.));
+		perf_stat<ShortName>::push(static_cast<u64>(diff * 1000'000'000.));
 
 		// Print in microseconds
 		if (static_cast<u64>(diff * 1000'000.) >= g_cfg.core.perf_report_threshold)
 		{
-			perf_log.notice("%s: %.3fµs", perf_name<ShortName>.data(), diff * 1000'000.);
+			perf_log.notice(u8"%s: %.3fµs", perf_name<ShortName>.data(), diff * 1000'000.);
 		}
 
 		// TODO: handle push(), currently ignored

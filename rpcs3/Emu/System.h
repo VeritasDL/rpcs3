@@ -30,6 +30,7 @@ enum class game_boot_result : u32
 	decryption_error,
 	file_creation_error,
 	firmware_missing,
+	unsupported_disc_type
 };
 
 struct EmuCallbacks
@@ -240,3 +241,5 @@ private:
 extern Emulator Emu;
 
 extern bool g_use_rtm;
+extern u64 g_rtm_tx_limit1;
+extern u64 g_rtm_tx_limit2;

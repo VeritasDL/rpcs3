@@ -19,7 +19,7 @@
 #include "Utilities/sema.h"
 #ifdef _WIN32
 #include <windows.h>
-#include "Utilities/dynamic_library.h"
+#include "util/dyn_lib.hpp"
 DYNAMIC_IMPORT("ntdll.dll", NtQueryTimerResolution, NTSTATUS(PULONG MinimumResolution, PULONG MaximumResolution, PULONG CurrentResolution));
 DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResolution, BOOLEAN SetResolution, PULONG CurrentResolution));
 #else
@@ -62,6 +62,7 @@ extern char **environ;
 #endif
 
 LOG_CHANNEL(sys_log, "SYS");
+LOG_CHANNEL(q_debug, "QDEBUG");
 
 [[noreturn]] extern void report_fatal_error(const std::string& text)
 {
@@ -178,6 +179,7 @@ const char* arg_styles     = "styles";
 const char* arg_style      = "style";
 const char* arg_stylesheet = "stylesheet";
 const char* arg_config     = "config";
+const char* arg_q_debug    = "qDebug";
 const char* arg_error      = "error";
 const char* arg_updating   = "updating";
 const char* arg_decrypt    = "decrypt"; //RTC_Hijack: add decrypt command line arg
@@ -278,6 +280,20 @@ QCoreApplication* createApplication(int& argc, char* argv[])
 	return new gui_application(argc, argv);
 }
 
+void log_q_debug(QtMsgType type, const QMessageLogContext& context, const QString& msg)
+{
+	Q_UNUSED(context);
+
+	switch (type)
+	{
+	case QtDebugMsg: q_debug.trace("%s", msg.toStdString()); break;
+	case QtInfoMsg: q_debug.notice("%s", msg.toStdString()); break;
+	case QtWarningMsg: q_debug.warning("%s", msg.toStdString()); break;
+	case QtCriticalMsg: q_debug.error("%s", msg.toStdString()); break;
+	case QtFatalMsg: q_debug.fatal("%s", msg.toStdString()); break;
+	}
+}
+
 
 
 int main(int argc, char** argv)
@@ -285,6 +301,7 @@ int main(int argc, char** argv)
 #ifdef _WIN32
 	ULONG64 intro_cycles{};
 	QueryThreadCycleTime(GetCurrentThread(), &intro_cycles);
+	SetProcessWorkingSetSize(GetCurrentProcess(), 0x60000000, 0x80000000); // 2GiB
 #elif defined(RUSAGE_THREAD)
 	struct ::rusage intro_stats{};
 	::getrusage(RUSAGE_THREAD, &intro_stats);
@@ -381,11 +398,18 @@ int main(int argc, char** argv)
 		// Write OS version
 		logs::stored_message os;
 		os.m.ch  = nullptr;
-		os.m.sev = logs::level::notice;
+		os.m.sev = logs::level::always;
 		os.stamp = 0;
-		os.text = utils::get_OS_version();
+		os.text  = utils::get_OS_version();
 
-		logs::set_init({std::move(ver), std::move(os)});
+		// Write Qt version
+		logs::stored_message qt;
+		qt.m.ch  = nullptr;
+		qt.m.sev = (strcmp(QT_VERSION_STR, qVersion()) != 0) ? logs::level::error : logs::level::notice;
+		qt.stamp = 0;
+		qt.text  = fmt::format("Qt version: Compiled against Qt %s | Run-time uses Qt %s", QT_VERSION_STR, qVersion());
+
+		logs::set_init({std::move(ver), std::move(os), std::move(qt)});
 	}
 
 #ifdef _WIN32
@@ -398,8 +422,17 @@ int main(int argc, char** argv)
 	struct ::rlimit rlim;
 	rlim.rlim_cur = 4096;
 	rlim.rlim_max = 4096;
+#ifdef RLIMIT_NOFILE
 	if (::setrlimit(RLIMIT_NOFILE, &rlim) != 0)
-		std::fprintf(stderr, "Failed to set max open file limit (4096).");
+		std::fprintf(stderr, "Failed to set max open file limit (4096).\n");
+#endif
+
+	rlim.rlim_cur = 0x80000000;
+	rlim.rlim_max = 0x80000000;
+#ifdef RLIMIT_MEMLOCK
+	if (::setrlimit(RLIMIT_MEMLOCK, &rlim) != 0)
+		std::fprintf(stderr, "Failed to set RLIMIT_MEMLOCK size to 2 GiB. Try to update your system configuration.\n");
+#endif
 	// Work around crash on startup on KDE: https://bugs.kde.org/show_bug.cgi?id=401637
 	setenv( "KDE_DEBUG", "1", 0 );
 #endif
@@ -432,6 +465,7 @@ int main(int argc, char** argv)
 	parser.addOption(QCommandLineOption(arg_stylesheet, "Loads a custom stylesheet.", "path", ""));
 	const QCommandLineOption config_option(arg_config, "Forces the emulator to use this configuration file.", "path", "");
 	parser.addOption(config_option);
+	parser.addOption(QCommandLineOption(arg_q_debug, "Log qDebug to RPCS3.log."));
 	parser.addOption(QCommandLineOption(arg_error, "For internal usage."));
 	parser.addOption(QCommandLineOption(arg_updating, "For internal usage."));
 	parser.addOption(QCommandLineOption(arg_decrypt, "Automatically decrypt a chosen self file.")); //RTC_Hijack: Describe decryption arg
@@ -441,6 +475,11 @@ int main(int argc, char** argv)
 	// Don't start up the full rpcs3 gui if we just want the version or help.
 	if (parser.isSet(version_option) || parser.isSet(help_option))
 		return 0;
+
+	if (parser.isSet(arg_q_debug))
+	{
+		qInstallMessageHandler(log_q_debug);
+	}
 
 	if (parser.isSet(arg_styles))
 	{
@@ -630,3 +669,55 @@ int main(int argc, char** argv)
 	// run event loop (maybe only needed for the gui application)
 	return app->exec();
 }
+
+// Temporarily, this is code from std for prebuilt LLVM. I don't understand why this is necessary.
+// From the same MSVC 19.27.29112.0, LLVM libs depend on these, but RPCS3 gets linker errors.
+#ifdef _WIN32
+extern "C"
+{
+	int __stdcall __std_init_once_begin_initialize(void** ppinit, ulong f, int* fp, void** lpc) noexcept
+	{
+		return InitOnceBeginInitialize(reinterpret_cast<LPINIT_ONCE>(ppinit), f, fp, lpc);
+	}
+
+	int __stdcall __std_init_once_complete(void** ppinit, ulong f, void* lpc) noexcept
+	{
+		return InitOnceComplete(reinterpret_cast<LPINIT_ONCE>(ppinit), f, lpc);
+	}
+
+	size_t __stdcall __std_get_string_size_without_trailing_whitespace(const char* str, size_t size) noexcept
+	{
+		while (size)
+		{
+			switch (str[size - 1])
+			{
+			case 0:
+			case ' ':
+			case '\n':
+			case '\r':
+			case '\t':
+			{
+				size--;
+				continue;
+			}
+			}
+
+			break;
+		}
+
+		return size;
+	}
+
+	size_t __stdcall __std_system_error_allocate_message(const unsigned long msg_id, char** ptr_str) noexcept
+	{
+		return __std_get_string_size_without_trailing_whitespace(*ptr_str, FormatMessageA(
+			FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+			nullptr, msg_id, 0, reinterpret_cast<char*>(ptr_str), 0, nullptr));
+	}
+
+	void __stdcall __std_system_error_deallocate_message(char* s) noexcept
+	{
+		LocalFree(s);
+	}
+}
+#endif

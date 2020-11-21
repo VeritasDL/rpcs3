@@ -1,16 +1,19 @@
 ﻿#pragma once
 
-#include "types.h"
+#include "Utilities/types.h"
+
+extern bool g_use_rtm;
+extern u64 g_rtm_tx_limit1;
 
 namespace utils
 {
-	// Transaction helper (Max = max attempts) (result = pair of success and op result, which is only meaningful on success)
-	template <uint Max = 10, typename F, typename R = std::invoke_result_t<F>>
+	// Transaction helper (result = pair of success and op result, or just bool)
+	template <typename F, typename R = std::invoke_result_t<F>>
 	inline auto tx_start(F op)
 	{
 		uint status = -1;
 
-		for (uint i = 0; i < Max; i++)
+		for (auto stamp0 = __rdtsc(), stamp1 = stamp0; g_use_rtm && stamp1 - stamp0 <= g_rtm_tx_limit1; stamp1 = __rdtsc())
 		{
 #ifndef _MSC_VER
 			__asm__ goto ("xbegin %l[retry];" ::: "memory" : retry);
@@ -48,9 +51,8 @@ namespace utils
 #ifndef _MSC_VER
 			__asm__ volatile ("movl %%eax, %0;" : "=r" (status) :: "memory");
 #endif
-			if (!(status & _XABORT_RETRY)) [[unlikely]]
+			if (!status) [[unlikely]]
 			{
-				// In order to abort transaction, tx_abort() can be used, so there is no need for "special" return value
 				break;
 			}
 		}
@@ -65,21 +67,16 @@ namespace utils
 		}
 	};
 
-	// Special function to abort transaction
-	[[noreturn]] FORCE_INLINE void tx_abort()
+#if defined(__GNUG__)
+
+	inline void prefetch_read(const void* ptr)
 	{
-#ifndef _MSC_VER
-		__asm__ volatile ("xabort $0;" ::: "memory");
-		__builtin_unreachable();
+#if __has_builtin(__builtin_prefetch)
+		return __builtin_prefetch(ptr);
 #else
-		_xabort(0);
-		__assume(0);
+		__asm__ volatile ("prefetcht0 0(%[ptr])" : : [ptr] "r" (ptr));
 #endif
 	}
-
-
-// Rotate helpers
-#if defined(__GNUG__)
 
 	inline u8 rol8(u8 x, u8 n)
 	{
@@ -209,7 +206,36 @@ namespace utils
 		return r;
 	}
 
+	inline u32 ctz128(u128 arg)
+	{
+		if (u64 lo = static_cast<u64>(arg))
+		{
+			return std::countr_zero<u64>(lo);
+		}
+		else
+		{
+			return std::countr_zero<u64>(arg >> 64) + 64;
+		}
+	}
+
+	inline u32 clz128(u128 arg)
+	{
+		if (u64 hi = static_cast<u64>(arg >> 64))
+		{
+			return std::countl_zero<u64>(hi);
+		}
+		else
+		{
+			return std::countl_zero<u64>(arg) + 64;
+		}
+	}
+
 #elif defined(_MSC_VER)
+	inline void prefetch_read(const void* ptr)
+	{
+		return _mm_prefetch(reinterpret_cast<const char*>(ptr), _MM_HINT_T0);
+	}
+
 	inline u8 rol8(u8 x, u8 n)
 	{
 		return _rotl8(x, n);
@@ -284,6 +310,30 @@ namespace utils
 		}
 
 		return r;
+	}
+
+	inline u32 ctz128(u128 arg)
+	{
+		if (!arg.lo)
+		{
+			return std::countr_zero(arg.hi) + 64u;
+		}
+		else
+		{
+			return std::countr_zero(arg.lo);
+		}
+	}
+
+	inline u32 clz128(u128 arg)
+	{
+		if (arg.hi)
+		{
+			return std::countl_zero(arg.hi);
+		}
+		else
+		{
+			return std::countl_zero(arg.lo) + 64;
+		}
 	}
 #endif
 } // namespace utils
