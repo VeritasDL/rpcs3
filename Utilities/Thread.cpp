@@ -2127,15 +2127,16 @@ u64 thread_base::get_cycles()
 
 void thread_ctrl::emergency_exit(std::string_view reason)
 {
-	sig_log.fatal("Thread terminated due to fatal error: %s", reason);
+	//RTC_Hijack: no thread termination
+	//sig_log.fatal("Thread terminated due to fatal error: %s", reason);
 
-	std::fprintf(stderr, "Thread '%s' terminated due to fatal error: %s\n", g_tls_log_prefix().c_str(), std::string(reason).c_str());
+	//std::fprintf(stderr, "Thread '%s' terminated due to fatal error: %s\n", g_tls_log_prefix().c_str(), std::string(reason).c_str());
 
 #ifdef _WIN32
 	if (IsDebuggerPresent())
 	{
-		OutputDebugStringA(fmt::format("Thread '%s' terminated due to fatal error: %s\n", g_tls_log_prefix(), reason).c_str());
-		__debugbreak();
+		//OutputDebugStringA(fmt::format("Thread '%s' terminated due to fatal error: %s\n", g_tls_log_prefix(), reason).c_str());
+		//__debugbreak();
 	}
 #else
 	if (IsDebuggerPresent())
@@ -2146,24 +2147,25 @@ void thread_ctrl::emergency_exit(std::string_view reason)
 
 	if (const auto _this = g_tls_this_thread)
 	{
-		g_tls_error_callback();
+		//g_tls_error_callback();
 
 		if (_this->finalize(thread_state::errored))
 		{
-			delete _this;
+			//delete _this;
 		}
 
-		thread_base::finalize();
+		//thread_base::finalize();
 
 #ifdef _WIN32
-		_endthreadex(0);
+		//_endthreadex(0);
 #else
 		pthread_exit(0);
 #endif
 	}
 
 	// Assume main thread
-	report_fatal_error(std::string(reason));
+	//report_fatal_error(std::string(reason));
+	//RTC_Hijack end
 }
 
 void thread_ctrl::detect_cpu_layout()
