@@ -1521,23 +1521,23 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 
 			return true;
 		}
-//	RTC_Hijack: Comment out access violation code and pray that I don't have to manually re-add this hijack again			  
+
 		if (cpu->id_type() != 1)
 		{
 			if (!g_tls_access_violation_recovered)
 			{
 				vm_log.notice("\n%s", cpu->dump_all());
-				//vm_log.error("Access violation %s location 0x%x (%s) [type=u%u]", is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory", d_size * 8);
+				vm_log.error("Access violation %s location 0x%x (%s) [type=u%u]", is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory", d_size * 8);
 			}
 
 			// TODO:
 			// RawSPU: Send appropriate interrupt
 			// SPUThread: Send sys_spu exception event
-			//cpu->state += cpu_flag::dbg_pause;
+			cpu->state += cpu_flag::dbg_pause;
 
 			if (cpu->check_state() && !hack_alloc())
 			{
-				//std::terminate();
+				std::terminate();
 			}
 
 			return true;
@@ -1546,37 +1546,37 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 		{
 			if (auto last_func = static_cast<ppu_thread*>(cpu)->current_function)
 			{
-				//ppu_log.fatal("Function aborted: %s", last_func);
+				ppu_log.fatal("Function aborted: %s", last_func);
 			}
 
-			//lv2_obj::sleep(*cpu);
+			lv2_obj::sleep(*cpu);
 		}
 	}
 
-	//Emu.Pause();
+	Emu.Pause();
 
 	if (cpu && !g_tls_access_violation_recovered)
 	{
-		//vm_log.notice("\n%s", cpu->dump_all());
+		vm_log.notice("\n%s", cpu->dump_all());
 	}
 
 	// Note: a thread may access violate more than once after hack_alloc recovery
 	// Do not log any further access violations in this case.
 	if (!g_tls_access_violation_recovered)
 	{
-		//vm_log.fatal("Access violation %s location 0x%x (%s) [type=u%u]", is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory", d_size * 8);
+		vm_log.fatal("Access violation %s location 0x%x (%s) [type=u%u]", is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory", d_size * 8);
 	}
 
 	while (Emu.IsPaused())
 	{
-		//thread_ctrl::wait();
+		thread_ctrl::wait();
 	}
 
 	if (Emu.IsStopped() && !hack_alloc())
 	{
-		//std::terminate();
+		std::terminate();
 	}
-	//	RTC_Hijack end
+
 	return true;
 }
 
@@ -1614,14 +1614,13 @@ static LONG exception_handler(PEXCEPTION_POINTERS pExp) noexcept
 
 static LONG exception_filter(PEXCEPTION_POINTERS pExp) noexcept
 {
- //RTC_Hijack: comment this annoying fatal error handler out for now
 	std::string msg = fmt::format("Unhandled Win32 exception 0x%08X.\n", pExp->ExceptionRecord->ExceptionCode);
 
 	if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
 	{
-		//const auto cause = pExp->ExceptionRecord->ExceptionInformation[0] != 0 ? "writing" : "reading";
+		const auto cause = pExp->ExceptionRecord->ExceptionInformation[0] != 0 ? "writing" : "reading";
 
-		//fmt::append(msg, "Segfault %s location %p at %p.\n", cause, pExp->ExceptionRecord->ExceptionInformation[1], pExp->ExceptionRecord->ExceptionAddress);
+		fmt::append(msg, "Segfault %s location %p at %p.\n", cause, pExp->ExceptionRecord->ExceptionInformation[1], pExp->ExceptionRecord->ExceptionAddress);
 	}
 	else
 	{
@@ -1702,12 +1701,12 @@ static LONG exception_filter(PEXCEPTION_POINTERS pExp) noexcept
 
 	// TODO: print registers and the callstack
 
-	//sys_log.fatal("\n%s", msg);
+	sys_log.fatal("\n%s", msg);
 
 	if (!IsDebuggerPresent())
 	{
-		//report_fatal_error(msg);
-	//	RTC_Hijack end
+		report_fatal_error(msg);
+	}
 
 	return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -2317,16 +2316,15 @@ u64 thread_base::get_cycles()
 
 void thread_ctrl::emergency_exit(std::string_view reason)
 {
-	//RTC_Hijack: no thread termination
-	//sig_log.fatal("Thread terminated due to fatal error: %s", reason);
+	sig_log.fatal("Thread terminated due to fatal error: %s", reason);
 
-	//std::fprintf(stderr, "Thread '%s' terminated due to fatal error: %s\n", g_tls_log_prefix().c_str(), std::string(reason).c_str());
+	std::fprintf(stderr, "Thread '%s' terminated due to fatal error: %s\n", g_tls_log_prefix().c_str(), std::string(reason).c_str());
 
 #ifdef _WIN32
 	if (IsDebuggerPresent())
 	{
-		//OutputDebugStringA(fmt::format("Thread '%s' terminated due to fatal error: %s\n", g_tls_log_prefix(), reason).c_str());
-		//__debugbreak();
+		OutputDebugStringA(fmt::format("Thread '%s' terminated due to fatal error: %s\n", g_tls_log_prefix(), reason).c_str());
+		__debugbreak();
 	}
 #else
 	if (IsDebuggerPresent())
@@ -2337,28 +2335,27 @@ void thread_ctrl::emergency_exit(std::string_view reason)
 
 	if (const auto _this = g_tls_this_thread)
 	{
-		//g_tls_error_callback();
+		g_tls_error_callback();
 
 		u64 _self = _this->finalize(thread_state::errored);
 
 		if (!_self)
 		{
 			// Unused, detached thread support remnant
-			//delete _this;
+			delete _this;
 		}
 
-		//thread_base::finalize(0);
+		thread_base::finalize(0);
 
 #ifdef _WIN32
-		//_endthreadex(0);
+		_endthreadex(0);
 #else
 		pthread_exit(0);
 #endif
 	}
 
 	// Assume main thread
-	//(std::string(reason));
-	//RTC_Hijack end		   
+	report_fatal_error(std::string(reason));
 }
 
 void thread_ctrl::detect_cpu_layout()
