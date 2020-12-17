@@ -7,10 +7,13 @@
 #include "Utilities/asm.h"
 #include "Utilities/sysinfo.h"
 #include "Emu/Cell/Common.h"
+#include "../../rpcs3qt/breakpoint_handler.h"
 
 #include <atomic>
 #include <bit>
 #include <cmath>
+#include <string>
+#include <sstream>
 
 #if !defined(_MSC_VER) && defined(__clang__)
 #pragma GCC diagnostic push
@@ -26,6 +29,68 @@
 const bool s_use_ssse3 = utils::has_ssse3();
 
 extern void do_cell_atomic_128_store(u32 addr, const void* to_write);
+
+LOG_CHANNEL(debugbp_log, "DebugBP");
+
+#define SHOW_PACKED_DATA_STRUCT
+
+namespace neolib
+{
+	template<class Elem, class Traits>
+	inline void hex_dump2(const void* aData, std::size_t aLength, std::basic_ostream<Elem, Traits>& aStream, std::size_t aWidth = 16, ::std::string prepend_line = "", bool show_ascii = true)
+	{
+		const char* const start = static_cast<const char*>(aData);
+		const char* const end = start + aLength;
+		const char* line = start;
+		while (line != end)
+		{
+			aStream << prepend_line;
+			//aStream.width(4);
+			//aStream.fill('0');
+			//aStream << std::hex << line - start << " ";
+			std::size_t lineLength = std::min(aWidth, static_cast<std::size_t>(end - line));
+			for (std::size_t pass = show_ascii ? 1 : 2; pass <= 2; ++pass)
+			{	
+				for (const char* next = line; next != end && next != line + aWidth; ++next)
+				{
+					char ch = *next;
+					switch(pass)
+					{
+					case 1:
+						aStream << (((ch < 32) || (ch >= 127)) ? '.' : ch);
+						break;
+					case 2:
+						if (next != line)
+							aStream << " ";
+						aStream.width(2);
+						aStream.fill('0');
+						aStream << std::hex << std::uppercase << static_cast<int>(static_cast<unsigned char>(ch));
+						break;
+					}
+				}
+				if (pass == 1 && lineLength != aWidth)
+					aStream << std::string(aWidth - lineLength, ' ');
+				aStream << " ";
+			}
+			aStream << std::endl;
+			line = line + lineLength;
+		}
+	}
+}
+
+void ppubreak(ppu_thread& ppu)
+{
+	if (!g_breakpoint_handler->IsBreakOnBPM()) return;
+
+	bool status = ppu.state.test_and_set(cpu_flag::dbg_pause);
+#ifdef WITH_GDB_DEBUGGER
+	fxm::get<GDBDebugServer>()->notify();
+#endif
+	if (!status && ppu.check_state())
+	{
+		return;
+	}
+}
 
 inline u64 dup32(u32 x) { return x | static_cast<u64>(x) << 32; }
 
@@ -3115,8 +3180,92 @@ bool ppu_interpreter::MCRF(ppu_thread& ppu, ppu_opcode_t op)
 	return true;
 }
 
+//#define DEBUG_LOG
+
+#ifdef DEBUG_LOG
+static FILE* fp_dbg = fopen("rpcs3_sly1_debug2.log", "w");
+#endif
+
+static bool change_file_dec = true;
+
+static u32 data_unpack_dst{};
+static u32 data_unpack_data_ptr{};
+static u32 data_unpack_len{};
+static u32 data_unpack_off{};
+static std::string data_unpack_str{};
+
 bool ppu_interpreter::BCLR(ppu_thread& ppu, ppu_opcode_t op)
 {
+#ifdef DEBUG_LOG
+	//if ((0x002232ac < ppu.cia && ppu.cia <= 0x002233f8) || (0x002233fc < ppu.cia && ppu.cia <= 0x0022351c)) {
+	//	change_file = true;
+	//}
+
+	//if (ppu.cia == 0x0017793c) {
+	//}
+
+	if (ppu.cia == 0x00036d60 && data_unpack_dst) {
+		data_unpack_off += data_unpack_len;
+//#ifndef SHOW_PACKED_DATA_STRUCT
+		auto dst_ptr = vm::base(data_unpack_dst);
+		std::stringstream hex_ss;
+		const auto max_len = 0x48u;
+		auto len = std::min(max_len, data_unpack_len);
+		neolib::hex_dump2((const void*)dst_ptr, len, hex_ss, max_len, "", true);
+		auto hex_str = hex_ss.str();
+		hex_str.pop_back(); // remove newline
+//#else
+		//auto dst_data_ptr = vm::base(data_unpack_data_ptr);
+		//std::stringstream hex_ss2;
+		//neolib::hex_dump2((const void*)dst_data_ptr, 0x5Cu, hex_ss2, 0x5Cu, "", false);
+		//auto hex_str2 = hex_ss2.str();
+		//hex_str2.pop_back(); // remove newline
+//#endif
+		fprintf(fp_dbg, "%s  %s\n", data_unpack_str.c_str(), hex_str.c_str());
+		//fprintf(fp_dbg, "%s  %s\n\t\t%s\n", data_unpack_str.c_str(), hex_str.c_str(), hex_str2.c_str());
+	}
+	
+	auto log_get_packed = [&ppu](int size, const char* str, bool is_double = false) {
+				const auto data_unpack_str2 = fmt::format("        %s LR=%06llX off=%06X len=0x8     (%5d) dst=ret     ",
+			str, ppu.lr, data_unpack_off, size, size);
+		std::string hex_str;
+		if (is_double) {
+			f32 fpr1_f32 = (f32)ppu.fpr[1];
+			hex_str = fmt::format("F32: %08X  %f", *reinterpret_cast<u32*>(&fpr1_f32), ppu.fpr[1]);
+		} else {
+			auto data_ = ppu.gpr[3];
+			std::stringstream hex_ss;
+			const auto max_len = size;
+			auto len = size;
+			neolib::hex_dump2((const void*)&data_, len, hex_ss, max_len, fmt::format("%s: ", str), false);
+			hex_str = hex_ss.str();
+			hex_str.pop_back(); // remove newline
+		}
+		fprintf(fp_dbg, "%s  %s\n", data_unpack_str2.c_str(), hex_str.c_str());
+	};
+
+	if (ppu.cia == 0x00037bfc) {
+		log_get_packed(1, "I08");
+	} else if (ppu.cia == 0x00037600 || ppu.cia == 0x00037354) {
+		log_get_packed(2, "I16");
+	} else if (ppu.cia == 0x00037524 || ppu.cia == 0x0003726c) {
+		log_get_packed(4, "I32");
+	} else if (ppu.cia == 0x00036ed0) {
+		log_get_packed(4, "F32", true);
+	} else if (ppu.cia == 0x0003714c) {
+		fprintf(fp_dbg, "            LR=%06llX --- get_next_3_dvec3 ---\n", ppu.lr);
+	} else if (ppu.cia == 0x000370f4) {
+		fprintf(fp_dbg, "            LR=%06llX --- get_next_dvec3 ---\n", ppu.lr);
+	} else if (ppu.cia == 0x00037094) {
+		fprintf(fp_dbg, "            LR=%06llX --- get_next_3_vec3 ---\n", ppu.lr);
+	} else if (ppu.cia == 0x00037008) {
+		fprintf(fp_dbg, "            LR=%06llX --- get_next_vec3 ---\n", ppu.lr);
+	} else if (ppu.cia == 0x00036fa8) {
+		fprintf(fp_dbg, "            LR=%06llX --- get_next_vec4 ---\n", ppu.lr);
+	}
+
+#endif
+
 	const bool bo0 = (op.bo & 0x10) != 0;
 	const bool bo1 = (op.bo & 0x08) != 0;
 	const bool bo2 = (op.bo & 0x04) != 0;
@@ -3436,6 +3585,13 @@ bool ppu_interpreter::LWZX(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
 	ppu.gpr[op.rd] = ppu_feed_data<u32>(ppu, addr);
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mread))
+	{
+		debugbp_log.success("BPMR: LWZX breakpoint reading 0x%x at 0x%x", static_cast<u32>(ppu.gpr[op.rd]), addr);
+		ppubreak(ppu);
+	}
+
 	return true;
 }
 
@@ -3593,6 +3749,13 @@ bool ppu_interpreter::LBZX(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
 	ppu.gpr[op.rd] = ppu_feed_data<u8>(ppu, addr);
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mread))
+	{
+		debugbp_log.success("BPMR: LBZX breakpoint reading 0x%x at 0x%x", static_cast<u8>(ppu.gpr[op.rd]), addr);
+		ppubreak(ppu);
+	}
+
 	return true;
 }
 
@@ -3600,6 +3763,13 @@ bool ppu_interpreter::LVX(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
 	ppu.vr[op.vd] = ppu_feed_data<v128>(ppu, addr);
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mread))
+	{
+		debugbp_log.success("BPMR: LVX breakpoint reading vector at 0x%x", addr);
+		ppubreak(ppu);
+	}
+
 	return true;
 }
 
@@ -3711,6 +3881,13 @@ bool ppu_interpreter::STDX(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
 	vm::write64(vm::cast(addr, HERE), ppu.gpr[op.rs]);
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mwrite))
+	{
+		debugbp_log.success("BPMW: STDX breakpoint writing 0x%x at 0x%x", ppu.gpr[op.rs], addr);
+		ppubreak(ppu);
+	}
+
 	return true;
 }
 
@@ -3725,6 +3902,13 @@ bool ppu_interpreter::STWX(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
 	vm::write32(vm::cast(addr, HERE), static_cast<u32>(ppu.gpr[op.rs]));
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mwrite))
+	{
+		debugbp_log.success("BPMW: STWX breakpoint writing 0x%x at 0x%x", static_cast<u32>(ppu.gpr[op.rs]), addr);
+		ppubreak(ppu);
+	}
+
 	return true;
 }
 
@@ -3740,14 +3924,51 @@ bool ppu_interpreter::STDUX(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
 	vm::write64(vm::cast(addr, HERE), ppu.gpr[op.rs]);
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mwrite))
+	{
+		debugbp_log.success("BPMW: STDUX breakpoint writing 0x%x at 0x%x", ppu.gpr[op.rs], addr);
+		ppubreak(ppu);
+	}
+
 	ppu.gpr[op.ra] = addr;
 	return true;
+}
+
+#include <Emu/RSX/gcm_enums.h>
+#include <Emu/System.h>
+void checkpls(u32 addr, u32 value) {
+	if (
+		(((value & RSX_METHOD_NON_INCREMENT_COUNT_MASK) >> RSX_METHOD_NON_INCREMENT_COUNT_SHIFT) == 1)
+		&&
+		(
+		 ((value & RSX_METHOD_INCREMENT_CMD_MASK) == RSX_METHOD_INCREMENT_CMD)
+		 ||
+		 ((value & RSX_METHOD_NON_INCREMENT_CMD_MASK) == RSX_METHOD_NON_INCREMENT_CMD)
+		)
+		&&
+		(((value & RSX_METHOD_INCREMENT_METHOD_MASK) >> 2) == NV4097_SET_LINE_WIDTH)
+	   )
+	{
+		debugbp_log.error("addr: 0x%08X val: 0x%08X count: 0x%X next: 0x%08X",
+			addr, value, (value & RSX_METHOD_INCREMENT_COUNT_MASK) >> RSX_METHOD_INCREMENT_COUNT_SHIFT, vm::read32(addr + 4));
+		//__debugbreak();
+	}
 }
 
 bool ppu_interpreter::STWUX(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
 	vm::write32(vm::cast(addr, HERE), static_cast<u32>(ppu.gpr[op.rs]));
+
+	//checkpls(addr, static_cast<u32>(ppu.gpr[op.rs]));
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mwrite))
+	{
+		debugbp_log.success("BPMW: STWUX breakpoint writing 0x%x at 0x%x", static_cast<u32>(ppu.gpr[op.rs]), addr);
+		ppubreak(ppu);
+	}
+
 	ppu.gpr[op.ra] = addr;
 	return true;
 }
@@ -3793,6 +4014,13 @@ bool ppu_interpreter::STBX(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
 	vm::write8(vm::cast(addr, HERE), static_cast<u8>(ppu.gpr[op.rs]));
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mwrite))
+	{
+		debugbp_log.success("BPMW: STBX breakpoint writing 0x%x at 0x%x", static_cast<u8>(ppu.gpr[op.rs]), addr);
+		ppubreak(ppu);
+	}
+
 	return true;
 }
 
@@ -3856,6 +4084,13 @@ bool ppu_interpreter::STBUX(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
 	vm::write8(vm::cast(addr, HERE), static_cast<u8>(ppu.gpr[op.rs]));
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mwrite))
+	{
+		debugbp_log.success("BPMW: STBUX breakpoint writing 0x%x at 0x%x", static_cast<u8>(ppu.gpr[op.rs]), addr);
+		ppubreak(ppu);
+	}
+
 	ppu.gpr[op.ra] = addr;
 	return true;
 }
@@ -3909,8 +4144,37 @@ bool ppu_interpreter::XOR(ppu_thread& ppu, ppu_opcode_t op)
 	return true;
 }
 
+typedef struct {
+	be_t<uint8_t> format;
+	be_t<uint8_t> mipmap;
+	be_t<uint8_t> dimension;
+	be_t<uint8_t> cubemap;
+	be_t<uint32_t> remap;
+	be_t<uint16_t> width;
+	be_t<uint16_t> height;
+	be_t<uint16_t> depth;
+	be_t<uint8_t> location;
+	be_t<uint8_t> _padding;
+	be_t<uint32_t> pitch;
+	be_t<uint32_t> offset;
+} CellGcmTexture;
+
 bool ppu_interpreter::MFSPR(ppu_thread& ppu, ppu_opcode_t op)
 {
+#ifdef DEBUG_LOG
+#if 1 // sly1
+	if (ppu.cia == 0x0020ccb8) {
+		CellGcmTexture* tex = (CellGcmTexture*)vm::base(ppu.gpr[5]);
+		fprintf(fp_dbg, "  cellGcmSetTexture LR=0x%08X idx=%d fmt=%02X loc=%d offset=0x%X %dx%d\n", ppu.lr, ppu.gpr[4], tex->format, tex->location, tex->offset, tex->width, tex->height);
+	} else if (ppu.cia == 0x001773b0) {
+		fprintf(fp_dbg, "  get_texture LR=0x%08X %04X %04X\n", ppu.lr, ppu.gpr[3], ppu.gpr[4]);
+		//if (ppu.gpr[3]==0x1C8E)
+			//__debugbreak();
+	} else if (ppu.cia == 0x00174220) {
+		fprintf(fp_dbg, "\n\nNEW FRAME\n\n\n");
+	}
+#endif
+#endif
 	const u32 n = (op.spr >> 5) | ((op.spr & 0x1f) << 5);
 
 	switch (n)
@@ -4083,6 +4347,13 @@ bool ppu_interpreter::STVXL(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
 	vm::_ref<v128>(vm::cast(addr, HERE)) = ppu.vr[op.vs];
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mwrite))
+	{
+		debugbp_log.success("BPMW: STVXL breakpoint writing vector at 0x%x", addr);
+		ppubreak(ppu);
+	}
+
 	return true;
 }
 
@@ -4505,6 +4776,13 @@ bool ppu_interpreter::LWZ(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
 	ppu.gpr[op.rd] = ppu_feed_data<u32>(ppu, addr);
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mread))
+	{
+		debugbp_log.success("BPMR: LWZ breakpoint reading 0x%x at 0x%x", static_cast<u32>(ppu.gpr[op.rd]), addr);
+		ppubreak(ppu);
+	}
+
 	return true;
 }
 
@@ -4516,10 +4794,37 @@ bool ppu_interpreter::LWZU(ppu_thread& ppu, ppu_opcode_t op)
 	return true;
 }
 
+static bool change_file_enc = true;
+
 bool ppu_interpreter::LBZ(ppu_thread& ppu, ppu_opcode_t op)
 {
+#if 0
+	static FILE* fp{};
+
+	if (ppu.cia == 0x00036ac0) { // sly1
+		if (change_file_enc) {
+			change_file_enc = false;
+
+			if (fp != nullptr)
+				fclose(fp);
+			std::string filename = fmt::format("sly1_enc_data_0.bin");
+			fp = fopen(filename.c_str(), "wb");
+		}
+
+		const u8 bt = static_cast<u8>(ppu.gpr[op.rs]);
+		fwrite(&bt, 1, 1, fp);
+	}
+#endif
+
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
 	ppu.gpr[op.rd] = ppu_feed_data<u8>(ppu, addr);
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mread))
+	{
+		debugbp_log.success("BPMR: LBZ breakpoint reading 0x%x at 0x%x", static_cast<u8>(ppu.gpr[op.rd]), addr);
+		ppubreak(ppu);
+	}
+
 	return true;
 }
 
@@ -4537,10 +4842,18 @@ bool ppu_interpreter::STW(ppu_thread& ppu, ppu_opcode_t op)
 	const u32 value = static_cast<u32>(ppu.gpr[op.rs]);
 	vm::write32(vm::cast(addr, HERE), value);
 
+	//checkpls(addr, value);
+
 	//Insomniac engine v3 & v4 (newer R&C, Fuse, Resitance 3)
 	if (value == 0xAAAAAAAA) [[unlikely]]
 	{
 		vm::reservation_update(vm::cast(addr, HERE));
+	}
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mwrite))
+	{
+		debugbp_log.success("BPMW: STW breakpoint writing 0x%x at 0x%x", static_cast<u32>(ppu.gpr[op.rs]), addr);
+		ppubreak(ppu);
 	}
 
 	return true;
@@ -4550,6 +4863,15 @@ bool ppu_interpreter::STWU(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = ppu.gpr[op.ra] + op.simm16;
 	vm::write32(vm::cast(addr, HERE), static_cast<u32>(ppu.gpr[op.rs]));
+
+	//checkpls(addr, static_cast<u32>(ppu.gpr[op.rs]));
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mwrite))
+	{
+		debugbp_log.success("BPMW: STWU breakpoint writing 0x%x at 0x%x", static_cast<u32>(ppu.gpr[op.rs]), addr);
+		ppubreak(ppu);
+	}
+
 	ppu.gpr[op.ra] = addr;
 	return true;
 }
@@ -4558,6 +4880,46 @@ bool ppu_interpreter::STB(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
 	vm::write8(vm::cast(addr, HERE), static_cast<u8>(ppu.gpr[op.rs]));
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mwrite))
+	{
+		debugbp_log.success("BPMW: STB breakpoint writing 0x%x at 0x%x", static_cast<u8>(ppu.gpr[op.rs]), addr);
+		ppubreak(ppu);
+	}
+
+#if 0
+	static uint64_t i = 0;
+	static u64 file_idx = 0;
+	static FILE* fp{};
+
+	//if (ppu.cia == 0x00036a6c || ppu.cia == 0x00036b20) { // sly1
+	 if (ppu.cia == 0x002230f8 || ppu.cia == 0x00223044) { // sly3
+
+#if 0
+		// if (i == 0x1fff790) { //0x02BFBD94) { // sly1
+		if (i == 0x191843) { //0x02BFBD94) { // sly1
+			volatile const u8 ayy = static_cast<u8>(ppu.gpr[op.rs]);
+			__debugbreak();
+		}
+		i++;
+#else		
+		if (change_file_dec) {
+			change_file_dec = false;
+
+			if (fp != nullptr)
+				fclose(fp);
+			std::string filename = fmt::format("sly3_dec_data_%d.bin", file_idx);
+			fp = fopen(filename.c_str(), "wb");
+
+			file_idx++;
+		}
+
+		const u8 bt = static_cast<u8>(ppu.gpr[op.rs]);
+		fwrite(&bt, 1, 1, fp);
+#endif
+	}
+#endif
+
 	return true;
 }
 
@@ -4565,6 +4927,13 @@ bool ppu_interpreter::STBU(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = ppu.gpr[op.ra] + op.simm16;
 	vm::write8(vm::cast(addr, HERE), static_cast<u8>(ppu.gpr[op.rs]));
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mwrite))
+	{
+		debugbp_log.success("BPMW: STBU breakpoint writing 0x%x at 0x%x", static_cast<u8>(ppu.gpr[op.rs]), addr);
+		ppubreak(ppu);
+	}
+
 	ppu.gpr[op.ra] = addr;
 	return true;
 }
@@ -4573,6 +4942,13 @@ bool ppu_interpreter::LHZ(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
 	ppu.gpr[op.rd] = ppu_feed_data<u16>(ppu, addr);
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mread))
+	{
+		debugbp_log.success("BPMR: LHZ breakpoint reading 0x%x at 0x%x", static_cast<u16>(ppu.gpr[op.rd]), addr);
+		ppubreak(ppu);
+	}
+
 	return true;
 }
 
@@ -4720,13 +5096,46 @@ bool ppu_interpreter::STD(ppu_thread& ppu, ppu_opcode_t op)
 {
 	const u64 addr = (op.simm16 & ~3) + (op.ra ? ppu.gpr[op.ra] : 0);
 	vm::write64(vm::cast(addr, HERE), ppu.gpr[op.rs]);
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mwrite))
+	{
+		debugbp_log.success("BPMW: STD breakpoint writing 0x%x at 0x%x", ppu.gpr[op.rs], addr);
+		ppubreak(ppu);
+	}
+
 	return true;
 }
 
 bool ppu_interpreter::STDU(ppu_thread& ppu, ppu_opcode_t op)
 {
+#ifdef DEBUG_LOG
+	if (ppu.cia == 0x00036c40) {
+		data_unpack_str = fmt::format("data_unpack LR=%06X off=%06X len=0x%5X (%5d) dst=%08X",
+			ppu.lr, data_unpack_off, ppu.gpr[4], ppu.gpr[4], ppu.gpr[5]);
+		data_unpack_dst = ppu.gpr[5];
+		data_unpack_len = ppu.gpr[4];
+		data_unpack_data_ptr = ppu.gpr[3];
+		//if (ppu.gpr[5]==0xD00800E8)
+			//Emu.Pause();
+	} else if (ppu.cia == 0x00043190) {
+		char lvl_name[256]{};
+		strncpy(lvl_name, (const char*)vm::base(ppu.gpr[4]), 255);
+		auto type = (char)(ppu.gpr[5]>>24);
+		fprintf(fp_dbg, "load_asset type: %c, \"%s\" r3: 0x%X r6: 0x%X\n", type, lvl_name,ppu.gpr[3],ppu.gpr[6]);
+		if (type == 'W' && ppu.gpr[6])
+			data_unpack_off = 0;
+	}
+#endif
+
 	const u64 addr = ppu.gpr[op.ra] + (op.simm16 & ~3);
 	vm::write64(vm::cast(addr, HERE), ppu.gpr[op.rs]);
+
+	if (g_breakpoint_handler->HasBreakpoint(addr, breakpoint_type::bp_mwrite))
+	{
+		debugbp_log.success("BPMW: STDU breakpoint writing 0x%x at 0x%x", ppu.gpr[op.rs], addr);
+		ppubreak(ppu);
+	}
+
 	ppu.gpr[op.ra] = addr;
 	return true;
 }

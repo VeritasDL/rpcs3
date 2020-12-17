@@ -1,9 +1,57 @@
-﻿#include "stdafx.h"
+﻿#pragma optimize("", off)
+
+#include "stdafx.h"
 #include "Emu/System.h"
 #include "../rsx_methods.h"
 #include "FragmentProgramDecompiler.h"
 
 #include <algorithm>
+#include <string>
+#include <sstream>
+
+namespace neolib
+{
+	template<class Elem, class Traits>
+	inline void hex_dump(const void* aData, std::size_t aLength, std::basic_ostream<Elem, Traits>& aStream, std::size_t aWidth = 16, ::std::string prepend_line = "")
+	{
+		const char* const start = static_cast<const char*>(aData);
+		const char* const end = start + aLength;
+		const char* line = start;
+		while (line != end)
+		{
+			aStream << prepend_line;
+			aStream.width(4);
+			aStream.fill('0');
+			aStream << std::hex << line - start << " ";
+			std::size_t lineLength = std::min(aWidth, static_cast<std::size_t>(end - line));
+			for (std::size_t pass = 1; pass <= 2; ++pass)
+			{	
+				for (const char* next = line; next != end && next != line + aWidth; ++next)
+				{
+					char ch = *next;
+					switch(pass)
+					{
+					case 1:
+						aStream << (ch < 32 ? '.' : ch);
+						break;
+					case 2:
+						if (next != line)
+							aStream << " ";
+						aStream.width(2);
+						aStream.fill('0');
+						aStream << std::hex << std::uppercase << static_cast<int>(static_cast<unsigned char>(ch));
+						break;
+					}
+				}
+				if (pass == 1 && lineLength != aWidth)
+					aStream << std::string(aWidth - lineLength, ' ');
+				aStream << " ";
+			}
+			aStream << std::endl;
+			line = line + lineLength;
+		}
+	}
+}
 
 FragmentProgramDecompiler::FragmentProgramDecompiler(const RSXFragmentProgram &prog, u32& size)
 	: m_size(size)
@@ -51,12 +99,12 @@ void FragmentProgramDecompiler::SetDst(std::string code, u32 flags)
 		if (dst.fp16 && device_props.has_native_half_support && !(flags & OPFLAGS::skip_type_cast))
 		{
 			// Cast to native data type
-			code = ClampValue(code, 1);
+			code = ClampValue(code, RSX_FP_PRECISION_HALF);
 		}
 
 		if (dst.saturate)
 		{
-			code = ClampValue(code, 4);
+			code = ClampValue(code, RSX_FP_PRECISION_SATURATE);
 		}
 		else if (dst.prec)
 		{
@@ -81,15 +129,15 @@ void FragmentProgramDecompiler::SetDst(std::string code, u32 flags)
 			default:
 			{
 				// fp16 precsion flag on f32 register; ignore
-				if (dst.prec == 1 && !dst.fp16)
+				if (dst.prec == RSX_FP_PRECISION_HALF && !dst.fp16)
 					break;
 
 				// Native type already has fp16 clamped (input must have been cast)
-				if (dst.prec == 1 && dst.fp16 && device_props.has_native_half_support)
+				if (dst.prec == RSX_FP_PRECISION_HALF && dst.fp16 && device_props.has_native_half_support)
 					break;
 
 				// clamp value to allowed range
-				code = ClampValue(code, dst.prec);
+				code = ClampValue(code, static_cast<register_precision>(dst.prec));
 				break;
 			}
 			}
@@ -263,7 +311,7 @@ std::string FragmentProgramDecompiler::AddX2d()
 	return m_parr.AddParam(PF_PARAM_NONE, getFloatTypeName(4), "x2d", getFloatTypeName(4) + "(0.)");
 }
 
-std::string FragmentProgramDecompiler::ClampValue(const std::string& code, u32 precision)
+std::string FragmentProgramDecompiler::ClampValue(const std::string& code, register_precision precision)
 {
 	// FP16 is expected to overflow a lot easier at 0+-65504
 	// FP32 can still work up to 0+-3.4E38
@@ -292,7 +340,7 @@ std::string FragmentProgramDecompiler::ClampValue(const std::string& code, u32 p
 		// Doesn't seem to do anything to the input from hw tests, same as 0
 		break;
 	default:
-		rsx_log.error("Unexpected precision modifier (%d)\n", precision);
+		rsx_log.error("Unexpected precision modifier (%d)\n", static_cast<int>(precision));
 		break;
 	}
 
@@ -479,19 +527,19 @@ void FragmentProgramDecompiler::AddCodeCond(const std::string& lhs, const std::s
 template<typename T> std::string FragmentProgramDecompiler::GetSRC(T src)
 {
 	std::string ret;
-	u32 precision_modifier = 0;
+	register_precision precision_modifier = RSX_FP_PRECISION_REAL;
 
 	if constexpr (std::is_same<T, SRC0>::value)
 	{
-		precision_modifier = src1.src0_prec_mod;
+		precision_modifier = static_cast<register_precision>(src1.src0_prec_mod);
 	}
 	else if constexpr (std::is_same<T, SRC1>::value)
 	{
-		precision_modifier = src1.src1_prec_mod;
+		precision_modifier = static_cast<register_precision>(src1.src1_prec_mod);
 	}
 	else if constexpr (std::is_same<T, SRC2>::value)
 	{
-		precision_modifier = src1.src2_prec_mod;
+		precision_modifier = static_cast<register_precision>(src1.src2_prec_mod);
 	}
 
 	switch (src.reg_type)
@@ -686,7 +734,7 @@ template<typename T> std::string FragmentProgramDecompiler::GetSRC(T src)
 
 	// Warning: Modifier order matters. e.g neg should be applied after precision clamping (tested with Naruto UNS)
 	if (src.abs) ret = "abs(" + ret + ")";
-	if (precision_modifier) ret = ClampValue(ret, precision_modifier);
+	if (precision_modifier != RSX_FP_PRECISION_REAL) ret = ClampValue(ret, precision_modifier);
 	if (src.neg) ret = "-" + ret;
 
 	return ret;
@@ -887,6 +935,14 @@ std::string FragmentProgramDecompiler::BuildCode()
 	insertMainStart(OS);
 	OS << main << std::endl;
 	insertMainEnd(OS);
+
+	std::stringstream shader_hex_str;
+	neolib::hex_dump((const void*)m_prog.addr, m_size, shader_hex_str, 16, "// ");
+
+	OS << "\n// Instruction Count: " << m_ins_count << "\n\n";
+
+	OS << "// Hex dump:\n";
+	OS << shader_hex_str.str();
 
 	return OS.str();
 }
@@ -1263,6 +1319,7 @@ std::string FragmentProgramDecompiler::Decompile()
 		}
 
 		m_size += m_offset;
+		m_ins_count += 1;
 
 		if (dst.end) break;
 

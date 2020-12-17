@@ -98,21 +98,21 @@ union OPDEST
 
 	struct
 	{
-		u32 end              : 1; // Set to 1 if this is the last instruction
-		u32 dest_reg         : 6; // Destination register index
-		u32 fp16             : 1; // Destination is a half register (H0 to H47)
-		u32 set_cond         : 1; // Condition Code Registers (CC0 and CC1) are updated
-		u32 mask_x           : 1;
-		u32 mask_y           : 1;
-		u32 mask_z           : 1;
-		u32 mask_w           : 1;
-		u32 src_attr_reg_num : 4;
-		u32 tex_num          : 4;
-		u32 exp_tex          : 1; // _bx2
-		u32 prec             : 2;
-		u32 opcode           : 6;
-		u32 no_dest          : 1;
-		u32 saturate         : 1; // _sat
+		/* 00 */ u32 end              : 1; // Set to 1 if this is the last instruction
+		/* 01 */ u32 dest_reg         : 6; // Destination register index
+		/* 07 */ u32 fp16             : 1; // Destination is a half register (H0 to H47)
+		/* 08 */ u32 set_cond         : 1; // Condition Code Registers (CC0 and CC1) are updated
+		/* 09 */ u32 mask_x           : 1;
+		/* 10 */ u32 mask_y           : 1;
+		/* 11 */ u32 mask_z           : 1;
+		/* 12 */ u32 mask_w           : 1;
+		/* 13 */ u32 src_attr_reg_num : 4;
+		/* 17 */ u32 tex_num          : 4;
+		/* 21 */ u32 exp_tex          : 1; // _bx2
+		/* 22 */ u32 prec             : 2;
+		/* 24 */ u32 opcode           : 6;
+		/* 30 */ u32 no_dest          : 1;
+		/* 31 */ u32 saturate         : 1; // _sat
 	};
 };
 

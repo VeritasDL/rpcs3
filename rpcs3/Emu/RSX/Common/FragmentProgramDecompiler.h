@@ -146,6 +146,7 @@ class FragmentProgramDecompiler
 
 	std::string main;
 	u32& m_size;
+	u32 m_ins_count = 0;
 	u32 m_const_index = 0;
 	u32 m_offset;
 	u32 m_location = 0;
@@ -176,7 +177,7 @@ class FragmentProgramDecompiler
 	std::string AddX2d();
 
 	//Prevents operations from overflowing the desired range (tested with fp_dynamic3 autotest sample, DS2 for src1.input_prec_mod)
-	std::string ClampValue(const std::string& code, u32 precision);
+	std::string ClampValue(const std::string& code, register_precision precision);
 
 	/**
 	* Returns true if the dst set is not a vector (i.e only a single component)

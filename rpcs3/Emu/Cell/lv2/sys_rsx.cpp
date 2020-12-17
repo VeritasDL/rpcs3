@@ -418,6 +418,7 @@ error_code sys_rsx_context_attribute(u32 context_id, u32 package_id, u64 a3, u64
 		render->pause();
 		const u64 get = static_cast<u32>(a3);
 		const u64 put = static_cast<u32>(a4);
+		sys_rsx.error("GET=0x%llX PUT=0x%llX", get, put);
 		vm::_ref<atomic_be_t<u64>>(rsx_cfg->dma_address + ::offset32(&RsxDmaControl::put)).release(put << 32 | get);
 		render->sync_point_request.release(true);
 		render->unpause();

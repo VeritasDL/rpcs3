@@ -21,6 +21,7 @@ namespace vk
 		case rsx::primitive_type::points:
 			return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
 		case rsx::primitive_type::triangles:
+			//return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
 			return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		case rsx::primitive_type::triangle_strip:
 		case rsx::primitive_type::quad_strip:
