@@ -1,0 +1,13 @@
+prefix=M:/sourcecode/rpcs3/out/install/x64-Debug (default)
+exec_prefix=M:/sourcecode/rpcs3/out/install/x64-Debug (default)
+libdir=M:/sourcecode/rpcs3/out/install/x64-Debug (default)/lib
+sharedlibdir=M:/sourcecode/rpcs3/out/install/x64-Debug (default)/lib
+includedir=M:/sourcecode/rpcs3/out/install/x64-Debug (default)/include
+
+Name: zlib
+Description: zlib compression library
+Version: 1.2.11
+
+Requires:
+Libs: -L${libdir} -L${sharedlibdir} -lz
+Cflags: -I${includedir}
