@@ -231,11 +231,11 @@ s32 _ConvertStr(s32 src_code, const void *src, s32 src_len, s32 dst_code, void *
 #else
 	s32 retValue = ConversionOK;
 	iconv_t ict = iconv_open(dstCode, srcCode);
-	size_t srcLen = src_len;
+	usz srcLen = src_len;
 	if (dst != NULL)
 	{
-		size_t dstLen = *dst_len;
-		size_t ictd = iconv(ict, const_cast<char**>(reinterpret_cast<const char**>(&src)), &srcLen, reinterpret_cast<char**>(&dst), &dstLen);
+		usz dstLen = *dst_len;
+		usz ictd = iconv(ict, const_cast<char**>(reinterpret_cast<const char**>(&src)), &srcLen, reinterpret_cast<char**>(&dst), &dstLen);
 		*dst_len -= dstLen;
 		if (ictd == umax)
 		{
@@ -258,9 +258,9 @@ s32 _ConvertStr(s32 src_code, const void *src, s32 src_len, s32 dst_code, void *
 		char buf[16];
 		while (srcLen > 0)
 		{
-			char *bufPtr = buf;
-			size_t bufLeft = sizeof(buf);
-			size_t ictd = iconv(ict, const_cast<char**>(reinterpret_cast<const char**>(&src)), &srcLen, reinterpret_cast<char**>(&dst), &bufLeft);
+			//char *bufPtr = buf;
+			usz bufLeft = sizeof(buf);
+			usz ictd = iconv(ict, const_cast<char**>(reinterpret_cast<const char**>(&src)), &srcLen, reinterpret_cast<char**>(&dst), &bufLeft);
 			*dst_len += sizeof(buf) - bufLeft;
 			if (ictd == umax && errno != E2BIG)
 			{
@@ -301,7 +301,7 @@ s32 _L10nConvertChar(s32 src_code, const void *src, s32 src_len, s32 dst_code, v
 s32 _L10nConvertCharNoResult(s32 src_code, const void *src, s32 src_len, s32 dst_code, vm::ptr<void> dst)
 {
 	s32 dstLen = 0x7FFFFFFF;
-	s32 result = _ConvertStr(src_code, src, src_len, dst_code, dst.get_ptr(), &dstLen, true);
+	[[maybe_unused]] s32 result = _ConvertStr(src_code, src, src_len, dst_code, dst.get_ptr(), &dstLen, true);
 	return dstLen;
 }
 

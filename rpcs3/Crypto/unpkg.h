@@ -1,13 +1,16 @@
 #pragma once
 
-#include "Utilities/BEType.h"
+#include "Loader/PSF.h"
+#include "util/endian.hpp"
+#include "util/types.hpp"
+#include "Utilities/File.h"
 #include <sstream>
 #include <iomanip>
 
 // Constants
 enum
 {
-	PKG_HEADER_SIZE  = 0xC0, //sizeof(pkg_header) + sizeof(pkg_unk_checksum)
+	PKG_HEADER_SIZE  = 0xC0, // sizeof(pkg_header) + sizeof(pkg_unk_checksum)
 	PKG_HEADER_SIZE2 = 0x280,
 };
 
@@ -96,7 +99,7 @@ struct PKGExtHeader
 	be_t<u32> ext_hdr_size;                     // Extended header size. ex: 0x40
 	be_t<u32> ext_data_size;                    // ex: 0x180
 	be_t<u32> main_and_ext_headers_hmac_offset; // ex: 0x100
-	be_t<u32> metadata_header_hmac_offset;      // ex: 0x360, 0x390, 0x490 
+	be_t<u32> metadata_header_hmac_offset;      // ex: 0x360, 0x390, 0x490
 	be_t<u64> tail_offset;                      // tail size seams to be always 0x1A0
 	be_t<u32> padding1;
 	be_t<u32> pkg_key_id;                       // Id of the AES key used for decryption. PSP = 0x1, PSVita = 0xC0000002, PSM = 0xC0000004
@@ -118,16 +121,16 @@ struct PKGEntry
 struct PKGMetaData
 {
 private:
-	static std::string to_hex_string(u8 buf[], size_t size)
+	static std::string to_hex_string(u8 buf[], usz size)
 	{
 		std::stringstream sstream;
-		for (size_t i = 0; i < size; i++)
+		for (usz i = 0; i < size; i++)
 		{
 			sstream << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(buf[i]);
 		}
 		return sstream.str();
 	}
-	static std::string to_hex_string(u8 buf[], size_t size, size_t dotpos)
+	static std::string to_hex_string(u8 buf[], usz size, usz dotpos)
 	{
 		std::string result = to_hex_string(buf, size);
 		if (result.size() > dotpos)
@@ -304,28 +307,31 @@ public:
 
 	package_error check_target_app_version();
 	bool extract_data(atomic_t<double>& sync);
+	psf::registry get_psf() const { return m_psf; }
 
 private:
 	bool read_header();
 	bool read_metadata();
+	bool read_param_sfo();
 	bool decrypt_data();
 	void archive_seek(const s64 new_offset, const fs::seek_mode damode = fs::seek_set);
 	u64 archive_read(void* data_ptr, const u64 num_bytes);
 	u64 decrypt(u64 offset, u64 size, const uchar* key);
 
-	const std::size_t BUF_SIZE = 8192 * 1024; // 8 MB
+	const usz BUF_SIZE = 8192 * 1024; // 8 MB
 
 	bool m_is_valid = false;
 
 	std::string m_path;
-	std::string install_dir;
-	std::vector<fs::file> filelist;
-	size_t cur_file = 0;
-	u64 cur_offset = 0;
-	u64 cur_file_offset = 0;
-	std::unique_ptr<u128[]> buf;
-	std::array<uchar, 16> dec_key{};
+	std::string m_install_dir;
+	std::vector<fs::file> m_filelist;
+	usz m_cur_file = 0;
+	u64 m_cur_offset = 0;
+	u64 m_cur_file_offset = 0;
+	std::unique_ptr<u128[]> m_buf;
+	std::array<uchar, 16> m_dec_key{};
 
-	PKGHeader header{};
-	PKGMetaData metadata{};
+	PKGHeader m_header{};
+	PKGMetaData m_metadata{};
+	psf::registry m_psf;
 };

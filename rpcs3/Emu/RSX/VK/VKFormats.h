@@ -1,9 +1,13 @@
-﻿#pragma once
-#include "VKHelpers.h"
+#pragma once
+#include "VulkanAPI.h"
+#include "../gcm_enums.h"
 #include <tuple>
 
 namespace vk
 {
+	class image;
+	struct gpu_formats_support;
+
 	struct minification_filter
 	{
 		VkFilter filter;

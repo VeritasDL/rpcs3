@@ -1,7 +1,8 @@
 #pragma once
 
 #include "vm_ptr.h"
-#include "Utilities/BEType.h"
+
+#include "util/to_endian.hpp"
 
 namespace vm
 {
@@ -15,7 +16,7 @@ namespace vm
 
 		static inline void dealloc(u32 addr, u32 size = 0) noexcept
 		{
-			return vm::dealloc_verbose_nothrow(addr, Location);
+			ensure(vm::dealloc(addr, Location));
 		}
 	};
 

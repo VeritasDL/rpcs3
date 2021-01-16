@@ -2,7 +2,7 @@
 
 if(MSVC)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:throwingNew /constexpr:steps16777216 /D _CRT_SECURE_NO_DEPRECATE=1 /D _CRT_NON_CONFORMING_SWPRINTFS=1 /D _SCL_SECURE_NO_WARNINGS=1")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /D _ENABLE_EXTENDED_ALIGNED_STORAGE=1 /D _HAS_EXCEPTIONS=0 /MT")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /D NOMINMAX /D _ENABLE_EXTENDED_ALIGNED_STORAGE=1 /D _HAS_EXCEPTIONS=0 /MT")
 	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /NODEFAULTLIB:libc.lib /NODEFAULTLIB:libcmt.lib /NODEFAULTLIB:libcd.lib /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrtd.lib")
 	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /DYNAMICBASE:NO /BASE:0x10000 /FIXED")
 
@@ -30,14 +30,11 @@ else()
 	add_compile_options(-Werror=old-style-cast)
 	add_compile_options(-Werror=sign-compare)
 	add_compile_options(-Werror=reorder)
+	add_compile_options(-Werror=return-type)
 
 	#TODO Clean the code so these are removed
-	add_compile_options(-Wno-unused-variable)
-	add_compile_options(-Wno-unknown-pragmas)
-	add_compile_options(-Wno-invalid-offsetof)
 	add_compile_options(-Wno-unused-function)
 	add_compile_options(-Wno-attributes)
-	add_compile_options(-Wno-comment)
 
 	if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 		add_compile_options(-fconstexpr-steps=16777216)

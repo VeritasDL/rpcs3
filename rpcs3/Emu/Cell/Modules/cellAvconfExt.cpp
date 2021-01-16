@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "Emu/system_config.h"
 #include "Emu/Cell/PPUModule.h"
 #include "Emu/IdManager.h"
@@ -45,7 +45,7 @@ avconf_manager::avconf_manager()
 {
 	u32 curindex = 0;
 
-	auto mic_list = fmt::split(g_cfg.audio.microphone_devices, {"@@@"});
+	auto mic_list = fmt::split(g_cfg.audio.microphone_devices.to_string(), {"@@@"});
 	if (!mic_list.empty())
 	{
 		switch (g_cfg.audio.microphone_type)

@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "IdManager.h"
 #include "System.h"
 #include "VFS.h"
@@ -291,17 +291,15 @@ std::string vfs::escape(std::string_view name, bool escape_slash)
 {
 	std::string result;
 
-	if (name.size() > 2 && name.find_first_not_of('.') == umax)
+	if (name.size() <= 2 && name.find_first_not_of('.') == umax)
 	{
-		// Name contains only dots, not allowed on Windows.
-		result.reserve(name.size() + 2);
-		result += reinterpret_cast<const char*>(u8"．");
-		result += name.substr(1);
+		// Return . or .. as is
+		result = name;
 		return result;
 	}
 
 	// Emulate NTS (limited)
-	auto get_char = [&](std::size_t pos) -> char2
+	auto get_char = [&](usz pos) -> char2
 	{
 		if (pos < name.size())
 		{
@@ -352,7 +350,7 @@ std::string vfs::escape(std::string_view name, bool escape_slash)
 
 	result.reserve(result.size() + name.size());
 
-	for (std::size_t i = 0, s = name.size(); i < s; i++)
+	for (usz i = 0, s = name.size(); i < s; i++)
 	{
 		switch (char2 c = name[i])
 		{
@@ -450,10 +448,28 @@ std::string vfs::escape(std::string_view name, bool escape_slash)
 			result += c;
 			break;
 		}
+		case '.':
+		case ' ':
+		{
+			if (!get_char(i + 1))
+			{
+				switch (c)
+				{
+				// Directory name ended with a space or a period, not allowed on Windows.
+				case '.': result += reinterpret_cast<const char*>(u8"．"); break;
+				case ' ': result += reinterpret_cast<const char*>(u8"＿"); break;
+				}
+
+				break;
+			}
+
+			result += c;
+			break;
+		}
 		case char2{u8"！"[0]}:
 		{
 			// Escape full-width characters 0xFF01..0xFF5e with ！ (0xFF01)
-			switch (char2 c2 = get_char(i + 1))
+			switch (get_char(i + 1))
 			{
 			case char2{u8"！"[1]}:
 			{
@@ -499,7 +515,7 @@ std::string vfs::unescape(std::string_view name)
 	result.reserve(name.size());
 
 	// Emulate NTS
-	auto get_char = [&](std::size_t pos) -> char2
+	auto get_char = [&](usz pos) -> char2
 	{
 		if (pos < name.size())
 		{
@@ -511,13 +527,13 @@ std::string vfs::unescape(std::string_view name)
 		}
 	};
 
-	for (std::size_t i = 0, s = name.size(); i < s; i++)
+	for (usz i = 0, s = name.size(); i < s; i++)
 	{
 		switch (char2 c = name[i])
 		{
 		case char2{u8"！"[0]}:
 		{
-			switch (char2 c2 = get_char(i + 1))
+			switch (get_char(i + 1))
 			{
 			case char2{u8"！"[1]}:
 			{
@@ -584,6 +600,11 @@ std::string vfs::unescape(std::string_view name)
 
 						i += 3;
 						continue;
+					}
+					case char2{u8"＿"[2]}:
+					{
+						result += ' ';
+						break;
 					}
 					case char2{u8"．"[2]}:
 					{
@@ -707,7 +728,7 @@ std::string vfs::unescape(std::string_view name)
 
 std::string vfs::host::hash_path(const std::string& path, const std::string& dev_root)
 {
-	return fmt::format(u8"%s/＄%s%s", dev_root, fmt::base57(std::hash<std::string>()(path)), fmt::base57(__rdtsc()));
+	return fmt::format(u8"%s/＄%s%s", dev_root, fmt::base57(std::hash<std::string>()(path)), fmt::base57(utils::get_unique_tsc()));
 }
 
 bool vfs::host::rename(const std::string& from, const std::string& to, const lv2_fs_mount_point* mp, bool overwrite)
@@ -727,7 +748,7 @@ bool vfs::host::rename(const std::string& from, const std::string& to, const lv2
 	{
 		if (check_path(fs::escape_path(file.real_path)))
 		{
-			verify(HERE), file.mp == mp;
+			ensure(file.mp == mp);
 			file.restore_data.seek_pos = file.file.pos();
 			file.file.close(); // Actually close it!
 		}
@@ -767,7 +788,7 @@ bool vfs::host::rename(const std::string& from, const std::string& to, const lv2
 			// Reopen with ignored TRUNC, APPEND, CREATE and EXCL flags
 			auto res0 = lv2_file::open_raw(file.real_path, file.flags & CELL_FS_O_ACCMODE, file.mode, file.type, file.mp);
 			file.file = std::move(res0.file);
-			verify(HERE), file.file.operator bool();
+			ensure(file.file.operator bool());
 			file.file.seek(file.restore_data.seek_pos);
 		}
 	});

@@ -1,5 +1,3 @@
-﻿#include "stdafx.h"
-
 #include "main_window.h"
 #include "qt_utils.h"
 #include "vfs_dialog.h"
@@ -27,8 +25,10 @@
 #include "pkg_install_dialog.h"
 #include "category.h"
 #include "gui_settings.h"
+#include "input_dialog.h"
 
 #include <thread>
+#include <charconv>
 
 #include <QScreen>
 #include <QDirIterator>
@@ -38,10 +38,12 @@
 
 #include "rpcs3_version.h"
 #include "Emu/System.h"
+#include "Emu/IdManager.h"
 #include "Emu/system_config.h"
 
 #include "Crypto/unpkg.h"
 #include "Crypto/unself.h"
+#include "Crypto/unedat.h"
 
 #include "Loader/PUP.h"
 #include "Loader/TAR.h"
@@ -52,7 +54,7 @@
 
 LOG_CHANNEL(gui_log, "GUI");
 
-extern std::atomic<bool> g_user_asked_for_frame_capture;
+extern atomic_t<bool> g_user_asked_for_frame_capture;
 
 inline std::string sstr(const QString& _in) { return _in.toStdString(); }
 
@@ -204,7 +206,7 @@ void main_window::Init()
 	m_download_menu_action = ui->menuBar->addMenu(download_menu);
 #endif
 
-	ASSERT(m_download_menu_action);
+	ensure(m_download_menu_action);
 	m_download_menu_action->setVisible(false);
 
 	connect(&m_updater, &update_manager::signal_update_available, this, [this](bool update_available)
@@ -300,10 +302,6 @@ void main_window::OnPlayOrPause()
 
 void main_window::show_boot_error(game_boot_result status)
 {
-	if (status == game_boot_result::no_errors)
-	{
-		return;
-	}
 	QString message;
 	switch (status)
 	{
@@ -325,9 +323,9 @@ void main_window::show_boot_error(game_boot_result status)
 	case game_boot_result::file_creation_error:
 		message = tr("The emulator could not create files required for booting.");
 		break;
-	case game_boot_result::firmware_missing:
-		message = tr("Firmware has not been installed. Install firmware with the \"File > Install Firmware\" menu option.");
-		break;
+	case game_boot_result::firmware_missing: // Handled elsewhere
+	case game_boot_result::no_errors:
+		return;
 	case game_boot_result::generic_error:
 	default:
 		message = tr("Unknown error.");
@@ -513,7 +511,44 @@ void main_window::InstallPackages(QStringList file_paths)
 	else if (file_paths.count() == 1)
 	{
 		// This can currently only happen by drag and drop.
-		if (QMessageBox::question(this, tr("PKG Decrypter / Installer"), tr("Install package: %1?").arg(file_paths.front()),
+		const QString file_path = file_paths.front();
+		const QFileInfo file_info(file_path);
+
+		compat::package_info info = game_compatibility::GetPkgInfo(file_path, m_game_list_frame ? m_game_list_frame->GetGameCompatibility() : nullptr);
+
+		if (info.type != compat::package_type::other)
+		{
+			if (info.type == compat::package_type::dlc)
+			{
+				info.local_cat = tr("\nDLC", "Block for package type (DLC)");
+			}
+			else
+			{
+				info.local_cat = tr("\nUpdate", "Block for package type (Update)");
+			}
+		}
+		else if (!info.local_cat.isEmpty())
+		{
+			info.local_cat = tr("\n%0", "Block for package type").arg(info.local_cat);
+		}
+
+		if (!info.title_id.isEmpty())
+		{
+			info.title_id = tr("\n%0", "Block for Title ID").arg(info.title_id);
+		}
+
+		if (!info.version.isEmpty())
+		{
+			info.version = tr("\nVersion %0", "Block for Version").arg(info.version);
+		}
+
+		if (!info.changelog.isEmpty())
+		{
+			info.changelog = tr("\n\nChangelog:\n%0", "Block for Changelog").arg(info.changelog);
+		}
+
+		if (QMessageBox::question(this, tr("PKG Decrypter / Installer"), tr("Do you want to install this package?\n\n%0\n\n%1%2%3%4%5")
+			.arg(file_info.fileName()).arg(info.title).arg(info.local_cat).arg(info.title_id).arg(info.version).arg(info.changelog),
 			QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
 		{
 			gui_log.notice("PKG: Cancelled installation from drop. File: %s", sstr(file_paths.front()));
@@ -540,37 +575,38 @@ void main_window::InstallPackages(QStringList file_paths)
 	// Find remaining package files
 	file_paths = file_paths.filter(QRegExp(".*\\.pkg", Qt::CaseInsensitive));
 
-	if (file_paths.isEmpty())
+	if (!file_paths.isEmpty())
 	{
-		return;
-	}
-
-	// Let the user choose the packages to install and select the order in which they shall be installed.
-	if (file_paths.size() > 1)
-	{
-		pkg_install_dialog dlg(file_paths, this);
-		connect(&dlg, &QDialog::accepted, [&file_paths, &dlg]()
+		// Handle further installations with a timeout. Otherwise the source explorer instance is not usable during the following file processing.
+		QTimer::singleShot(0, [this, paths = std::move(file_paths)]()
 		{
-			file_paths = dlg.GetPathsToInstall();
+			HandlePackageInstallation(paths);
 		});
-		dlg.exec();
 	}
-
-	if (file_paths.empty())
-	{
-		return;
-	}
-
-	// Handle the actual installations with a timeout. Otherwise the source explorer instance is not usable during the following file processing.
-	QTimer::singleShot(0, [this, file_paths]()
-	{
-		HandlePackageInstallation(file_paths);
-	});
 }
 
 void main_window::HandlePackageInstallation(QStringList file_paths)
 {
-	if (file_paths.isEmpty())
+	std::vector<compat::package_info> packages;
+
+	game_compatibility* compat = m_game_list_frame ? m_game_list_frame->GetGameCompatibility() : nullptr;
+
+	if (file_paths.size() > 1)
+	{
+		// Let the user choose the packages to install and select the order in which they shall be installed.
+		pkg_install_dialog dlg(file_paths, compat, this);
+		connect(&dlg, &QDialog::accepted, [&packages, &dlg]()
+		{
+			packages = dlg.GetPathsToInstall();
+		});
+		dlg.exec();
+	}
+	else
+	{
+		packages.push_back(game_compatibility::GetPkgInfo(file_paths.front(), compat));
+	}
+
+	if (packages.empty())
 	{
 		return;
 	}
@@ -581,6 +617,7 @@ void main_window::HandlePackageInstallation(QStringList file_paths)
 	}
 
 	progress_dialog pdlg(tr("RPCS3 Package Installer"), tr("Installing package, please wait..."), tr("Cancel"), 0, 1000, false, this);
+	pdlg.setAutoClose(false);
 	pdlg.show();
 
 	// Synchronization variable
@@ -590,20 +627,42 @@ void main_window::HandlePackageInstallation(QStringList file_paths)
 
 	bool cancelled = false;
 
-	for (int i = 0, count = file_paths.count(); i < count; i++)
+	for (size_t i = 0, count = packages.size(); i < count; i++)
 	{
 		progress = 0.;
 
+		const compat::package_info& package = packages.at(i);
+		QString app_info = package.title; // This should always be non-empty
+
+		if (!package.title_id.isEmpty() || !package.version.isEmpty())
+		{
+			app_info += QStringLiteral("\n");
+
+			if (!package.title_id.isEmpty())
+			{
+				app_info += package.title_id;
+			}
+
+			if (!package.version.isEmpty())
+			{
+				if (!package.title_id.isEmpty())
+				{
+					app_info += " ";
+				}
+
+				app_info += tr("v.%0", "Package version for install progress dialog").arg(package.version);
+			}
+		}
+
 		pdlg.SetValue(0);
-		pdlg.setLabelText(tr("Installing package (%0/%1), please wait...").arg(i + 1).arg(count));
+		pdlg.setLabelText(tr("Installing package (%0/%1), please wait...\n\n%2").arg(i + 1).arg(count).arg(app_info));
 		pdlg.show();
 
 		Emu.SetForceBoot(true);
 		Emu.Stop();
 
-		const QString file_path = file_paths.at(i);
-		const QFileInfo file_info(file_path);
-		const std::string path = sstr(file_path);
+		const QFileInfo file_info(package.path);
+		const std::string path      = sstr(package.path);
 		const std::string file_name = sstr(file_info.fileName());
 
 		// Run PKG unpacking asynchronously
@@ -632,7 +691,7 @@ void main_window::HandlePackageInstallation(QStringList file_paths)
 
 			// Update progress window
 			double pval = progress;
-			if (pval < 0) pval += 1.;
+			if (pval < 0.) pval += 1.;
 			pdlg.SetValue(static_cast<int>(pval * pdlg.maximum()));
 			QCoreApplication::processEvents();
 		}
@@ -651,7 +710,7 @@ void main_window::HandlePackageInstallation(QStringList file_paths)
 		if (worker())
 		{
 			m_game_list_frame->Refresh(true);
-			gui_log.success("Successfully installed %s.", file_name);
+			gui_log.success("Successfully installed %s (title_id=%s, title=%s, version=%s).", file_name, sstr(package.title_id), sstr(package.title), sstr(package.version));
 
 			if (i == (count - 1))
 			{
@@ -665,12 +724,12 @@ void main_window::HandlePackageInstallation(QStringList file_paths)
 				if (error == package_error::app_version)
 				{
 					gui_log.error("Cannot install %s.", file_name);
-					QMessageBox::warning(this, tr("Warning!"), tr("The following package cannot be installed on top of the current data:\n%1!").arg(file_path));
+					QMessageBox::warning(this, tr("Warning!"), tr("The following package cannot be installed on top of the current data:\n%1!").arg(package.path));
 				}
 				else
 				{
 					gui_log.error("Failed to install %s.", file_name);
-					QMessageBox::critical(this, tr("Failure!"), tr("Failed to install software from package:\n%1!").arg(file_path));
+					QMessageBox::critical(this, tr("Failure!"), tr("Failed to install software from package:\n%1!").arg(package.path));
 				}
 			}
 			return;
@@ -780,12 +839,12 @@ void main_window::HandlePupInstallation(QString file_path)
 
 	std::string version_string = pup.get_file(0x100).to_string();
 
-	if (const size_t version_pos = version_string.find('\n'); version_pos != umax)
+	if (const usz version_pos = version_string.find('\n'); version_pos != umax)
 	{
 		version_string.erase(version_pos);
 	}
 
-	const std::string cur_version = "4.86";
+	const std::string cur_version = "4.87";
 
 	if (version_string < cur_version &&
 		QMessageBox::question(this, tr("RPCS3 Firmware Installer"), tr("Old firmware detected.\nThe newest firmware version is %1 and you are trying to install version %2\nContinue installation?").arg(qstr(cur_version), qstr(version_string)),
@@ -880,27 +939,55 @@ void main_window::DecryptSPRXLibraries()
 		return;
 	}
 
-	if (!m_gui_settings->GetBootConfirmation(this))
-	{
-		return;
-	}
-
-	Emu.SetForceBoot(true);
-	Emu.Stop();
-
 	m_gui_settings->SetValue(gui::fd_decrypt_sprx, QFileInfo(modules.first()).path());
 
 	gui_log.notice("Decrypting binaries...");
+
+	// Always start with no KLIC
+	std::vector<u128> klics{u128{}};
+
+	if (const auto keys = g_fxo->get<loaded_npdrm_keys>())
+	{
+		// Second klic: get it from a running game
+		if (const u128 klic = keys->devKlic)
+		{
+			klics.emplace_back(klic);
+		}
+	}
 
 	for (const QString& _module : modules)
 	{
 		const std::string old_path = sstr(_module);
 
-		fs::file elf_file(old_path);
+		fs::file elf_file;
 
-		if (elf_file && elf_file.size() >= 4 && elf_file.read<u32>() == "SCE\0"_u32)
+		bool tried = false;
+		bool invalid = false;
+		usz key_it = 0;
+
+		while (true)
 		{
-			elf_file = decrypt_self(std::move(elf_file));
+			for (; key_it < klics.size(); key_it++)
+			{
+				if (elf_file.open(old_path) && elf_file.size() >= 4 && elf_file.read<u32>() == "SCE\0"_u32)
+				{
+					// First KLIC is no KLIC
+					elf_file = decrypt_self(std::move(elf_file), key_it != 0 ? reinterpret_cast<u8*>(&klics[key_it]) : nullptr);
+
+					if (!elf_file)
+					{
+						// Try another key
+						continue;
+					}
+				}
+				else
+				{
+					elf_file = {};
+					invalid = true;
+				}
+
+				break;
+			}
 
 			if (elf_file)
 			{
@@ -916,11 +1003,70 @@ void main_window::DecryptSPRXLibraries()
 				{
 					gui_log.error("Failed to create %s", new_path);
 				}
+
+				break;
 			}
-			else
+			else if (!invalid)
 			{
-				gui_log.error("Failed to decrypt %s", old_path);
+				// Allow the user to manually type KLIC if decryption failed
+
+				const std::string filename = old_path.substr(old_path.find_last_of(fs::delim) + 1);
+
+				const QString hint = tr("Hint: KLIC (KLicense key) is a 16-byte long string. (32 hexadecimal characters)"
+							"\nAnd is logged with some sceNpDrm* functions when the game/application which owns \"%0\" is running.").arg(qstr(filename));
+
+				if (tried)
+				{
+					gui_log.error("Failed to decrypt %s with specfied KLIC, retrying.\n%s", old_path, sstr(hint));
+				}
+
+				input_dialog dlg(32, "", tr("Enter KLIC of %0").arg(qstr(filename)),
+					tried ? tr("Decryption failed with provided KLIC.\n%0").arg(hint) : tr("Hexadecimal only."), "00000000000000000000000000000000", this);
+
+				QFont mono = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+				mono.setPointSize(8);
+				dlg.set_input_font(mono, true, '0');
+				dlg.set_clear_button_enabled(false);
+				dlg.set_button_enabled(QDialogButtonBox::StandardButton::Ok, false);
+				dlg.set_validator(new QRegExpValidator(QRegExp("^[a-fA-F0-9]*$"))); // HEX only
+
+				connect(&dlg, &input_dialog::text_changed, [&](const QString& text)
+				{
+					dlg.set_button_enabled(QDialogButtonBox::StandardButton::Ok, text.size() == 32);
+				});
+
+				if (dlg.exec() == QDialog::Accepted)
+				{
+					const std::string text = sstr(dlg.get_input_text());
+
+					auto& klic = (tried ? klics.back() : klics.emplace_back());
+
+					ensure(text.size() == 32);
+
+					// It must succeed (only hex characters are present)
+					u64 lo_ = 0;
+					u64 hi_ = 0;
+					std::from_chars(&text[0], &text[16], lo_, 16);
+					std::from_chars(&text[16], &text[32], hi_, 16);
+
+					be_t<u64> lo = std::bit_cast<be_t<u64>>(lo_);
+					be_t<u64> hi = std::bit_cast<be_t<u64>>(hi_);
+
+					klic = (u128{+hi} << 64) | +lo;
+
+					// Retry with specified KLIC
+					key_it -= +std::exchange(tried, true); // Rewind on second and above attempt
+					gui_log.notice("KLIC entered for %s: %s", filename, klic);
+					continue;
+				}
+				else
+				{
+					gui_log.notice("User has cancelled entering KLIC.");
+				}
 			}
+
+			gui_log.error("Failed to decrypt \"%s\".", old_path);
+			break;
 		}
 	}
 
@@ -945,9 +1091,9 @@ void main_window::SaveWindowState()
 
 void main_window::RepaintThumbnailIcons()
 {
-	const QColor new_color = gui::utils::get_label_color("thumbnail_icon_color");
+	[[maybe_unused]] const QColor new_color = gui::utils::get_label_color("thumbnail_icon_color");
 
-	const auto icon = [&new_color](const QString& path)
+	[[maybe_unused]] const auto icon = [&new_color](const QString& path)
 	{
 		return gui::utils::get_colorized_icon(QPixmap::fromImage(gui::utils::get_opaque_image_area(path)), Qt::black, new_color);
 	};
@@ -1152,6 +1298,12 @@ void main_window::OnEmuStop()
 	if (m_game_list_frame)
 	{
 		m_game_list_frame->Refresh();
+	}
+
+	// Close kernel explorer if running
+	if (m_kernel_explorer)
+	{
+		m_kernel_explorer->close();
 	}
 }
 
@@ -1674,14 +1826,21 @@ void main_window::CreateConnects()
 
 	connect(ui->toolskernel_explorerAct, &QAction::triggered, [this]
 	{
-		kernel_explorer* kernelExplorer = new kernel_explorer(this);
-		kernelExplorer->show();
+		if (!m_kernel_explorer)
+		{
+			m_kernel_explorer = new kernel_explorer(this, [this]()
+			{
+				m_kernel_explorer = nullptr;
+			});
+		}
+
+		m_kernel_explorer->show();
 	});
 
 	connect(ui->toolsmemory_viewerAct, &QAction::triggered, [this]
 	{
-		memory_viewer_panel* mvp = new memory_viewer_panel(this);
-		mvp->show();
+		if (!Emu.IsStopped())
+			idm::make<memory_viewer_handle>(this);
 	});
 
 	connect(ui->toolsRsxDebuggerAct, &QAction::triggered, [this]
@@ -2227,7 +2386,10 @@ void main_window::closeEvent(QCloseEvent* closeEvent)
 	}
 
 	// Cleanly stop and quit the emulator.
-	Emu.Stop();
+	if (!Emu.IsStopped())
+	{
+		Emu.Stop();
+	}
 	Emu.Quit(true);
 }
 

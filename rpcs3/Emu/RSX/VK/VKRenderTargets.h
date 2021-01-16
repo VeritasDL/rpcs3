@@ -1,9 +1,15 @@
-﻿#pragma once
+#pragma once
 
-#include "stdafx.h"
-#include "VKHelpers.h"
-#include "VKFormats.h"
+#include "util/types.hpp"
 #include "../Common/surface_store.h"
+
+#include "VKFormats.h"
+#include "VKHelpers.h"
+#include "vkutils/barriers.h"
+#include "vkutils/data_heap.h"
+#include "vkutils/device.h"
+#include "vkutils/image.h"
+#include "vkutils/scratch.h"
 
 namespace vk
 {
@@ -21,7 +27,6 @@ namespace vk
 			if (!resolve_surface)
 			{
 				// Create a resolve surface
-				auto pdev = vk::get_current_renderer();
 				const auto resolve_w = width() * samples_x;
 				const auto resolve_h = height() * samples_y;
 
@@ -29,8 +34,8 @@ namespace vk
 				usage |= (this->info.usage & (VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT));
 
 				resolve_surface.reset(new vk::viewable_image(
-					*pdev,
-					pdev->get_memory_mapping().device_local,
+					*g_render_device,
+					g_render_device->get_memory_mapping().device_local,
 					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 					VK_IMAGE_TYPE_2D,
 					format(),
@@ -59,7 +64,7 @@ namespace vk
 
 			if (!is_depth_surface()) [[likely]]
 			{
-				verify(HERE), current_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+				ensure(current_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
 				// This is the source; finish writing before reading
 				vk::insert_image_memory_barrier(
@@ -127,12 +132,12 @@ namespace vk
 		// Unresolve the linear data into planar MSAA data
 		void unresolve(vk::command_buffer& cmd)
 		{
-			verify(HERE), !(msaa_flags & rsx::surface_state_flags::require_resolve);
+			ensure(!(msaa_flags & rsx::surface_state_flags::require_resolve));
 			VkImageSubresourceRange range = { aspect(), 0, 1, 0, 1 };
 
 			if (!is_depth_surface()) [[likely]]
 			{
-				verify(HERE), current_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+				ensure(current_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
 				// This is the dest; finish reading before writing
 				vk::insert_image_memory_barrier(
@@ -329,7 +334,8 @@ namespace vk
 			}
 
 			// A read barrier should have been called before this!
-			verify("Read access without explicit barrier" HERE), resolve_surface, !(msaa_flags & rsx::surface_state_flags::require_resolve);
+			ensure(resolve_surface); // "Read access without explicit barrier"
+			ensure(!(msaa_flags & rsx::surface_state_flags::require_resolve));
 			return resolve_surface.get();
 		}
 
@@ -454,7 +460,7 @@ namespace vk
 					// NOTE: This step CAN introduce MSAA flags!
 					initialize_memory(cmd, read_access);
 
-					verify(HERE), state_flags == rsx::surface_state_flags::ready;
+					ensure(state_flags == rsx::surface_state_flags::ready);
 					on_write(rsx::get_shared_tag(), static_cast<rsx::surface_state_flags>(msaa_flags));
 				}
 
@@ -472,7 +478,7 @@ namespace vk
 					if (!read_access)
 					{
 						// Only do this step when it is needed to start rendering
-						verify(HERE), resolve_surface;
+						ensure(resolve_surface);
 						unresolve(cmd);
 					}
 				}
@@ -543,7 +549,7 @@ namespace vk
 				{
 					// Might introduce MSAA flags
 					initialize_memory(cmd, false);
-					verify(HERE), state_flags == rsx::surface_state_flags::ready;
+					ensure(state_flags == rsx::surface_state_flags::ready);
 				}
 
 				if (msaa_flags & rsx::surface_state_flags::require_resolve)
@@ -597,7 +603,7 @@ namespace vk
 
 	static inline vk::render_target* as_rtt(vk::image* t)
 	{
-		return verify(HERE, dynamic_cast<vk::render_target*>(t));
+		return ensure(dynamic_cast<vk::render_target*>(t));
 	}
 }
 
@@ -614,7 +620,7 @@ namespace rsx
 		static std::unique_ptr<vk::render_target> create_new_surface(
 			u32 address,
 			surface_color_format format,
-			size_t width, size_t height, size_t pitch,
+			usz width, usz height, usz pitch,
 			rsx::surface_antialiasing antialias,
 			vk::render_device &device, vk::command_buffer& cmd)
 		{
@@ -651,7 +657,7 @@ namespace rsx
 				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 				VK_IMAGE_TYPE_2D,
 				requested_format,
-				static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1, 1, 1,
+				static_cast<u32>(width_), static_cast<u32>(height_), 1, 1, 1,
 				static_cast<VkSampleCountFlagBits>(samples),
 				VK_IMAGE_LAYOUT_UNDEFINED,
 				VK_IMAGE_TILING_OPTIMAL,
@@ -679,7 +685,7 @@ namespace rsx
 		static std::unique_ptr<vk::render_target> create_new_surface(
 			u32 address,
 			surface_depth_format2 format,
-			size_t width, size_t height, size_t pitch,
+			usz width, usz height, usz pitch,
 			rsx::surface_antialiasing antialias,
 			vk::render_device &device, vk::command_buffer& cmd)
 		{
@@ -711,7 +717,7 @@ namespace rsx
 				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 				VK_IMAGE_TYPE_2D,
 				requested_format,
-				static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1, 1, 1,
+				static_cast<u32>(width_), static_cast<u32>(height_), 1, 1, 1,
 				static_cast<VkSampleCountFlagBits>(samples),
 				VK_IMAGE_LAYOUT_UNDEFINED,
 				VK_IMAGE_TILING_OPTIMAL,
@@ -827,12 +833,12 @@ namespace rsx
 		static void prepare_surface_for_sampling(vk::command_buffer& /*cmd*/, vk::render_target* /*surface*/)
 		{}
 
-		static bool surface_is_pitch_compatible(const std::unique_ptr<vk::render_target> &surface, size_t pitch)
+		static bool surface_is_pitch_compatible(const std::unique_ptr<vk::render_target> &surface, usz pitch)
 		{
 			return surface->rsx_pitch == pitch;
 		}
 
-		static void invalidate_surface_contents(vk::command_buffer& /*cmd*/, vk::render_target *surface, u32 address, size_t pitch)
+		static void invalidate_surface_contents(vk::command_buffer& /*cmd*/, vk::render_target *surface, u32 address, usz pitch)
 		{
 			surface->rsx_pitch = static_cast<u16>(pitch);
 			surface->queue_tag(address);
@@ -868,7 +874,7 @@ namespace rsx
 		static bool int_surface_matches_properties(
 			const std::unique_ptr<vk::render_target> &surface,
 			VkFormat format,
-			size_t width, size_t height,
+			usz width, usz height,
 			rsx::surface_antialiasing antialias,
 			bool check_refs)
 		{
@@ -886,7 +892,7 @@ namespace rsx
 		static bool surface_matches_properties(
 			const std::unique_ptr<vk::render_target> &surface,
 			surface_color_format format,
-			size_t width, size_t height,
+			usz width, usz height,
 			rsx::surface_antialiasing antialias,
 			bool check_refs = false)
 		{
@@ -897,7 +903,7 @@ namespace rsx
 		static bool surface_matches_properties(
 			const std::unique_ptr<vk::render_target> &surface,
 			surface_depth_format2 format,
-			size_t width, size_t height,
+			usz width, usz height,
 			rsx::surface_antialiasing antialias,
 			bool check_refs = false)
 		{
@@ -936,7 +942,7 @@ namespace rsx
 			const u64 last_finished_frame = vk::get_last_completed_frame_id();
 			invalidated_resources.remove_if([&](std::unique_ptr<vk::render_target> &rtt)
 			{
-				verify(HERE), rtt->frame_tag != 0;
+				ensure(rtt->frame_tag != 0);
 
 				if (rtt->unused_check_count() >= 2 && rtt->frame_tag < last_finished_frame)
 					return true;

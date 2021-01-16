@@ -1,11 +1,14 @@
-﻿#pragma once
-#include "VKHelpers.h"
+#pragma once
 #include "../rsx_utils.h"
 #include "Utilities/hash.h"
 #include "Utilities/lockless.h"
+#include "VKProgramPipeline.h"
+#include "vkutils/graphics_pipeline_state.hpp"
 
 namespace vk
 {
+	class render_device;
+
 	struct pipeline_props
 	{
 		graphics_pipeline_state state;
@@ -163,9 +166,9 @@ namespace vk
 namespace rpcs3
 {
 	template <>
-	size_t hash_struct<vk::pipeline_props>(const vk::pipeline_props &pipelineProperties)
+	usz hash_struct<vk::pipeline_props>(const vk::pipeline_props &pipelineProperties)
 	{
-		size_t seed = hash_base(pipelineProperties.renderpass_key);
+		usz seed = hash_base(pipelineProperties.renderpass_key);
 		seed ^= hash_struct(pipelineProperties.state.ia);
 		seed ^= hash_struct(pipelineProperties.state.ds);
 		seed ^= hash_struct(pipelineProperties.state.rs);

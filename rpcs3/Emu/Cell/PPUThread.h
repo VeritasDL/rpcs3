@@ -1,8 +1,11 @@
-﻿#pragma once
+#pragma once
 
 #include "../CPU/CPUThread.h"
 #include "../Memory/vm_ptr.h"
 #include "Utilities/lockless.h"
+
+#include "util/logs.hpp"
+#include "util/v128.hpp"
 
 LOG_CHANNEL(ppu_log, "PPU");
 
@@ -59,6 +62,54 @@ struct ppu_thread_params
 	u64 arg1;
 };
 
+struct cmd64
+{
+	u64 m_data = 0;
+
+	constexpr cmd64() noexcept = default;
+
+	struct pair_t
+	{
+		u32 arg1;
+		u32 arg2;
+	};
+
+	template <typename T, typename T2 = simple_t<T>>
+	cmd64(const T& value)
+		: m_data(std::bit_cast<u64, T2>(value))
+	{
+	}
+
+	template <typename T1, typename T2>
+	cmd64(const T1& arg1, const T2& arg2)
+		: cmd64(pair_t{std::bit_cast<u32>(arg1), std::bit_cast<u32>(arg2)})
+	{
+	}
+
+	explicit operator bool() const
+	{
+		return m_data != 0;
+	}
+
+	template <typename T>
+	T as() const
+	{
+		return std::bit_cast<T>(m_data);
+	}
+
+	template <typename T>
+	T arg1() const
+	{
+		return std::bit_cast<T>(std::bit_cast<pair_t>(m_data).arg1);
+	}
+
+	template <typename T>
+	T arg2() const
+	{
+		return std::bit_cast<T>(std::bit_cast<pair_t>(m_data).arg2);
+	}
+};
+
 class ppu_thread : public cpu_thread
 {
 public:
@@ -87,7 +138,7 @@ public:
 		u8 bits[32];
 		u32 fields[8];
 
-		u8& operator [](std::size_t i)
+		u8& operator [](usz i)
 		{
 			return bits[i];
 		}
@@ -215,7 +266,7 @@ public:
 	const char* last_function{}; // Sticky copy of current_function, is not cleared on function return
 
 	// Thread name
-	stx::atomic_cptr<std::string> ppu_tname;
+	atomic_ptr<std::string> ppu_tname;
 
 	u64 last_ftsc = 0;
 	u64 last_ftime = 0;
@@ -267,20 +318,6 @@ struct ppu_gpr_cast_impl<b8, void>
 	static inline b8 from(const u64 reg)
 	{
 		return static_cast<u32>(reg) != 0;
-	}
-};
-
-template<>
-struct ppu_gpr_cast_impl<error_code, void>
-{
-	static inline u64 to(const error_code& code)
-	{
-		return code;
-	}
-
-	static inline error_code from(const u64 reg)
-	{
-		return not_an_error(reg);
 	}
 };
 

@@ -1,12 +1,23 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "../Overlays/overlay_shader_compile_notification.h"
 #include "../Overlays/Shaders/shader_loading_dialog_native.h"
 #include "VKGSRender.h"
+#include "VKHelpers.h"
 #include "VKCommonDecompiler.h"
+#include "VKCompute.h"
 #include "VKRenderPass.h"
 #include "VKResourceManager.h"
 #include "VKCommandStream.h"
+
+#include "vkutils/buffer_object.h"
+#include "vkutils/scratch.h"
+
+#include "Emu/RSX/rsx_methods.h"
 #include "Emu/Memory/vm_locking.h"
+
+#include "../Common/program_state_cache2.hpp"
+
+#include "util/asm.hpp"
 
 namespace vk
 {
@@ -20,13 +31,13 @@ namespace vk
 		switch (color_format)
 		{
 		case rsx::surface_color_format::r5g6b5:
-			return std::make_pair(VK_FORMAT_R5G6B5_UNORM_PACK16, vk::default_component_map());
+			return std::make_pair(VK_FORMAT_R5G6B5_UNORM_PACK16, vk::default_component_map);
 
 		case rsx::surface_color_format::a8r8g8b8:
-			return std::make_pair(VK_FORMAT_B8G8R8A8_UNORM, vk::default_component_map());
+			return std::make_pair(VK_FORMAT_B8G8R8A8_UNORM, vk::default_component_map);
 
 		case rsx::surface_color_format::a8b8g8r8:
-			return std::make_pair(VK_FORMAT_R8G8B8A8_UNORM, vk::default_component_map());
+			return std::make_pair(VK_FORMAT_R8G8B8A8_UNORM, vk::default_component_map);
 
 		case rsx::surface_color_format::x8b8g8r8_o8b8g8r8:
 			return std::make_pair(VK_FORMAT_R8G8B8A8_UNORM, o_rgb);
@@ -41,10 +52,10 @@ namespace vk
 			return std::make_pair(VK_FORMAT_B8G8R8A8_UNORM, o_rgb);
 
 		case rsx::surface_color_format::w16z16y16x16:
-			return std::make_pair(VK_FORMAT_R16G16B16A16_SFLOAT, vk::default_component_map());
+			return std::make_pair(VK_FORMAT_R16G16B16A16_SFLOAT, vk::default_component_map);
 
 		case rsx::surface_color_format::w32z32y32x32:
-			return std::make_pair(VK_FORMAT_R32G32B32A32_SFLOAT, vk::default_component_map());
+			return std::make_pair(VK_FORMAT_R32G32B32A32_SFLOAT, vk::default_component_map);
 
 		case rsx::surface_color_format::x1r5g5b5_o1r5g5b5:
 			return std::make_pair(VK_FORMAT_A1R5G5B5_UNORM_PACK16, o_rgb);
@@ -72,7 +83,7 @@ namespace vk
 
 		default:
 			rsx_log.error("Surface color buffer: Unsupported surface color format (0x%x)", static_cast<u32>(color_format));
-			return std::make_pair(VK_FORMAT_B8G8R8A8_UNORM, vk::default_component_map());
+			return std::make_pair(VK_FORMAT_B8G8R8A8_UNORM, vk::default_component_map);
 		}
 	}
 
@@ -97,7 +108,7 @@ namespace vk
 		case rsx::logic_op::logic_nand: return VK_LOGIC_OP_NAND;
 		case rsx::logic_op::logic_set: return VK_LOGIC_OP_SET;
 		default:
-			fmt::throw_exception("Unknown logic op 0x%x" HERE, static_cast<u32>(op));
+			fmt::throw_exception("Unknown logic op 0x%x", static_cast<u32>(op));
 		}
 	}
 
@@ -121,7 +132,7 @@ namespace vk
 		case rsx::blend_factor::one_minus_constant_color: return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
 		case rsx::blend_factor::src_alpha_saturate: return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
 		default:
-			fmt::throw_exception("Unknown blend factor 0x%x" HERE, static_cast<u32>(factor));
+			fmt::throw_exception("Unknown blend factor 0x%x", static_cast<u32>(factor));
 		}
 	}
 
@@ -142,7 +153,7 @@ namespace vk
 		case rsx::blend_equation::min: return VK_BLEND_OP_MIN;
 		case rsx::blend_equation::max: return VK_BLEND_OP_MAX;
 		default:
-			fmt::throw_exception("Unknown blend op: 0x%x" HERE, static_cast<u32>(op));
+			fmt::throw_exception("Unknown blend op: 0x%x", static_cast<u32>(op));
 		}
 	}
 
@@ -159,7 +170,7 @@ namespace vk
 		case rsx::stencil_op::incr_wrap: return VK_STENCIL_OP_INCREMENT_AND_WRAP;
 		case rsx::stencil_op::decr_wrap: return VK_STENCIL_OP_DECREMENT_AND_WRAP;
 		default:
-			fmt::throw_exception("Unknown stencil op: 0x%x" HERE, static_cast<u32>(op));
+			fmt::throw_exception("Unknown stencil op: 0x%x", static_cast<u32>(op));
 		}
 	}
 
@@ -170,7 +181,7 @@ namespace vk
 		case rsx::front_face::cw: return VK_FRONT_FACE_CLOCKWISE;
 		case rsx::front_face::ccw: return VK_FRONT_FACE_COUNTER_CLOCKWISE;
 		default:
-			fmt::throw_exception("Unknown front face value: 0x%x" HERE, static_cast<u32>(ffv));
+			fmt::throw_exception("Unknown front face value: 0x%x", static_cast<u32>(ffv));
 		}
 	}
 
@@ -182,7 +193,7 @@ namespace vk
 		case rsx::cull_face::front: return VK_CULL_MODE_FRONT_BIT;
 		case rsx::cull_face::front_and_back: return VK_CULL_MODE_FRONT_AND_BACK;
 		default:
-			fmt::throw_exception("Unknown cull face value: 0x%x" HERE, static_cast<u32>(cfv));
+			fmt::throw_exception("Unknown cull face value: 0x%x", static_cast<u32>(cfv));
 		}
 	}
 }
@@ -194,7 +205,7 @@ namespace
 		const auto& binding_table = vk::get_current_renderer()->get_pipeline_binding_table();
 		std::vector<VkDescriptorSetLayoutBinding> bindings(binding_table.total_descriptor_bindings);
 
-		size_t idx = 0;
+		usz idx = 0;
 
 		// Vertex stream, one stream for cacheable data, one stream for transient data
 		for (int i = 0; i < 3; i++)
@@ -275,7 +286,7 @@ namespace
 			idx++;
 		}
 
-		verify(HERE), idx == binding_table.total_descriptor_bindings;
+		ensure(idx == binding_table.total_descriptor_bindings);
 
 		std::array<VkPushConstantRange, 1> push_constants;
 		push_constants[0].offset = 0;
@@ -291,7 +302,7 @@ namespace
 		VkDescriptorSetLayoutCreateInfo infos = {};
 		infos.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 		infos.pBindings = bindings.data();
-		infos.bindingCount = static_cast<uint32_t>(bindings.size());
+		infos.bindingCount = static_cast<u32>(bindings.size());
 
 		VkDescriptorSetLayout set_layout;
 		CHECK_RESULT(vkCreateDescriptorSetLayout(dev, &infos, nullptr, &set_layout));
@@ -316,9 +327,9 @@ u64 VKGSRender::get_cycles()
 
 VKGSRender::VKGSRender() : GSRender()
 {
-	if (m_thread_context.createInstance("RPCS3"))
+	if (m_instance.create("RPCS3"))
 	{
-		m_thread_context.makeCurrentInstance();
+		m_instance.bind();
 	}
 	else
 	{
@@ -327,7 +338,7 @@ VKGSRender::VKGSRender() : GSRender()
 		return;
 	}
 
-	std::vector<vk::physical_device>& gpus = m_thread_context.enumerateDevices();
+	std::vector<vk::physical_device>& gpus = m_instance.enumerate_devices();
 
 	//Actually confirm  that the loader found at least one compatible device
 	//This should not happen unless something is wrong with the driver setup on the target system
@@ -358,7 +369,7 @@ VKGSRender::VKGSRender() : GSRender()
 	{
 		if (gpu.get_name() == adapter_name)
 		{
-			m_swapchain.reset(m_thread_context.createSwapChain(display, gpu));
+			m_swapchain.reset(m_instance.create_swapchain(display, gpu));
 			gpu_found = true;
 			break;
 		}
@@ -366,7 +377,7 @@ VKGSRender::VKGSRender() : GSRender()
 
 	if (!gpu_found || adapter_name.empty())
 	{
-		m_swapchain.reset(m_thread_context.createSwapChain(display, gpus[0]));
+		m_swapchain.reset(m_instance.create_swapchain(display, gpus[0]));
 	}
 
 	if (!m_swapchain)
@@ -377,8 +388,6 @@ VKGSRender::VKGSRender() : GSRender()
 	}
 
 	m_device = const_cast<vk::render_device*>(&m_swapchain->get_device());
-
-	vk::set_current_thread_ctx(m_thread_context);
 	vk::set_current_renderer(m_swapchain->get_device());
 
 	m_swapchain_dims.width = m_frame->client_width();
@@ -466,7 +475,7 @@ VKGSRender::VKGSRender() : GSRender()
 	{
 		vkCreateSemaphore((*m_device), &semaphore_info, nullptr, &ctx.present_wait_semaphore);
 		vkCreateSemaphore((*m_device), &semaphore_info, nullptr, &ctx.acquire_signal_semaphore);
-		ctx.descriptor_pool.create(*m_device, sizes.data(), static_cast<uint32_t>(sizes.size()), DESCRIPTOR_MAX_DRAW_CALLS, 1);
+		ctx.descriptor_pool.create(*m_device, sizes.data(), static_cast<u32>(sizes.size()), DESCRIPTOR_MAX_DRAW_CALLS, 1);
 	}
 
 	const auto& memory_map = m_device->get_memory_mapping();
@@ -475,13 +484,6 @@ VKGSRender::VKGSRender() : GSRender()
 
 	vk::initialize_compiler_context();
 	vk::initialize_pipe_compiler(g_cfg.video.shader_compiler_threads_count);
-
-	if (g_cfg.video.overlay)
-	{
-		auto key = vk::get_renderpass_key(m_swapchain->get_surface_format());
-		m_text_writer = std::make_unique<vk::text_writer>();
-		m_text_writer->init(*m_device, vk::get_renderpass(*m_device, key));
-	}
 
 	m_prog_buffer = std::make_unique<vk::program_cache>
 	(
@@ -640,7 +642,7 @@ VKGSRender::~VKGSRender()
 
 	//Device handles/contexts
 	m_swapchain->destroy();
-	m_thread_context.close();
+	m_instance.destroy();
 
 #if defined(HAVE_X11) && defined(HAVE_VULKAN)
 	if (m_display_handle)
@@ -671,7 +673,7 @@ bool VKGSRender::on_access_violation(u32 address, bool is_writing)
 		if (g_fxo->get<rsx::dma_manager>()->is_current_thread())
 		{
 			// The offloader thread cannot handle flush requests
-			verify(HERE), !(m_queue_status & flush_queue_state::deadlock);
+			ensure(!(m_queue_status & flush_queue_state::deadlock));
 
 			m_offloader_fault_range = g_fxo->get<rsx::dma_manager>()->get_fault_range(is_writing);
 			m_offloader_fault_cause = (is_writing) ? rsx::invalidation_cause::write : rsx::invalidation_cause::read;
@@ -682,7 +684,7 @@ bool VKGSRender::on_access_violation(u32 address, bool is_writing)
 			// Wait for deadlock to clear
 			while (m_queue_status & flush_queue_state::deadlock)
 			{
-				_mm_pause();
+				utils::pause();
 			}
 
 			g_fxo->get<rsx::dma_manager>()->clear_mem_fault_flag();
@@ -758,7 +760,7 @@ void VKGSRender::on_semaphore_acquire_wait()
 
 bool VKGSRender::on_vram_exhausted(rsx::problem_severity severity)
 {
-	ASSERT(!vk::is_uninterruptible() && rsx::get_current_renderer()->is_current_thread());
+	ensure(!vk::is_uninterruptible() && rsx::get_current_renderer()->is_current_thread());
 	bool released = m_texture_cache.handle_memory_pressure(severity);
 
 	if (severity <= rsx::problem_severity::moderate)
@@ -781,7 +783,7 @@ void VKGSRender::notify_tile_unbound(u32 tile)
 	//TODO: Handle texture writeback
 	if (false)
 	{
-		u32 addr = rsx::get_address(tiles[tile].offset, tiles[tile].location, HERE);
+		u32 addr = rsx::get_address(tiles[tile].offset, tiles[tile].location);
 		on_notify_memory_unmapped(addr, tiles[tile].size);
 		m_rtts.invalidate_surface_address(addr, false);
 	}
@@ -794,7 +796,7 @@ void VKGSRender::notify_tile_unbound(u32 tile)
 
 void VKGSRender::check_heap_status(u32 flags)
 {
-	verify(HERE), flags;
+	ensure(flags);
 
 	bool heap_critical;
 	if (flags == VK_HEAP_CHECK_ALL)
@@ -917,7 +919,7 @@ void VKGSRender::check_descriptors()
 {
 	// Ease resource pressure if the number of draw calls becomes too high or we are running low on memory resources
 	const auto required_descriptors = rsx::method_registers.current_draw_clause.pass_count();
-	verify(HERE), required_descriptors < DESCRIPTOR_MAX_DRAW_CALLS;
+	ensure(required_descriptors < DESCRIPTOR_MAX_DRAW_CALLS);
 	if ((required_descriptors + m_current_frame->used_descriptors) > DESCRIPTOR_MAX_DRAW_CALLS)
 	{
 		// Should hard sync before resetting descriptors for spec compliance
@@ -932,7 +934,7 @@ VkDescriptorSet VKGSRender::allocate_descriptor_set()
 {
 	if (!m_shader_interpreter.is_interpreter(m_program)) [[likely]]
 	{
-		verify(HERE), m_current_frame->used_descriptors < DESCRIPTOR_MAX_DRAW_CALLS;
+		ensure(m_current_frame->used_descriptors < DESCRIPTOR_MAX_DRAW_CALLS);
 
 		VkDescriptorSetAllocateInfo alloc_info = {};
 		alloc_info.descriptorPool = m_current_frame->descriptor_pool;
@@ -1022,7 +1024,7 @@ void VKGSRender::on_init_thread()
 	if (!m_overlay_manager)
 	{
 		m_frame->hide();
-		m_shaders_cache->load(nullptr, *m_device, pipeline_layout);
+		m_shaders_cache->load(nullptr, pipeline_layout);
 		m_frame->show();
 	}
 	else
@@ -1030,7 +1032,7 @@ void VKGSRender::on_init_thread()
 		rsx::shader_loading_dialog_native dlg(this);
 
 		// TODO: Handle window resize messages during loading on GPUs without OUT_OF_DATE_KHR support
-		m_shaders_cache->load(&dlg, *m_device, pipeline_layout);
+		m_shaders_cache->load(&dlg, pipeline_layout);
 	}
 }
 
@@ -1057,7 +1059,7 @@ void VKGSRender::clear_surface(u32 mask)
 
 	if (!framebuffer_status_valid) return;
 
-	float depth_clear = 1.f;
+	//float depth_clear = 1.f;
 	u32   stencil_clear = 0;
 	u32   depth_stencil_mask = 0;
 
@@ -1113,7 +1115,7 @@ void VKGSRender::clear_surface(u32 mask)
 
 			if ((mask & 0x3) != 0x3 && !require_mem_load && ds->state_flags & rsx::surface_state_flags::erase_bkgnd)
 			{
-				verify(HERE), depth_stencil_mask;
+				ensure(depth_stencil_mask);
 
 				if (!g_cfg.video.read_depth_buffer)
 				{
@@ -1229,7 +1231,7 @@ void VKGSRender::clear_surface(u32 mask)
 							rtt->pop_layout(*m_current_command_buffer);
 						}
 						else
-							fmt::throw_exception("Unreachable" HERE);
+							fmt::throw_exception("Unreachable");
 					}
 				}
 
@@ -1349,7 +1351,7 @@ void VKGSRender::flush_command_queue(bool hard_sync)
 
 void VKGSRender::sync_hint(rsx::FIFO_hint hint, void* args)
 {
-	verify(HERE), args;
+	ensure(args);
 	rsx::thread::sync_hint(hint, args);
 
 	// Occlusion queries not enabled, do nothing
@@ -1467,10 +1469,10 @@ void VKGSRender::do_local_task(rsx::FIFO_state state)
 
 bool VKGSRender::load_program()
 {
-	if ((m_interpreter_state = (m_graphics_state & rsx::pipeline_state::invalidate_pipeline_bits)))
+	if (m_graphics_state & rsx::pipeline_state::invalidate_pipeline_bits)
 	{
 		get_current_fragment_program(fs_sampler_state);
-		verify(HERE), current_fragment_program.valid;
+		ensure(current_fragment_program.valid);
 
 		get_current_vertex_program(vs_sampler_state);
 
@@ -1608,6 +1610,15 @@ bool VKGSRender::load_program()
 			rsx::method_registers.msaa_enabled(),
 			rsx::method_registers.msaa_alpha_to_coverage_enabled(),
 			alpha_to_one_enable);
+
+		if (const auto chip_family = vk::get_chip_family();
+			chip_family == vk::chip_class::AMD_navi1x ||
+			chip_family == vk::chip_class::AMD_navi2x)
+		{
+			// NAVI family has a GPU bug with MSAA where shading rate is not correctly initialized if left disabled
+			// Manually initialize it and set it to spec default (full shading)
+			properties.state.set_multisample_shading_rate(1.f);
+		}
 	}
 
 	properties.renderpass_key = m_current_renderpass_key;
@@ -1631,7 +1642,7 @@ bool VKGSRender::load_program()
 		vertex_program.skip_vertex_input_check = true;
 		fragment_program.unnormalized_coords = 0;
 		m_program = m_prog_buffer->get_graphics_pipeline(vertex_program, fragment_program, properties,
-			shadermode != shader_mode::recompiler, true, *m_device, pipeline_layout);
+			shadermode != shader_mode::recompiler, true, pipeline_layout);
 
 		vk::leave_uninterruptible();
 
@@ -1679,7 +1690,7 @@ void VKGSRender::load_program_env()
 {
 	if (!m_program)
 	{
-		fmt::throw_exception("Unreachable right now" HERE);
+		fmt::throw_exception("Unreachable right now");
 	}
 
 	const u32 fragment_constants_size = current_fp_metadata.program_constants_buffer_length;
@@ -1862,13 +1873,13 @@ void VKGSRender::update_vertex_env(u32 id, const vk::vertex_upload_info& vertex_
 
 	if (!m_vertex_layout_storage || !m_vertex_layout_storage->in_range(offset32, range32, base_offset))
 	{
-		verify("Incompatible driver (MacOS?)" HERE), m_texbuffer_view_size >= m_vertex_layout_stream_info.range;
+		ensure(m_texbuffer_view_size >= m_vertex_layout_stream_info.range);
 
 		if (m_vertex_layout_storage)
 			m_current_frame->buffer_views_to_clean.push_back(std::move(m_vertex_layout_storage));
 
-		const size_t alloc_addr = m_vertex_layout_stream_info.offset;
-		const size_t view_size = (alloc_addr + m_texbuffer_view_size) > m_vertex_layout_ring_info.size() ? m_vertex_layout_ring_info.size() - alloc_addr : m_texbuffer_view_size;
+		const usz alloc_addr = m_vertex_layout_stream_info.offset;
+		const usz view_size = (alloc_addr + m_texbuffer_view_size) > m_vertex_layout_ring_info.size() ? m_vertex_layout_ring_info.size() - alloc_addr : m_texbuffer_view_size;
 		m_vertex_layout_storage = std::make_unique<vk::buffer_view>(*m_device, m_vertex_layout_ring_info.heap->value, VK_FORMAT_R32G32_UINT, alloc_addr, view_size);
 		base_offset = 0;
 	}
@@ -1889,7 +1900,7 @@ void VKGSRender::update_vertex_env(u32 id, const vk::vertex_upload_info& vertex_
 
 	vkCmdPushConstants(*m_current_command_buffer, pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, data_size, draw_info);
 
-	const size_t data_offset = (id * 128) + m_vertex_layout_stream_info.offset;
+	const usz data_offset = (id * 128) + m_vertex_layout_stream_info.offset;
 	auto dst = m_vertex_layout_ring_info.map(data_offset, 128);
 
 	fill_vertex_layout_state(m_vertex_layout, vertex_info.first_vertex, vertex_info.allocated_vertex_count, static_cast<s32*>(dst),
@@ -1905,7 +1916,7 @@ void VKGSRender::init_buffers(rsx::framebuffer_creation_context context, bool)
 
 void VKGSRender::close_and_submit_command_buffer(vk::fence* pFence, VkSemaphore wait_semaphore, VkSemaphore signal_semaphore, VkPipelineStageFlags pipeline_stage_flags)
 {
-	verify("Recursive calls to submit the current commandbuffer will cause a deadlock" HERE), !m_queue_status.test_and_set(flush_queue_state::flushing);
+	ensure(!m_queue_status.test_and_set(flush_queue_state::flushing));
 
 	// Workaround for deadlock occuring during RSX offloader fault
 	// TODO: Restructure command submission infrastructure to avoid this condition
@@ -1914,16 +1925,16 @@ void VKGSRender::close_and_submit_command_buffer(vk::fence* pFence, VkSemaphore 
 
 	if (vk::test_status_interrupt(vk::heap_dirty))
 	{
-		if (m_attrib_ring_info.dirty() ||
-			m_fragment_env_ring_info.dirty() ||
-			m_vertex_env_ring_info.dirty() ||
-			m_fragment_texture_params_ring_info.dirty() ||
-			m_vertex_layout_ring_info.dirty() ||
-			m_fragment_constants_ring_info.dirty() ||
-			m_index_buffer_ring_info.dirty() ||
-			m_transform_constants_ring_info.dirty() ||
-			m_texture_upload_buffer_ring_info.dirty() ||
-			m_raster_env_ring_info.dirty())
+		if (m_attrib_ring_info.is_dirty() ||
+			m_fragment_env_ring_info.is_dirty() ||
+			m_vertex_env_ring_info.is_dirty() ||
+			m_fragment_texture_params_ring_info.is_dirty() ||
+			m_vertex_layout_ring_info.is_dirty() ||
+			m_fragment_constants_ring_info.is_dirty() ||
+			m_index_buffer_ring_info.is_dirty() ||
+			m_transform_constants_ring_info.is_dirty() ||
+			m_texture_upload_buffer_ring_info.is_dirty() ||
+			m_raster_env_ring_info.is_dirty())
 		{
 			std::lock_guard lock(m_secondary_cb_guard);
 			m_secondary_command_buffer.begin();
@@ -1951,7 +1962,7 @@ void VKGSRender::close_and_submit_command_buffer(vk::fence* pFence, VkSemaphore 
 #if 0 // Currently unreachable
 	if (m_current_command_buffer->flags & vk::command_buffer::cb_has_conditional_render)
 	{
-		verify(HERE), m_render_pass_open;
+		ensure(m_render_pass_open);
 		m_device->cmdEndConditionalRenderingEXT(*m_current_command_buffer);
 	}
 #endif
@@ -1978,7 +1989,7 @@ void VKGSRender::close_and_submit_command_buffer(vk::fence* pFence, VkSemaphore 
 
 	if (force_flush)
 	{
-		verify(HERE), m_current_command_buffer->submit_fence->flushed;
+		ensure(m_current_command_buffer->submit_fence->flushed);
 	}
 
 	m_queue_status.clear(flush_queue_state::flushing);
@@ -2078,7 +2089,7 @@ void VKGSRender::prepare_rtts(rsx::framebuffer_creation_context context)
 
 			m_surface_info[index].address = m_framebuffer_layout.color_addresses[index];
 			m_surface_info[index].pitch = m_framebuffer_layout.actual_color_pitch[index];
-			verify("Pitch mismatch!" HERE), surface->rsx_pitch == m_framebuffer_layout.actual_color_pitch[index];
+			ensure(surface->rsx_pitch == m_framebuffer_layout.actual_color_pitch[index]);
 
 			m_texture_cache.notify_surface_changed(m_surface_info[index].get_memory_range(m_framebuffer_layout.aa_factors));
 			m_draw_buffers.push_back(index);
@@ -2092,7 +2103,7 @@ void VKGSRender::prepare_rtts(rsx::framebuffer_creation_context context)
 
 		m_depth_surface_info.address = m_framebuffer_layout.zeta_address;
 		m_depth_surface_info.pitch = m_framebuffer_layout.actual_zeta_pitch;
-		verify("Pitch mismatch!" HERE), ds->rsx_pitch == m_framebuffer_layout.actual_zeta_pitch;
+		ensure(ds->rsx_pitch == m_framebuffer_layout.actual_zeta_pitch);
 
 		m_texture_cache.notify_surface_changed(m_depth_surface_info.get_memory_range(m_framebuffer_layout.aa_factors));
 	}
@@ -2218,7 +2229,7 @@ void VKGSRender::renderctl(u32 request_code, void* args)
 		break;
 	}
 	default:
-		fmt::throw_exception("Unhandled request code 0x%x" HERE, request_code);
+		fmt::throw_exception("Unhandled request code 0x%x", request_code);
 	}
 }
 
@@ -2249,7 +2260,7 @@ bool VKGSRender::scaled_image_from_memory(rsx::blit_src_info& src, rsx::blit_dst
 
 void VKGSRender::begin_occlusion_query(rsx::reports::occlusion_query_info* query)
 {
-	verify(HERE), !m_occlusion_query_active;
+	ensure(!m_occlusion_query_active);
 
 	query->result = 0;
 	//query->sync_timestamp = get_system_time();
@@ -2260,7 +2271,7 @@ void VKGSRender::begin_occlusion_query(rsx::reports::occlusion_query_info* query
 
 void VKGSRender::end_occlusion_query(rsx::reports::occlusion_query_info* query)
 {
-	verify(HERE), query == m_active_query_info;
+	ensure(query == m_active_query_info);
 
 	// NOTE: flushing the queue is very expensive, do not flush just because query stopped
 	if (m_current_command_buffer->flags & vk::command_buffer::cb_has_open_query)
@@ -2322,7 +2333,7 @@ void VKGSRender::get_occlusion_query_result(rsx::reports::occlusion_query_info* 
 		for (const auto occlusion_id : data.indices)
 		{
 			// We only need one hit
-			if (auto value = m_occlusion_query_manager->get_query_result(occlusion_id))
+			if (m_occlusion_query_manager->get_query_result(occlusion_id))
 			{
 				query->result = 1;
 				break;
@@ -2351,7 +2362,7 @@ void VKGSRender::discard_occlusion_query(rsx::reports::occlusion_query_info* que
 
 void VKGSRender::emergency_query_cleanup(vk::command_buffer* commands)
 {
-	verify("Command list mismatch" HERE), commands == static_cast<vk::command_buffer*>(m_current_command_buffer);
+	ensure(commands == static_cast<vk::command_buffer*>(m_current_command_buffer));
 
 	if (m_current_command_buffer->flags & vk::command_buffer::cb_has_open_query)
 	{
@@ -2363,7 +2374,7 @@ void VKGSRender::emergency_query_cleanup(vk::command_buffer* commands)
 
 void VKGSRender::begin_conditional_rendering(const std::vector<rsx::reports::occlusion_query_info*>& sources)
 {
-	verify(HERE), !sources.empty();
+	ensure(!sources.empty());
 
 	// Flag check whether to calculate all entries or only one
 	bool partial_eval;
@@ -2440,8 +2451,8 @@ void VKGSRender::begin_conditional_rendering(const std::vector<rsx::reports::occ
 
 	auto scratch = vk::get_scratch_buffer();
 	u32 dst_offset = 0;
-	size_t first = 0;
-	size_t last;
+	usz first = 0;
+	usz last;
 
 	if (!partial_eval) [[likely]]
 	{
@@ -2452,7 +2463,7 @@ void VKGSRender::begin_conditional_rendering(const std::vector<rsx::reports::occ
 		last = 1;
 	}
 
-	for (size_t i = first; i < last; ++i)
+	for (usz i = first; i < last; ++i)
 	{
 		auto& query_info = m_occlusion_map[sources[i]->driver_handle];
 		for (const auto& index : query_info.indices)
@@ -2465,7 +2476,7 @@ void VKGSRender::begin_conditional_rendering(const std::vector<rsx::reports::occ
 	if (dst_offset)
 	{
 		// Fast path should have been caught above
-		verify(HERE), dst_offset > 4;
+		ensure(dst_offset > 4);
 
 		if (!partial_eval)
 		{

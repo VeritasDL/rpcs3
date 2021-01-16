@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "Emu/VFS.h"
 #include "Emu/IdManager.h"
 #include "Emu/Cell/PPUModule.h"
@@ -106,7 +106,6 @@ error_code cellGifDecReadHeader(PMainHandle mainHandle, PSubHandle subHandle, PI
 	cellGifDec.warning("cellGifDecReadHeader(mainHandle=*0x%x, subHandle=*0x%x, info=*0x%x)", mainHandle, subHandle, info);
 
 	const u32& fd = subHandle->fd;
-	const u64& fileSize = subHandle->fileSize;
 	CellGifDecInfo& current_info = subHandle->info;
 
 	// Write the header to buffer

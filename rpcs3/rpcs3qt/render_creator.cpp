@@ -1,18 +1,18 @@
-﻿#include "render_creator.h"
+#include "render_creator.h"
 
 #include <QMessageBox>
 
 #include "Utilities/Thread.h"
 
 #if defined(_WIN32) || defined(HAVE_VULKAN)
-#include "Emu/RSX/VK/VKHelpers.h"
+#include "Emu/RSX/VK/vkutils/instance.hpp"
 #endif
 
-#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <util/logs.hpp>
 
 LOG_CHANNEL(cfg_log, "CFG");
 
@@ -25,9 +25,9 @@ render_creator::render_creator(QObject *parent) : QObject(parent)
 	// plugged in. This whole contraption is for showing an error message in case that happens, so that user has
 	// some idea about why the emulator window isn't showing up.
 
-	static std::atomic<bool> was_called = false;
+	static atomic_t<bool> was_called = false;
 	if (was_called.exchange(true))
-		fmt::throw_exception("Render_Creator cannot be created more than once" HERE);
+		fmt::throw_exception("Render_Creator cannot be created more than once");
 
 	static std::mutex mtx;
 	static std::condition_variable cond;
@@ -40,11 +40,11 @@ render_creator::render_creator(QObject *parent) : QObject(parent)
 	{
 		thread_ctrl::set_native_priority(-1);
 
-		vk::context device_enum_context;
-		if (device_enum_context.createInstance("RPCS3", true))
+		vk::instance device_enum_context;
+		if (device_enum_context.create("RPCS3", true))
 		{
-			device_enum_context.makeCurrentInstance();
-			std::vector<vk::physical_device>& gpus = device_enum_context.enumerateDevices();
+			device_enum_context.bind();
+			std::vector<vk::physical_device>& gpus = device_enum_context.enumerate_devices();
 
 			if (!gpus.empty())
 			{
@@ -101,7 +101,7 @@ void render_creator::update_names(const QStringList& names)
 {
 	for (int i = 0; i < names.size(); i++)
 	{
-		if (static_cast<size_t>(i) >= renderers.size() || !renderers[i])
+		if (static_cast<usz>(i) >= renderers.size() || !renderers[i])
 		{
 			cfg_log.error("render_creator::update_names could not update renderer %d", i);
 			return;

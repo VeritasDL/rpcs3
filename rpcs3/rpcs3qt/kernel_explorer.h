@@ -1,15 +1,16 @@
-﻿#pragma once
+#pragma once
 
 #include <QDialog>
-#include <QTreeWidget>
 
-#include "Utilities/types.h"
+#include "util/types.hpp"
+
+class QTreeWidget;
 
 class kernel_explorer : public QDialog
 {
 	Q_OBJECT
 
-	static const size_t sys_size = 256;
+	static const usz sys_size = 256;
 
 	enum additional_nodes
 	{
@@ -25,10 +26,12 @@ class kernel_explorer : public QDialog
 	};
 
 public:
-	kernel_explorer(QWidget* parent);
+	kernel_explorer(QWidget* parent, std::function<void()> on_destroy);
+	~kernel_explorer();
 
 private:
 	QTreeWidget* m_tree;
+	std::function<void()> m_on_destroy;
 
 private Q_SLOTS:
 	void Update();

@@ -1,9 +1,16 @@
-﻿#pragma once
-#include "VKHelpers.h"
-#include "VKPipelineCompiler.h"
-#include "VKRenderPass.h"
+#pragma once
+#include "vkutils/descriptors.hpp"
 #include "Utilities/StrUtil.h"
 #include "Emu/IdManager.h"
+
+#include "VKPipelineCompiler.h"
+#include "VKRenderPass.h"
+#include "VKHelpers.h"
+#include "vkutils/buffer_object.h"
+#include "vkutils/device.h"
+
+#include "util/asm.hpp"
+#include <unordered_map>
 
 #define VK_MAX_COMPUTE_TASKS 4096   // Max number of jobs per frame
 
@@ -52,7 +59,7 @@ namespace vk
 				{
 					bindings.push_back
 					({
-						uint32_t(bindings.size()),
+						u32(bindings.size()),
 						e.first,
 						1,
 						VK_SHADER_STAGE_COMPUTE_BIT,
@@ -62,14 +69,14 @@ namespace vk
 			}
 
 			// Reserve descriptor pools
-			m_descriptor_pool.create(*get_current_renderer(), descriptor_pool_sizes.data(), ::size32(descriptor_pool_sizes), VK_MAX_COMPUTE_TASKS, 3);
+			m_descriptor_pool.create(*g_render_device, descriptor_pool_sizes.data(), ::size32(descriptor_pool_sizes), VK_MAX_COMPUTE_TASKS, 3);
 
 			VkDescriptorSetLayoutCreateInfo infos = {};
 			infos.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 			infos.pBindings = bindings.data();
 			infos.bindingCount = ::size32(bindings);
 
-			CHECK_RESULT(vkCreateDescriptorSetLayout(*get_current_renderer(), &infos, nullptr, &m_descriptor_layout));
+			CHECK_RESULT(vkCreateDescriptorSetLayout(*g_render_device, &infos, nullptr, &m_descriptor_layout));
 
 			VkPipelineLayoutCreateInfo layout_info = {};
 			layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -86,7 +93,7 @@ namespace vk
 				layout_info.pPushConstantRanges = &push_constants;
 			}
 
-			CHECK_RESULT(vkCreatePipelineLayout(*get_current_renderer(), &layout_info, nullptr, &m_pipeline_layout));
+			CHECK_RESULT(vkCreatePipelineLayout(*g_render_device, &layout_info, nullptr, &m_pipeline_layout));
 		}
 
 		void create()
@@ -120,7 +127,7 @@ namespace vk
 					break;
 				}
 
-				const auto& gpu = vk::get_current_renderer()->gpu();
+				const auto& gpu = vk::g_render_device->gpu();
 				max_invocations_x = gpu.get_limits().maxComputeWorkGroupCount[0];
 
 				initialized = true;
@@ -135,8 +142,8 @@ namespace vk
 				m_program.reset();
 				m_param_buffer.reset();
 
-				vkDestroyDescriptorSetLayout(*get_current_renderer(), m_descriptor_layout, nullptr);
-				vkDestroyPipelineLayout(*get_current_renderer(), m_pipeline_layout, nullptr);
+				vkDestroyDescriptorSetLayout(*g_render_device, m_descriptor_layout, nullptr);
+				vkDestroyPipelineLayout(*g_render_device, m_pipeline_layout, nullptr);
 				m_descriptor_pool.destroy();
 
 				initialized = false;
@@ -183,7 +190,7 @@ namespace vk
 				declare_inputs();
 			}
 
-			verify(HERE), m_used_descriptors < VK_MAX_COMPUTE_TASKS;
+			ensure(m_used_descriptors < VK_MAX_COMPUTE_TASKS);
 
 			VkDescriptorSetAllocateInfo alloc_info = {};
 			alloc_info.descriptorPool = m_descriptor_pool;
@@ -191,7 +198,7 @@ namespace vk
 			alloc_info.pSetLayouts = &m_descriptor_layout;
 			alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 
-			CHECK_RESULT(vkAllocateDescriptorSets(*get_current_renderer(), &alloc_info, &m_descriptor_set));
+			CHECK_RESULT(vkAllocateDescriptorSets(*g_render_device, &alloc_info, &m_descriptor_set));
 			m_used_descriptors++;
 
 			bind_resources();
@@ -296,7 +303,7 @@ namespace vk
 				"%vars"
 				"\n";
 
-			const auto parameters_size = align(push_constants_size, 16) / 16;
+			const auto parameters_size = utils::align(push_constants_size, 16) / 16;
 			const std::pair<std::string, std::string> syntax_replace[] =
 			{
 				{ "%ws", std::to_string(optimal_group_size) },
@@ -351,7 +358,7 @@ namespace vk
 
 		void set_parameters(VkCommandBuffer cmd, const u32* params, u8 count)
 		{
-			verify(HERE), use_push_constants;
+			ensure(use_push_constants);
 			vkCmdPushConstants(cmd, m_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, count * 4, params);
 		}
 
@@ -460,7 +467,7 @@ namespace vk
 			u32 parameters[4] = { data_length, zeta_offset - data_offset, stencil_offset - data_offset, 0 };
 			set_parameters(cmd, parameters, 4);
 
-			verify(HERE), stencil_offset > data_offset;
+			ensure(stencil_offset > data_offset);
 			m_ssbo_length = stencil_offset + (data_length / 4) - data_offset;
 			cs_shuffle_base::run(cmd, data, data_length, data_offset);
 		}
@@ -751,7 +758,7 @@ namespace vk
 
 		cs_deswizzle_3d()
 		{
-			verify("Unsupported block type" HERE), (sizeof(_BlockType) & 3) == 0;
+			ensure((sizeof(_BlockType) & 3) == 0); // "Unsupported block type"
 
 			ssbo_count = 2;
 			use_push_constants = true;
@@ -899,7 +906,7 @@ namespace vk
 				}
 				else
 				{
-					fmt::throw_exception("Unreachable" HERE);
+					fmt::throw_exception("Unreachable");
 				}
 			}
 
@@ -943,7 +950,7 @@ namespace vk
 			set_parameters(cmd);
 
 			const u32 num_bytes_per_invocation = (sizeof(_BlockType) * optimal_group_size);
-			const u32 linear_invocations = aligned_div(data_length, num_bytes_per_invocation);
+			const u32 linear_invocations = utils::aligned_div(data_length, num_bytes_per_invocation);
 			compute_task::run(cmd, linear_invocations);
 		}
 	};
@@ -997,7 +1004,7 @@ namespace vk
 			word_count = num_words;
 			block_length = num_words * 4;
 
-			const u32 linear_invocations = aligned_div(word_count, optimal_group_size);
+			const u32 linear_invocations = utils::aligned_div(word_count, optimal_group_size);
 			compute_task::run(cmd, linear_invocations);
 		}
 	};

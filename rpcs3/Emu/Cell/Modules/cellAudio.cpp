@@ -1,11 +1,13 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "Emu/System.h"
 #include "Emu/Cell/PPUModule.h"
 
 #include "Emu/Cell/lv2/sys_process.h"
 #include "Emu/Cell/lv2/sys_event.h"
 #include "cellAudio.h"
-#include <atomic>
+
+#include "emmintrin.h"
+#include "immintrin.h"
 #include <cmath>
 
 LOG_CHANNEL(cellAudio);
@@ -125,7 +127,7 @@ audio_ringbuffer::audio_ringbuffer(cell_audio_config& _cfg)
 	backend->Open(cfg.num_allocated_buffers);
 	backend_open = true;
 
-	ASSERT(!get_backend_playing());
+	ensure(!get_backend_playing());
 }
 
 audio_ringbuffer::~audio_ringbuffer()
@@ -147,7 +149,7 @@ f32 audio_ringbuffer::set_frequency_ratio(f32 new_ratio)
 {
 	if (!has_capability(AudioBackend::SET_FREQUENCY_RATIO))
 	{
-		ASSERT(new_ratio == 1.0f);
+		ensure(new_ratio == 1.0f);
 		frequency_ratio = 1.0f;
 	}
 	else
@@ -230,7 +232,7 @@ void audio_ringbuffer::play()
 
 	playing = true;
 
-	ASSERT(enqueued_samples > 0);
+	ensure(enqueued_samples > 0);
 
 	play_timestamp = get_timestamp();
 	backend->Play();
@@ -345,7 +347,6 @@ u64 audio_ringbuffer::update()
 
 void audio_port::tag(s32 offset)
 {
-	auto port_pos = position(offset);
 	auto port_buf = get_vm_ptr(offset);
 
 	// This tag will be used to make sure that the game has finished writing the audio for the next audio period
@@ -379,7 +380,6 @@ std::tuple<u32, u32, u32, u32> cell_audio_thread::count_port_buffer_tags()
 		active++;
 
 		auto port_buf = port.get_vm_ptr();
-		u32 port_pos = port.position();
 
 		// Find the last tag that has been touched
 		const u32 tag_first_pos = port.num_channels == 2 ? PORT_BUFFER_TAG_FIRST_2CH : port.num_channels == 6 ? PORT_BUFFER_TAG_FIRST_6CH : PORT_BUFFER_TAG_FIRST_8CH;
@@ -612,7 +612,7 @@ void cell_audio_thread::operator()()
 	m_dynamic_period = 0;
 
 	u32 untouched_expected = 0;
-	u32 in_progress_expected = 0;
+	//u32 in_progress_expected = 0;
 
 	// Main cellAudio loop
 	while (thread_ctrl::state() != thread_state::aborting)
@@ -891,7 +891,7 @@ void cell_audio_thread::mix(float *out_buffer, s32 offset)
 		if (port.state != audio_port_state::started) continue;
 
 		auto buf = port.get_vm_ptr(offset);
-		static const float k = 1.f;
+
 		static constexpr float minus_3db = 0.707f; // value taken from https://www.dolby.com/us/en/technologies/a-guide-to-dolby-metadata.pdf
 		float m = master_volume;
 
@@ -1054,7 +1054,7 @@ void cell_audio_thread::mix(float *out_buffer, s32 offset)
 		}
 		else
 		{
-			fmt::throw_exception("Unknown channel count (port=%u, channel=%d)" HERE, port.number, port.num_channels);
+			fmt::throw_exception("Unknown channel count (port=%u, channel=%d)", port.number, port.num_channels);
 		}
 	}
 
@@ -1072,7 +1072,7 @@ void cell_audio_thread::mix(float *out_buffer, s32 offset)
 		// 2x CVTPS2DQ (converts float to s32)
 		// PACKSSDW (converts s32 to s16 with signed saturation)
 
-		for (size_t i = 0; i < out_buffer_sz; i += 8)
+		for (usz i = 0; i < out_buffer_sz; i += 8)
 		{
 			const auto scale = _mm_set1_ps(0x8000);
 			_mm_store_ps(out_buffer + i / 2, _mm_castsi128_ps(_mm_packs_epi32(

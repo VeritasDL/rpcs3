@@ -1,13 +1,18 @@
-﻿#include "stdafx.h"
-#include "VKHelpers.h"
+#include "stdafx.h"
 #include "VKResourceManager.h"
 #include "VKDMA.h"
+#include "vkutils/device.h"
+
+#include "Emu/Memory/vm.h"
+
+#include "util/asm.hpp"
+#include <unordered_map>
 
 namespace vk
 {
-	static constexpr size_t s_dma_block_length = 0x01000000;
+	static constexpr usz s_dma_block_length = 0x01000000;
 	static constexpr u32    s_dma_block_mask = 0xFF000000;
-	static constexpr u32    s_dma_offset_mask = 0x00FFFFFF;
+	//static constexpr u32    s_dma_offset_mask = 0x00FFFFFF;
 
 	static constexpr u32    s_page_size = 16384;
 	static constexpr u32    s_page_align = s_page_size - 1;
@@ -24,7 +29,7 @@ namespace vk
 			return inheritance_info.parent->map_range(range);
 		}
 
-		verify(HERE), range.start >= base_address;
+		ensure(range.start >= base_address);
 		u32 start = range.start;
 		start -= base_address;
 		return allocated_memory->map(start, range.length());
@@ -42,9 +47,10 @@ namespace vk
 		}
 	}
 
-	void dma_block::init(const render_device& dev, u32 addr, size_t size)
+	void dma_block::init(const render_device& dev, u32 addr, usz size)
 	{
-		verify(HERE), size, !(size % s_dma_block_length);
+		ensure(size);
+		ensure(!(size % s_dma_block_length));
 		base_address = addr;
 
 		allocated_memory = std::make_unique<vk::buffer>(dev, size,
@@ -54,7 +60,7 @@ namespace vk
 		page_info.resize(size / s_bytes_per_entry, ~0ull);
 	}
 
-	void dma_block::init(dma_block* parent, u32 addr, size_t size)
+	void dma_block::init(dma_block* parent, u32 addr, usz size)
 	{
 		base_address = addr;
 		inheritance_info.parent = parent;
@@ -84,7 +90,7 @@ namespace vk
 	{
 		if (!inheritance_info.parent)
 		{
-			const u32 start = align(range.start, s_page_size);
+			const u32 start = utils::align(range.start, s_page_size);
 			const u32 end = ((range.end + 1) & s_page_align);
 
 			for (u32 page = start; page < end; page += s_page_size)
@@ -113,7 +119,7 @@ namespace vk
 		if (!inheritance_info.parent)
 		{
 			auto bit_offset = page_offset / s_bytes_per_entry;
-			verify(HERE), (bit_offset + bits.size()) <= page_info.size();
+			ensure(bit_offset + bits.size() <= page_info.size());
 			std::memcpy(page_info.data() + bit_offset, bits.data(), bits.size());
 		}
 		else
@@ -149,7 +155,8 @@ namespace vk
 			return inheritance_info.parent->get(range);
 		}
 
-		verify(HERE), range.start >= base_address, range.end <= end();
+		ensure(range.start >= base_address);
+		ensure(range.end <= end());
 
 		// mark_dirty(range);
 		return { (range.start - base_address), allocated_memory.get() };
@@ -173,7 +180,7 @@ namespace vk
 
 	void dma_block::set_parent(command_buffer& cmd, dma_block* parent)
 	{
-		verify(HERE), parent;
+		ensure(parent);
 		if (inheritance_info.parent == parent)
 		{
 			// Nothing to do
@@ -199,9 +206,9 @@ namespace vk
 		}
 	}
 
-	void dma_block::extend(command_buffer& cmd, const render_device &dev, size_t new_size)
+	void dma_block::extend(command_buffer& cmd, const render_device &dev, usz new_size)
 	{
-		verify(HERE), allocated_memory;
+		ensure(allocated_memory);
 		if (new_size <= allocated_memory->size())
 			return;
 
@@ -252,12 +259,12 @@ namespace vk
 			}
 
 			auto &block_info = g_dma_pool[first_block];
-			block_info.init(*vk::get_current_renderer(), first_block, s_dma_block_length);
+			block_info.init(*g_render_device, first_block, s_dma_block_length);
 			return block_info.get(map_range);
 		}
 
 		dma_block* block_head = nullptr;
-		auto block_end = align(limit, s_dma_block_length);
+		auto block_end = utils::align(limit, s_dma_block_length);
 
 		// Reverse scan to try and find the minimum required length in case of other chaining
 		for (auto block = last_block; block != first_block; block -= s_dma_block_length)
@@ -286,13 +293,13 @@ namespace vk
 					if (entry->end() < limit)
 					{
 						auto new_length = block_end - block_head->start();
-						block_head->extend(cmd, *vk::get_current_renderer(), new_length);
+						block_head->extend(cmd, *g_render_device, new_length);
 					}
 				}
 				else
 				{
 					auto required_size = (block_end - block);
-					block_head->init(*vk::get_current_renderer(), block, required_size);
+					block_head->init(*g_render_device, block, required_size);
 				}
 			}
 			else
@@ -308,7 +315,7 @@ namespace vk
 			}
 		}
 
-		verify(HERE), block_head;
+		ensure(block_head);
 		return block_head->get(map_range);
 	}
 

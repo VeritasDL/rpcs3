@@ -1,4 +1,4 @@
-﻿#include "game_list_grid_delegate.h"
+#include "game_list_grid_delegate.h"
 
 game_list_grid_delegate::game_list_grid_delegate(const QSize& size, const qreal& margin_factor, const qreal& text_factor, QObject *parent)
 	 : QStyledItemDelegate(parent), m_size(size), m_margin_factor(margin_factor), m_text_factor(text_factor)
@@ -55,7 +55,7 @@ void game_list_grid_delegate::paint(QPainter *painter, const QStyleOptionViewIte
 	}
 
 	painter->setFont(option.font);
-	painter->drawText(QRect(r.left(), top, r.width(), height), Qt::TextWordWrap | Qt::AlignCenter, title);
+	painter->drawText(QRect(r.left(), top, r.width(), height), +Qt::TextWordWrap | +Qt::AlignCenter, title);
 }
 
 QSize game_list_grid_delegate::sizeHint(const QStyleOptionViewItem & option, const QModelIndex & index) const

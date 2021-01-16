@@ -1,6 +1,12 @@
-﻿#pragma once
+#pragma once
 #include "Emu/RSX/GSRender.h"
-#include "VKHelpers.h"
+
+#include "vkutils/descriptors.hpp"
+#include "vkutils/data_heap.h"
+#include "vkutils/instance.hpp"
+#include "vkutils/sync.h"
+#include "vkutils/swapchain.hpp"
+
 #include "VKTextureCache.h"
 #include "VKRenderTargets.h"
 #include "VKFormats.h"
@@ -13,7 +19,6 @@
 #include "../GCM.h"
 
 #include <thread>
-#include <atomic>
 #include <optional>
 
 namespace vk
@@ -54,12 +59,14 @@ extern u64 get_system_time();
 
 namespace vk
 {
+	struct buffer_view;
+
 	struct command_buffer_chunk: public vk::command_buffer
 	{
 		vk::fence* submit_fence = nullptr;
 		VkDevice m_device = VK_NULL_HANDLE;
 
-		std::atomic_bool pending = { false };
+		atomic_t<bool> pending = { false };
 		u64 eid_tag = 0;
 		u64 reset_id = 0;
 		shared_mutex guard_mutex;
@@ -111,7 +118,7 @@ namespace vk
 
 				if (pending)
 				{
-					vk::reset_fence(submit_fence);
+					submit_fence->reset();
 					vk::on_event_completed(eid_tag);
 
 					pending = false;
@@ -135,7 +142,7 @@ namespace vk
 
 			if (pending)
 			{
-				vk::reset_fence(submit_fence);
+				submit_fence->reset();
 				vk::on_event_completed(eid_tag);
 
 				pending = false;
@@ -301,7 +308,11 @@ namespace vk
 		{
 			while (num_waiters.load() != 0)
 			{
+#ifdef _MSC_VER
 				_mm_pause();
+#else
+				__builtin_ia32_pause();
+#endif
 			}
 		}
 
@@ -372,8 +383,7 @@ private:
 	u64 m_cond_render_sync_tag = 0;
 
 	shared_mutex m_sampler_mutex;
-	u64 surface_store_tag = 0;
-	std::atomic_bool m_samplers_dirty = { true };
+	atomic_t<bool> m_samplers_dirty = { true };
 	std::unique_ptr<vk::sampler> m_stencil_mirror_sampler;
 	std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, rsx::limits::fragment_textures_count> fs_sampler_state = {};
 	std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, rsx::limits::vertex_textures_count> vs_sampler_state = {};
@@ -393,7 +403,7 @@ private:
 	std::unique_ptr<vk::program_cache> m_prog_buffer;
 
 	std::unique_ptr<vk::swapchain_base> m_swapchain;
-	vk::context m_thread_context;
+	vk::instance m_instance;
 	vk::render_device *m_device;
 
 	//Vulkan internals

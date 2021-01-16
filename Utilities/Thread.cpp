@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "Emu/System.h"
 #include "Emu/Cell/SPUThread.h"
 #include "Emu/Cell/PPUThread.h"
@@ -7,7 +7,6 @@
 #include "Emu/Cell/lv2/sys_event.h"
 #include "Thread.h"
 #include "Utilities/JIT.h"
-#include "sysinfo.h"
 #include <typeinfo>
 #include <thread>
 #include <sstream>
@@ -77,6 +76,9 @@
 #include "util/vm.hpp"
 #include "util/logs.hpp"
 #include "util/asm.hpp"
+#include "util/v128.hpp"
+#include "util/v128sse.hpp"
+#include "util/sysinfo.hpp"
 #include "Emu/Memory/vm_locking.h"
 
 LOG_CHANNEL(sig_log, "SIG");
@@ -90,6 +92,9 @@ thread_local u64 g_tls_wait_time = 0;
 thread_local u64 g_tls_wait_fail = 0;
 thread_local bool g_tls_access_violation_recovered = false;
 extern thread_local std::string(*g_tls_log_prefix)();
+
+// Report error and call std::abort(), defined in main.cpp
+[[noreturn]] void report_fatal_error(const std::string&);
 
 template <>
 void fmt_class_string<std::thread::id>::format(std::string& out, u64 arg)
@@ -115,7 +120,7 @@ bool IsDebuggerPresent()
 	};
 	u_int miblen = std::size(mib);
 	struct kinfo_proc info;
-	size_t size = sizeof(info);
+	usz size = sizeof(info);
 
 	if (sysctl(mib, miblen, &info, &size, NULL, 0))
 	{
@@ -256,7 +261,7 @@ enum x64_op_t : u32
 	X64OP_SBB, // lock sbb [mem], ...
 };
 
-void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, size_t& out_size, size_t& out_length)
+void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, usz& out_size, usz& out_length)
 {
 	// simple analysis of x64 code allows to reinterpret MOV or other instructions in any desired way
 	out_length = 0;
@@ -382,12 +387,12 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 		return x64_reg_t{((*code & 0x38) >> 3) + X64R_AL};
 	};
 
-	auto get_op_size = [](const u8 rex, const bool oso) -> size_t
+	auto get_op_size = [](const u8 rex, const bool oso) -> usz
 	{
 		return rex & 8 ? 8 : (oso ? 2 : 4);
 	};
 
-	auto get_modRM_size = [](const u8* code) -> size_t
+	auto get_modRM_size = [](const u8* code) -> usz
 	{
 		switch (*code >> 6) // check Mod
 		{
@@ -537,7 +542,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 	}
 	case 0x80:
 	{
-		switch (auto mod_code = get_modRM_reg(code, 0))
+		switch (get_modRM_reg(code, 0))
 		{
 		//case 0: out_op = X64OP_ADD; break; // TODO: strange info in instruction manual
 		case 1: out_op = X64OP_OR; break;
@@ -556,7 +561,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 	}
 	case 0x81:
 	{
-		switch (auto mod_code = get_modRM_reg(code, 0))
+		switch (get_modRM_reg(code, 0))
 		{
 		case 0: out_op = X64OP_ADD; break;
 		case 1: out_op = X64OP_OR; break;
@@ -575,7 +580,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 	}
 	case 0x83:
 	{
-		switch (auto mod_code = get_modRM_reg(code, 0))
+		switch (get_modRM_reg(code, 0))
 		{
 		case 0: out_op = X64OP_ADD; break;
 		case 1: out_op = X64OP_OR; break;
@@ -716,7 +721,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 		const u8 vopm = op1 == 0xc5 ? 1 : op2 & 0x1f;
 		const u8 vop1 = op1 == 0xc5 ? op3 : code[2];
 		const u8 vlen = (opx & 0x4) ? 32 : 16;
-		const u8 vreg = (~opx >> 3) & 0xf;
+		//const u8 vreg = (~opx >> 3) & 0xf;
 		out_length += op1 == 0xc5 ? 2 : 3;
 		code += op1 == 0xc5 ? 2 : 3;
 
@@ -777,7 +782,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 	}
 	case 0xf6:
 	{
-		switch (auto mod_code = get_modRM_reg(code, 0))
+		switch (get_modRM_reg(code, 0))
 		{
 		case 0: out_op = X64OP_LOAD_TEST; break;
 		default: out_op = X64OP_NONE; break; // TODO...
@@ -790,7 +795,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 	}
 	case 0xf7:
 	{
-		switch (auto mod_code = get_modRM_reg(code, 0))
+		switch (get_modRM_reg(code, 0))
 		{
 		case 0: out_op = X64OP_LOAD_TEST; break;
 		default: out_op = X64OP_NONE; break; // TODO...
@@ -830,7 +835,7 @@ typedef ucontext_t x64_context;
 #define XMMREG(context, reg) (reinterpret_cast<v128*>(&(context)->uc_mcontext->__fs.__fpu_xmm0.__xmm_reg[reg]))
 #define EFLAGS(context) ((context)->uc_mcontext->__ss.__rflags)
 
-uint64_t* darwin_x64reg(x64_context *context, int reg)
+u64* darwin_x64reg(x64_context *context, int reg)
 {
 	auto *state = &context->uc_mcontext->__ss;
 	switch(reg)
@@ -973,7 +978,7 @@ static const int reg_table[] =
 #define RDI(c) (*X64REG((c), 7))
 #define RIP(c) (*X64REG((c), 16))
 
-bool get_x64_reg_value(x64_context* context, x64_reg_t reg, size_t d_size, size_t i_size, u64& out_value)
+bool get_x64_reg_value(x64_context* context, x64_reg_t reg, usz d_size, usz i_size, u64& out_value)
 {
 	// get x64 reg value (for store operations)
 	if (reg - X64R_RAX < 16)
@@ -1064,7 +1069,7 @@ bool get_x64_reg_value(x64_context* context, x64_reg_t reg, size_t d_size, size_
 	return false;
 }
 
-bool put_x64_reg_value(x64_context* context, x64_reg_t reg, size_t d_size, u64 value)
+bool put_x64_reg_value(x64_context* context, x64_reg_t reg, usz d_size, u64 value)
 {
 	// save x64 reg value (for load operations)
 	if (reg - X64R_RAX < 16)
@@ -1083,7 +1088,7 @@ bool put_x64_reg_value(x64_context* context, x64_reg_t reg, size_t d_size, u64 v
 	return false;
 }
 
-bool set_x64_cmp_flags(x64_context* context, size_t d_size, u64 x, u64 y, bool carry = true)
+bool set_x64_cmp_flags(x64_context* context, usz d_size, u64 x, u64 y, bool carry = true)
 {
 	switch (d_size)
 	{
@@ -1159,7 +1164,7 @@ bool set_x64_cmp_flags(x64_context* context, size_t d_size, u64 x, u64 y, bool c
 	return true;
 }
 
-size_t get_x64_access_size(x64_context* context, x64_op_t op, x64_reg_t reg, size_t d_size, size_t i_size)
+usz get_x64_access_size(x64_context* context, x64_op_t op, x64_reg_t reg, usz d_size, usz i_size)
 {
 	if (op == X64OP_MOVS || op == X64OP_STOS)
 	{
@@ -1224,8 +1229,8 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 
 	x64_op_t op;
 	x64_reg_t reg;
-	size_t d_size;
-	size_t i_size;
+	usz d_size;
+	usz i_size;
 
 	// decode single x64 instruction that causes memory access
 	decode_x64_reg_op(code, op, reg, d_size, i_size);
@@ -1246,7 +1251,7 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 	}
 
 	// get length of data being accessed
-	size_t a_size = get_x64_access_size(context, op, reg, d_size, i_size);
+	usz a_size = get_x64_access_size(context, op, reg, d_size, i_size);
 
 	if (0x1'0000'0000ull - addr < a_size)
 	{
@@ -1293,7 +1298,7 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 
 			if (op != X64OP_LOAD_BE)
 			{
-				value = se_storage<u32>::swap(value);
+				value = stx::se_storage<u32>::swap(value);
 			}
 
 			if (op == X64OP_LOAD_CMP)
@@ -1335,7 +1340,7 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 			}
 
 			u32 val32 = static_cast<u32>(reg_value);
-			if (!thread->write_reg(addr, op == X64OP_STORE ? se_storage<u32>::swap(val32) : val32))
+			if (!thread->write_reg(addr, op == X64OP_STORE ? stx::se_storage<u32>::swap(val32) : val32))
 			{
 				return false;
 			}
@@ -1589,21 +1594,27 @@ static LONG exception_handler(PEXCEPTION_POINTERS pExp) noexcept
 		return EXCEPTION_CONTINUE_SEARCH;
 	}
 
-	const u64 addr64 = pExp->ExceptionRecord->ExceptionInformation[1] - reinterpret_cast<u64>(vm::g_base_addr);
-	const u64 exec64 = (pExp->ExceptionRecord->ExceptionInformation[1] - reinterpret_cast<u64>(vm::g_exec_addr)) / 2;
+	const auto ptr = reinterpret_cast<u8*>(pExp->ExceptionRecord->ExceptionInformation[1]);
 	const bool is_writing = pExp->ExceptionRecord->ExceptionInformation[0] != 0;
 
-	if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && addr64 < 0x100000000ull)
+	if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
 	{
-		if (thread_ctrl::get_current() && handle_access_violation(static_cast<u32>(addr64), is_writing, pExp->ContextRecord))
-		{
-			return EXCEPTION_CONTINUE_EXECUTION;
-		}
-	}
+		u32 addr = 0;
 
-	if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && exec64 < 0x100000000ull)
-	{
-		if (thread_ctrl::get_current() && handle_access_violation(static_cast<u32>(exec64), is_writing, pExp->ContextRecord))
+		if (auto [addr0, ok] = vm::try_get_addr(ptr); ok)
+		{
+			addr = addr0;
+		}
+		else if (const usz exec64 = (ptr - vm::g_exec_addr) / 2; exec64 <= UINT32_MAX)
+		{
+			addr = static_cast<u32>(exec64);
+		}
+		else
+		{
+			return EXCEPTION_CONTINUE_SEARCH;
+		}
+
+		if (thread_ctrl::get_current() && handle_access_violation(addr, is_writing, pExp->ContextRecord))
 		{
 			return EXCEPTION_CONTINUE_EXECUTION;
 		}
@@ -1744,14 +1755,13 @@ static void signal_handler(int sig, siginfo_t* info, void* uct) noexcept
 	const bool is_writing = context->uc_mcontext.gregs[REG_ERR] & 0x2;
 #endif
 
-	const u64 addr64 = reinterpret_cast<u64>(info->si_addr) - reinterpret_cast<u64>(vm::g_base_addr);
 	const u64 exec64 = (reinterpret_cast<u64>(info->si_addr) - reinterpret_cast<u64>(vm::g_exec_addr)) / 2;
 	const auto cause = is_writing ? "writing" : "reading";
 
-	if (addr64 < 0x100000000ull)
+	if (auto [addr, ok] = vm::try_get_addr(info->si_addr); ok)
 	{
 		// Try to process access violation
-		if (thread_ctrl::get_current() && handle_access_violation(static_cast<u32>(addr64), is_writing, context))
+		if (thread_ctrl::get_current() && handle_access_violation(addr, is_writing, context))
 		{
 			return;
 		}
@@ -1786,7 +1796,9 @@ static void signal_handler(int sig, siginfo_t* info, void* uct) noexcept
 
 	if (IsDebuggerPresent())
 	{
-		__asm("int3;");
+		// Convert to SIGTRAP
+		raise(SIGTRAP);
+		return;
 	}
 
 	report_fatal_error(msg);
@@ -1849,7 +1861,7 @@ static atomic_t<u128, 64> s_thread_bits{0};
 
 static atomic_t<thread_base**> s_thread_pool[128]{};
 
-void thread_base::start(native_entry entry)
+void thread_base::start()
 {
 	for (u128 bits = s_thread_bits.load(); bits; bits &= bits - 1)
 	{
@@ -1867,22 +1879,21 @@ void thread_base::start(native_entry entry)
 			continue;
 		}
 
-		// Send "this" and entry point
-		const u64 entry_val = reinterpret_cast<u64>(entry);
-		m_thread = entry_val;
-		atomic_storage<thread_base*>::release(*tls, this);
-		s_thread_pool[pos].notify_all();
-
-		// Wait for actual "m_thread" in return
-		m_thread.wait(entry_val);
+		// Receive "that" native thread handle, sent "this" thread_base
+		const u64 _self = reinterpret_cast<u64>(atomic_storage<thread_base*>::load(*tls));
+		m_thread.release(_self);
+		ensure(_self != reinterpret_cast<u64>(this));
+		atomic_storage<thread_base*>::store(*tls, this);
+		s_thread_pool[pos].notify_one();
 		return;
 	}
 
 #ifdef _WIN32
-	m_thread = ::_beginthreadex(nullptr, 0, entry, this, CREATE_SUSPENDED, nullptr);
-	verify("thread_ctrl::start" HERE), m_thread, ::ResumeThread(reinterpret_cast<HANDLE>(+m_thread)) != -1;
+	m_thread = ::_beginthreadex(nullptr, 0, entry_point, this, CREATE_SUSPENDED, nullptr);
+	ensure(m_thread);
+	ensure(::ResumeThread(reinterpret_cast<HANDLE>(+m_thread)) != -1);
 #else
-	verify("thread_ctrl::start" HERE), pthread_create(reinterpret_cast<pthread_t*>(&m_thread.raw()), nullptr, entry, this) == 0;
+	ensure(pthread_create(reinterpret_cast<pthread_t*>(&m_thread.raw()), nullptr, entry_point, this) == 0);
 #endif
 }
 
@@ -1950,14 +1961,14 @@ void thread_base::set_name(std::string name)
 #endif
 
 #if defined(__APPLE__)
-	name.resize(std::min<std::size_t>(15, name.size()));
+	name.resize(std::min<usz>(15, name.size()));
 	pthread_setname_np(name.c_str());
 #elif defined(__DragonFly__) || defined(__FreeBSD__) || defined(__OpenBSD__)
 	pthread_set_name_np(pthread_self(), name.c_str());
 #elif defined(__NetBSD__)
 	pthread_setname_np(pthread_self(), "%s", name.data());
 #elif !defined(_WIN32)
-	name.resize(std::min<std::size_t>(15, name.size()));
+	name.resize(std::min<usz>(15, name.size()));
 	pthread_setname_np(pthread_self(), name.c_str());
 #endif
 }
@@ -2012,21 +2023,23 @@ u64 thread_base::finalize(thread_state result_state) noexcept
 
 	atomic_wait_engine::set_wait_callback(nullptr);
 
-	// Return true if need to delete thread object (no)
-	const bool ok = 0 == (3 & ~m_sync.fetch_op([&](u64& v)
+	// Avoid race with the destructor
+	const u64 _self = m_thread;
+
+	// Set result state (errored or finalized)
+	m_sync.fetch_op([&](u64& v)
 	{
 		v &= -4;
 		v |= static_cast<u32>(result_state);
-	}));
+	});
 
 	// Signal waiting threads
 	m_sync.notify_all(2);
 
-	// No detached thread supported atm
-	return m_thread;
+	return _self;
 }
 
-u64 thread_base::finalize(u64 _self) noexcept
+thread_base::native_entry thread_base::finalize(u64 _self) noexcept
 {
 	g_tls_fault_all = 0;
 	g_tls_fault_rsx = 0;
@@ -2035,17 +2048,55 @@ u64 thread_base::finalize(u64 _self) noexcept
 	g_tls_wait_fail = 0;
 	g_tls_access_violation_recovered = false;
 
-	atomic_wait_engine::set_wait_callback(nullptr);
+	const auto fake_self = reinterpret_cast<thread_base*>(_self);
+
 	g_tls_log_prefix = []() -> std::string { return {}; };
-	thread_ctrl::g_tls_this_thread = nullptr;
+	thread_ctrl::g_tls_this_thread = fake_self;
 
 	if (!_self)
 	{
-		return 0;
+		return nullptr;
 	}
 
 	// Try to add self to thread pool
 	set_name("..pool");
+
+	static constexpr u64 s_stop_bit = 0x8000'0000'0000'0000ull;
+
+	static atomic_t<u64> s_pool_ctr = []
+	{
+		std::atexit([]
+		{
+			s_pool_ctr |= s_stop_bit;
+
+			while (/*u64 remains = */s_pool_ctr & ~s_stop_bit)
+			{
+				for (u32 i = 0; i < std::size(s_thread_pool); i++)
+				{
+					if (thread_base** ptls = s_thread_pool[i].exchange(nullptr))
+					{
+						// Extract thread handle
+						const u64 _self = reinterpret_cast<u64>(*ptls);
+
+						// Wake up a thread and make sure it's joined
+						s_thread_pool[i].notify_one();
+
+#ifdef _WIN32
+						const HANDLE handle = reinterpret_cast<HANDLE>(_self);
+						WaitForSingleObject(handle, INFINITE);
+						CloseHandle(handle);
+#else
+						pthread_join(reinterpret_cast<pthread_t>(_self), nullptr);
+#endif
+					}
+				}
+			}
+		});
+
+		return 0;
+	}();
+
+	s_pool_ctr++;
 
 	u32 pos = -1;
 
@@ -2075,9 +2126,18 @@ u64 thread_base::finalize(u64 _self) noexcept
 	const auto tls = &thread_ctrl::g_tls_this_thread;
 	s_thread_pool[pos] = tls;
 
-	while (s_thread_pool[pos] == tls || !atomic_storage<thread_base*>::load(*tls))
+	atomic_wait::list<2> list{};
+	list.set<0>(s_pool_ctr, 0, s_stop_bit);
+	list.set<1>(s_thread_pool[pos], tls);
+
+	while (s_thread_pool[pos] == tls || atomic_storage<thread_base*>::load(*tls) == fake_self)
 	{
-		s_thread_pool[pos].wait(tls);
+		list.wait();
+
+		if (s_pool_ctr & s_stop_bit)
+		{
+			break;
+		}
 	}
 
 	// Free thread pool slot
@@ -2088,14 +2148,14 @@ u64 thread_base::finalize(u64 _self) noexcept
 
 	s_thread_bits.notify_one();
 
-	// Restore thread id
-	const auto _this = atomic_storage<thread_base*>::load(*tls);
-	const auto entry = _this->m_thread.exchange(_self);
-	verify(HERE), entry != _self;
-	_this->m_thread.notify_one();
+	if (--s_pool_ctr & s_stop_bit)
+	{
+		return nullptr;
+	}
 
-	// Return new entry
-	return entry;
+	// Return new entry point
+	utils::prefetch_exec((*tls)->entry_point);
+	return (*tls)->entry_point;
 }
 
 thread_base::native_entry thread_base::make_trampoline(u64(*entry)(thread_base* _base))
@@ -2113,7 +2173,7 @@ thread_base::native_entry thread_base::make_trampoline(u64(*entry)(thread_base* 
 
 		// Call finalize, return if zero
 		c.mov(args[0], x86::rax);
-		c.call(imm_ptr<u64(*)(u64)>(finalize));
+		c.call(imm_ptr<native_entry(*)(u64)>(finalize));
 		c.test(x86::rax, x86::rax);
 		c.jz(_ret);
 
@@ -2179,7 +2239,7 @@ void thread_ctrl::_wait_for(u64 usec, bool alert /* true */)
 	}
 #endif
 
-	if (_this->m_sync.btr(2))
+	if (_this->m_sync.bit_test_reset(2))
 	{
 		return;
 	}
@@ -2197,18 +2257,25 @@ std::string thread_ctrl::get_name_cached()
 		return {};
 	}
 
-	static thread_local stx::shared_cptr<std::string> name_cache;
+	static thread_local shared_ptr<std::string> name_cache;
 
 	if (!_this->m_tname.is_equal(name_cache)) [[unlikely]]
 	{
-		name_cache = _this->m_tname.load();
+		_this->m_tname.peek_op([&](const shared_ptr<std::string>& ptr)
+		{
+			if (ptr != name_cache)
+			{
+				name_cache = ptr;
+			}
+		});
 	}
 
 	return *name_cache;
 }
 
-thread_base::thread_base(std::string_view name)
-	: m_tname(stx::shared_cptr<std::string>::make(name))
+thread_base::thread_base(native_entry entry, std::string_view name)
+	: entry_point(entry)
+	, m_tname(make_single<std::string>(name))
 {
 }
 
@@ -2218,17 +2285,25 @@ thread_base::~thread_base()
 	if ((m_sync & 3) == 2)
 	{
 #ifdef _WIN32
-		CloseHandle(reinterpret_cast<HANDLE>(m_thread.load()));
+		const HANDLE handle0 = reinterpret_cast<HANDLE>(m_thread.load());
+		WaitForSingleObject(handle0, INFINITE);
+		CloseHandle(handle0);
 #else
 		pthread_join(reinterpret_cast<pthread_t>(m_thread.load()), nullptr);
 #endif
 	}
 }
 
-bool thread_base::join() const
+bool thread_base::join(bool dtor) const
 {
+	// Check if already finished
+	if (m_sync & 2)
+	{
+		return (m_sync & 3) == 3;
+	}
+
 	// Hacked for too sleepy threads (1ms) TODO: make sure it's unneeded and remove
-	const auto timeout = Emu.IsStopped() ? atomic_wait_timeout{1'000'000} : atomic_wait_timeout::inf;
+	const auto timeout = dtor && Emu.IsStopped() ? atomic_wait_timeout{1'000'000} : atomic_wait_timeout::inf;
 
 	bool warn = false;
 	auto stamp0 = __rdtsc();
@@ -2314,7 +2389,7 @@ u64 thread_base::get_cycles()
 	}
 }
 
-void thread_ctrl::emergency_exit(std::string_view reason)
+[[noreturn]] void thread_ctrl::emergency_exit(std::string_view reason)
 {
 	sig_log.fatal("Thread terminated due to fatal error: %s", reason);
 
@@ -2350,7 +2425,7 @@ void thread_ctrl::emergency_exit(std::string_view reason)
 #ifdef _WIN32
 		_endthreadex(0);
 #else
-		pthread_exit(0);
+		pthread_exit(nullptr);
 #endif
 	}
 
@@ -2397,8 +2472,8 @@ void thread_ctrl::detect_cpu_layout()
 		else
 		{
 			// Iterate through the buffer until a core with hyperthreading is found
-			auto ptr = reinterpret_cast<std::uintptr_t>(buffer.data());
-			const std::uintptr_t end = ptr + buffer_size;
+			auto ptr = reinterpret_cast<uptr>(buffer.data());
+			const uptr end = ptr + buffer_size;
 
 			while (ptr < end)
 			{
@@ -2423,7 +2498,7 @@ u64 thread_ctrl::get_affinity_mask(thread_class group)
 
 	if (const auto thread_count = std::thread::hardware_concurrency())
 	{
-		const u64 all_cores_mask = thread_count < 64 ? UINT64_MAX >> (64 - thread_count): UINT64_MAX;
+		const u64 all_cores_mask = get_process_affinity_mask();
 
 		switch (g_native_core_layout)
 		{
@@ -2434,105 +2509,140 @@ u64 thread_ctrl::get_affinity_mask(thread_class group)
 		}
 		case native_core_arrangement::amd_ccx:
 		{
-			u64 spu_mask, ppu_mask, rsx_mask;
-			const auto system_id = utils::get_cpu_brand();
-			if (thread_count >= 32)
+			if (thread_count <= 8)
 			{
-				if (system_id.find("3950X") != umax)
+				// Single CCX or not enough threads, do nothing
+				return all_cores_mask;
+			}
+
+			u64 spu_mask, ppu_mask, rsx_mask;
+			spu_mask = ppu_mask = rsx_mask = all_cores_mask; // Fallback, in case someone is messing with core config
+
+			const auto system_id = utils::get_cpu_brand();
+			const auto family_id = utils::get_cpu_family();
+			const auto model_id = utils::get_cpu_model();
+
+			switch (family_id)
+			{
+			case 0x17: // Zen, Zen+, Zen2
+			case 0x18: // Dhyana core (Zen)
+			{
+				if (model_id > 0x30)
 				{
-					// zen2
-					// Ryzen 9 3950X
-					// Assign threads 9-32
-					ppu_mask = 0b11111111000000000000000000000000;
-					spu_mask = 0b00000000111111110000000000000000;
-					rsx_mask = 0b00000000000000001111111100000000;
-				}
-				else if (system_id.find("2970WX") != umax)
-				{
-					// zen+
-					// Threadripper 2970WX
-					// Assign threads 9-24
-					ppu_mask = 0b000000111111000000000000;
-					spu_mask = ppu_mask;
-					rsx_mask = 0b111111000000000000000000;
+					// Zen2 (models 49, 96, 113, 144)
+					// Much improved inter-CCX latency
+					switch (thread_count)
+					{
+					case 128:
+					case 64:
+					case 48:
+					case 32:
+						// TR 3000 series, or R9 3950X, Assign threads 9-32
+						ppu_mask = 0b11111111000000000000000000000000;
+						spu_mask = 0b00000000111111110000000000000000;
+						rsx_mask = 0b00000000000000001111111100000000;
+						break;
+					case 24:
+						// 3900X, Assign threads 7-24
+						ppu_mask = 0b111111000000000000000000;
+						spu_mask = 0b000000111111000000000000;
+						rsx_mask = 0b000000000000111111000000;
+						break;
+					case 16:
+						// 3700, 3800 family, Assign threads 1-16
+						ppu_mask = 0b0000000011110000;
+						spu_mask = 0b1111111100000000;
+						rsx_mask = 0b0000000000001111;
+						break;
+					case 12:
+						// 3600 family, Assign threads 1-12
+						ppu_mask = 0b000000111000;
+						spu_mask = 0b111111000000;
+						rsx_mask = 0b000000000111;
+						break;
+					default:
+						break;
+					}
 				}
 				else
 				{
-					// zen(+)
-					// Threadripper 1950X/2950X/2990WX
-					// Assign threads 17-32
-					ppu_mask = 0b00000000111111110000000000000000;
-					spu_mask = ppu_mask;
-					rsx_mask = 0b11111111000000000000000000000000;
+					// Zen, Zen+ (models 1, 8(+), 17, 24(+), 32)
+					switch (thread_count)
+					{
+					case 64:
+						// TR 2990WX, Assign threads 17-32
+						ppu_mask = 0b00000000111111110000000000000000;
+						spu_mask = ppu_mask;
+						rsx_mask = 0b11111111000000000000000000000000;
+						break;
+					case 48:
+						// TR 2970WX, Assign threads 9-24
+						ppu_mask = 0b000000111111000000000000;
+						spu_mask = ppu_mask;
+						rsx_mask = 0b111111000000000000000000;
+						break;
+					case 32:
+						// TR 2950X, TR 1950X, Assign threads 17-32
+						ppu_mask = 0b00000000111111110000000000000000;
+						spu_mask = ppu_mask;
+						rsx_mask = 0b11111111000000000000000000000000;
+						break;
+					case 24:
+						// TR 1920X, 2920X, Assign threads 13-24
+						ppu_mask = 0b000000111111000000000000;
+						spu_mask = ppu_mask;
+						rsx_mask = 0b111111000000000000000000;
+						break;
+					case 16:
+						// 1700, 1800, 2700, TR 1900X family
+						ppu_mask = 0b1111111100000000;
+						spu_mask = ppu_mask;
+						rsx_mask = 0b0000000000111100;
+						break;
+					case 12:
+						// 1600, 2600 family, Assign threads 3-12
+						ppu_mask = 0b111111000000;
+						spu_mask = ppu_mask;
+						rsx_mask = 0b000000111100;
+						break;
+					default:
+						break;
+					}
 				}
-
+				break;
 			}
-			else if (thread_count == 24)
+			case 0x19: // Zen3
 			{
-				if (system_id.find("3900X") != umax)
+				// Single-CCX architecture, just disable SMT if wide enough
+				// CCX now holds upto 16 threads
+				// Lack of hw availability makes testing difficult
+				switch (thread_count)
 				{
-					// zen2
-					// Ryzen 9 3900X
-					// Assign threads 7-22
+				case 24:
+					// 5900X, Use same scheduler as 3900X
+					// Unverified on windows, may be worse than just disabling SMT and scheduler
 					ppu_mask = 0b111111000000000000000000;
 					spu_mask = 0b000000111111000000000000;
 					rsx_mask = 0b000000000000111111000000;
+					break;
+				default:
+					if (thread_count >= 16)
+					{
+						// Verified by more than one windows user on 16-thread CPU
+						ppu_mask = spu_mask = rsx_mask = (0b10101010101010101010101010101010 & all_cores_mask);
+					}
+					else
+					{
+						ppu_mask = spu_mask = rsx_mask = all_cores_mask;
+					}
+					break;
 				}
-				else
-				{
-					// zen(+)
-					// Threadripper 1920X/2920X
-					// Assign threads 13-24
-					ppu_mask = 0b000000111111000000000000;
-					spu_mask = ppu_mask;
-					rsx_mask = 0b111111000000000000000000;
-				}
+				break;
 			}
-			else if (thread_count == 16)
+			default:
 			{
-				if (system_id.find("3700X") != umax || system_id.find("3800X") != umax)
-				{
-					// Ryzen 7 3700/3800 (x)
-					// Assign threads 1-16
-					ppu_mask = 0b0000000011110000;
-					spu_mask = 0b1111111100000000;
-					rsx_mask = 0b0000000000001111;
-				}
-				else
-				{
-					// zen(+)
-					// Ryzen 7, Threadripper
-					// Assign threads 3-16
-					ppu_mask = 0b1111111100000000;
-					spu_mask = ppu_mask;
-					rsx_mask = 0b0000000000111100;
-				}
+				break;
 			}
-			else if (thread_count == 12)
-			{
-				if (system_id.find("3600") != umax)
-				{
-					// zen2
-					// R5 3600 (x)
-					// Assign threads 1-12
-					ppu_mask = 0b000000111000;
-					spu_mask = 0b111111000000;
-					rsx_mask = 0b000000000111;
-				}
-				else
-				{
-					// zen(+)
-					// R5 1600/2600 (x)
-					// Assign threads 3-12
-					ppu_mask = 0b111111000000;
-					spu_mask = ppu_mask;
-					rsx_mask = 0b000000111100;
-				}
-			}
-			else
-			{
-				// R5 & R3 don't seem to improve performance no matter how these are shuffled
-				ppu_mask = spu_mask = rsx_mask = 0b11111111 & all_cores_mask;
 			}
 
 			switch (group)
@@ -2723,17 +2833,17 @@ u64 thread_ctrl::get_thread_affinity_mask()
 #endif
 }
 
-std::pair<void*, std::size_t> thread_ctrl::get_thread_stack()
+std::pair<void*, usz> thread_ctrl::get_thread_stack()
 {
 #ifdef _WIN32
 	ULONG_PTR _min = 0;
 	ULONG_PTR _max = 0;
 	GetCurrentThreadStackLimits(&_min, &_max);
-	const std::size_t ssize = _max - _min;
+	const usz ssize = _max - _min;
 	const auto saddr = reinterpret_cast<void*>(_min);
 #else
 	void* saddr = 0;
-	std::size_t ssize = 0;
+	usz ssize = 0;
 	pthread_attr_t attr;
 #ifdef __linux__
 	pthread_getattr_np(pthread_self(), &attr);

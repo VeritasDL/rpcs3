@@ -1,4 +1,4 @@
-﻿// This makes debugging on windows less painful
+// This makes debugging on windows less painful
 //#define HAVE_LIBEVDEV
 
 #ifdef HAVE_LIBEVDEV
@@ -49,6 +49,8 @@ evdev_joystick_handler::~evdev_joystick_handler()
 
 void evdev_joystick_handler::init_config(pad_config* cfg, const std::string& name)
 {
+	if (!cfg) return;
+
 	// Set this profile's save location
 	cfg->cfg_name = name;
 
@@ -277,7 +279,7 @@ std::shared_ptr<evdev_joystick_handler::EvdevDevice> evdev_joystick_handler::get
 void evdev_joystick_handler::get_next_button_press(const std::string& padId, const pad_callback& callback, const pad_fail_callback& fail_callback, bool get_blacklist, const std::vector<std::string>& buttons)
 {
 	if (get_blacklist)
-		blacklist.clear();
+		m_blacklist.clear();
 
 	// Get our evdev device
 	auto device = get_evdev_device(padId);
@@ -341,7 +343,7 @@ void evdev_joystick_handler::get_next_button_press(const std::string& padId, con
 		if (padId.find("Sony") != umax && (code == BTN_TL2 || code == BTN_TR2))
 			continue;
 
-		if (!get_blacklist && std::find(blacklist.begin(), blacklist.end(), name) != blacklist.end())
+		if (!get_blacklist && std::find(m_blacklist.begin(), m_blacklist.end(), name) != m_blacklist.end())
 			continue;
 
 		const u16 value = data[code].first;
@@ -349,7 +351,7 @@ void evdev_joystick_handler::get_next_button_press(const std::string& padId, con
 		{
 			if (get_blacklist)
 			{
-				blacklist.emplace_back(name);
+				m_blacklist.emplace_back(name);
 				evdev_log.error("Evdev Calibration: Added button [ %d = %s = %s ] to blacklist. Value = %d", code, libevdev_event_code_get_name(EV_KEY, code), name, value);
 			}
 			else if (value > pressed_button.first)
@@ -362,7 +364,7 @@ void evdev_joystick_handler::get_next_button_press(const std::string& padId, con
 		if (data[code].second)
 			continue;
 
-		if (!get_blacklist && std::find(blacklist.begin(), blacklist.end(), name) != blacklist.end())
+		if (!get_blacklist && std::find(m_blacklist.begin(), m_blacklist.end(), name) != m_blacklist.end())
 			continue;
 
 		const u16 value = data[code].first;
@@ -372,7 +374,7 @@ void evdev_joystick_handler::get_next_button_press(const std::string& padId, con
 			{
 				const int min = libevdev_get_abs_minimum(dev, code);
 				const int max = libevdev_get_abs_maximum(dev, code);
-				blacklist.emplace_back(name);
+				m_blacklist.emplace_back(name);
 				evdev_log.error("Evdev Calibration: Added axis [ %d = %s = %s ] to blacklist. [ Value = %d ] [ Min = %d ] [ Max = %d ]", code, libevdev_event_code_get_name(EV_ABS, code), name, value, min, max);
 			}
 			else if (value > pressed_button.first)
@@ -385,7 +387,7 @@ void evdev_joystick_handler::get_next_button_press(const std::string& padId, con
 		if (!data[code].second)
 			continue;
 
-		if (!get_blacklist && std::find(blacklist.begin(), blacklist.end(), name) != blacklist.end())
+		if (!get_blacklist && std::find(m_blacklist.begin(), m_blacklist.end(), name) != m_blacklist.end())
 			continue;
 
 		const u16 value = data[code].first;
@@ -395,7 +397,7 @@ void evdev_joystick_handler::get_next_button_press(const std::string& padId, con
 			{
 				const int min = libevdev_get_abs_minimum(dev, code);
 				const int max = libevdev_get_abs_maximum(dev, code);
-				blacklist.emplace_back(name);
+				m_blacklist.emplace_back(name);
 				evdev_log.error("Evdev Calibration: Added rev axis [ %d = %s = %s ] to blacklist. [ Value = %d ] [ Min = %d ] [ Max = %d ]", code, libevdev_event_code_get_name(EV_ABS, code), name, value, min, max);
 			}
 			else if (value > pressed_button.first)
@@ -405,7 +407,7 @@ void evdev_joystick_handler::get_next_button_press(const std::string& padId, con
 
 	if (get_blacklist)
 	{
-		if (blacklist.empty())
+		if (m_blacklist.empty())
 			evdev_log.success("Evdev Calibration: Blacklist is clear. No input spam detected");
 		return;
 	}
@@ -616,8 +618,8 @@ std::vector<std::string> evdev_joystick_handler::ListDevices()
 
 int evdev_joystick_handler::add_device(const std::string& device, const std::shared_ptr<Pad>& pad, bool in_settings)
 {
-	if (in_settings && settings_added.count(device))
-		return settings_added.at(device);
+	if (in_settings && m_settings_added.count(device))
+		return m_settings_added.at(device);
 
 	// Now we need to find the device with the same name, and make sure not to grab any duplicates.
 	std::unordered_map<std::string, u32> unique_names;
@@ -654,12 +656,11 @@ int evdev_joystick_handler::add_device(const std::string& device, const std::sha
 				name == device)
 			{
 				// It's a joystick. Now let's make sure we don't already have this one.
-				auto it = std::find_if(bindings.begin(), bindings.end(), [&path](std::pair<std::shared_ptr<PadDevice>, std::shared_ptr<Pad>> binding)
+				if (std::any_of(bindings.begin(), bindings.end(), [&path](std::pair<std::shared_ptr<PadDevice>, std::shared_ptr<Pad>> binding)
 				{
-					auto device = std::static_pointer_cast<EvdevDevice>(binding.first);
+					const auto device = std::static_pointer_cast<EvdevDevice>(binding.first);
 					return device && path == device->path;
-				});
-				if (it != bindings.end())
+				}))
 				{
 					libevdev_free(dev);
 					close(fd);
@@ -669,7 +670,7 @@ int evdev_joystick_handler::add_device(const std::string& device, const std::sha
 				if (in_settings)
 				{
 					m_dev                  = std::make_shared<EvdevDevice>();
-					settings_added[device] = bindings.size();
+					m_settings_added[device] = bindings.size();
 
 					// Let's log axis information while we are in the settings in order to identify problems more easily.
 					for (const auto& [code, axis_name] : axis_list)
@@ -1015,7 +1016,7 @@ bool evdev_joystick_handler::check_button(const EvdevButton& b, const u32 code)
 
 bool evdev_joystick_handler::check_buttons(const std::vector<EvdevButton>& b, const u32 code)
 {
-	return std::find_if(b.begin(), b.end(), [this, code](const EvdevButton& b) { return check_button(b, code); }) != b.end();
+	return std::any_of(b.begin(), b.end(), [this, code](const EvdevButton& b) { return check_button(b, code); });
 };
 
 bool evdev_joystick_handler::get_is_left_trigger(u64 keyCode)

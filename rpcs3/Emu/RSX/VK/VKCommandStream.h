@@ -1,9 +1,16 @@
-﻿#pragma once
+#pragma once
 
-#include "VKHelpers.h"
+#include "VulkanAPI.h"
 
 namespace vk
 {
+	struct fence;
+
+	enum // callback commands
+	{
+		rctrl_queue_submit = 0x80000000
+	};
+
 	struct submit_packet
 	{
 		// Core components

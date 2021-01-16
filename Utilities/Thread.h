@@ -1,8 +1,8 @@
-﻿#pragma once
+#pragma once
 
-#include "types.h"
+#include "util/types.hpp"
 #include "util/atomic.hpp"
-#include "util/shared_cptr.hpp"
+#include "util/shared_ptr.hpp"
 
 #include <string>
 #include <memory>
@@ -10,9 +10,6 @@
 
 #include "mutex.h"
 #include "lockless.h"
-
-// Report error and call std::abort(), defined in main.cpp
-[[noreturn]] void report_fatal_error(const std::string&);
 
 // Hardware core layout
 enum class native_core_arrangement : u32
@@ -100,6 +97,8 @@ public:
 	using native_entry = void*(*)(void* arg);
 #endif
 
+	const native_entry entry_point;
+
 private:
 	// Thread handle (platform-specific)
 	atomic_t<u64> m_thread{0};
@@ -108,10 +107,10 @@ private:
 	atomic_t<u64> m_sync{0};
 
 	// Thread name
-	stx::atomic_cptr<std::string> m_tname;
+	atomic_ptr<std::string> m_tname;
 
 	// Start thread
-	void start(native_entry);
+	void start();
 
 	// Called at the thread start
 	void initialize(void (*error_cb)());
@@ -120,7 +119,7 @@ private:
 	u64 finalize(thread_state result) noexcept;
 
 	// Cleanup after possibly deleting the thread instance
-	static u64 finalize(u64 _self) noexcept;
+	static native_entry finalize(u64 _self) noexcept;
 
 	// Set name for debugger
 	static void set_name(std::string);
@@ -134,7 +133,7 @@ private:
 	friend class named_thread;
 
 protected:
-	thread_base(std::string_view name);
+	thread_base(native_entry, std::string_view name);
 
 	~thread_base();
 
@@ -143,7 +142,7 @@ public:
 	u64 get_cycles();
 
 	// Wait for the thread (it does NOT change thread state, and can be called from multiple threads)
-	bool join() const;
+	bool join(bool dtor = false) const;
 
 	// Notify the thread
 	void notify();
@@ -189,14 +188,14 @@ public:
 	// Set current thread name (not recommended)
 	static void set_name(std::string_view name)
 	{
-		g_tls_this_thread->m_tname.store(stx::shared_cptr<std::string>::make(name));
+		g_tls_this_thread->m_tname.store(make_single<std::string>(name));
 	}
 
 	// Set thread name (not recommended)
 	template <typename T>
 	static void set_name(named_thread<T>& thread, std::string_view name)
 	{
-		static_cast<thread_base&>(thread).m_tname.store(stx::shared_cptr<std::string>::make(name));
+		static_cast<thread_base&>(thread).m_tname.store(make_single<std::string>(name));
 	}
 
 	template <typename T>
@@ -263,7 +262,7 @@ public:
 	static u64 get_thread_affinity_mask();
 
 	// Get current thread stack addr and size
-	static std::pair<void*, std::size_t> get_thread_stack();
+	static std::pair<void*, usz> get_thread_stack();
 
 private:
 	// Miscellaneous
@@ -316,26 +315,26 @@ public:
 	template <bool Valid = std::is_default_constructible_v<Context> && thread_thread_name<Context>(), typename = std::enable_if_t<Valid>>
 	named_thread()
 		: Context()
-		, thread(Context::thread_name)
+		, thread(trampoline, Context::thread_name)
 	{
-		thread::start(trampoline);
+		thread::start();
 	}
 
 	// Normal forwarding constructor
 	template <typename... Args, typename = std::enable_if_t<std::is_constructible_v<Context, Args&&...>>>
 	named_thread(std::string_view name, Args&&... args)
 		: Context(std::forward<Args>(args)...)
-		, thread(name)
+		, thread(trampoline, name)
 	{
-		thread::start(trampoline);
+		thread::start();
 	}
 
 	// Lambda constructor, also the implicit deduction guide candidate
 	named_thread(std::string_view name, Context&& f)
 		: Context(std::forward<Context>(f))
-		, thread(name)
+		, thread(trampoline, name)
 	{
-		thread::start(trampoline);
+		thread::start();
 	}
 
 	named_thread(const named_thread&) = delete;
@@ -373,8 +372,6 @@ public:
 	// Try to abort by assigning thread_state::aborting (UB if assigning different state)
 	named_thread& operator=(thread_state s)
 	{
-		ASSUME(s == thread_state::aborting);
-
 		if (s == thread_state::aborting && thread::m_sync.fetch_op([](u64& v){ return !(v & 3) && (v |= 1); }).second)
 		{
 			if (s == thread_state::aborting)
@@ -396,7 +393,7 @@ public:
 	{
 		// Assign aborting state forcefully
 		operator=(thread_state::aborting);
-		thread::join();
+		thread::join(true);
 
 		if constexpr (!result::empty)
 		{

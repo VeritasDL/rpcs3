@@ -33,14 +33,13 @@ target_include_directories(rpcs3_emu
 # Utilities
 target_sources(rpcs3_emu PRIVATE
 	../util/atomic.cpp
-	../util/atomic2.cpp
-	../util/shared_cptr.cpp
 	../util/fixed_typemap.cpp
 	../util/logs.cpp
 	../util/yaml.cpp
 	../util/cereal.cpp
 	../util/vm_native.cpp
 	../util/dyn_lib.cpp
+	../util/sysinfo.cpp
 	../../Utilities/bin_patch.cpp
 	../../Utilities/cheat_info.cpp
 	../../Utilities/cond.cpp
@@ -52,7 +51,6 @@ target_sources(rpcs3_emu PRIVATE
 	../../Utilities/rXml.cpp
 	../../Utilities/sema.cpp
 	../../Utilities/StrFmt.cpp
-	../../Utilities/sysinfo.cpp
 	../../Utilities/Thread.cpp
 	../../Utilities/version.cpp
 )
@@ -360,6 +358,7 @@ target_sources(rpcs3_emu PRIVATE
 	Io/usb_device.cpp
 	Io/Skylander.cpp
 	Io/GHLtar.cpp
+	Io/Buzz.cpp
 )
 
 # Np
@@ -394,6 +393,7 @@ target_sources(rpcs3_emu PRIVATE
 	RSX/rsx_utils.cpp
 	RSX/Common/BufferUtils.cpp
 	RSX/Common/FragmentProgramDecompiler.cpp
+	RSX/Common/GLSLCommon.cpp
 	RSX/Common/ProgramStateCache.cpp
 	RSX/Common/surface_store.cpp
 	RSX/Common/TextureUtils.cpp
@@ -429,11 +429,25 @@ target_sources(rpcs3_emu PRIVATE
 	RSX/GL/GLTexture.cpp
 	RSX/GL/GLVertexBuffers.cpp
 	RSX/GL/GLVertexProgram.cpp
+	RSX/GL/GLTextureCache.cpp
 	RSX/GL/OpenGL.cpp
 )
 
 if(TARGET 3rdparty_vulkan)
 	target_sources(rpcs3_emu PRIVATE
+		RSX/VK/vkutils/barriers.cpp
+		RSX/VK/vkutils/buffer_object.cpp
+		RSX/VK/vkutils/chip_class.cpp
+		RSX/VK/vkutils/commands.cpp
+		RSX/VK/vkutils/data_heap.cpp
+		RSX/VK/vkutils/image.cpp
+		RSX/VK/vkutils/image_helpers.cpp
+		RSX/VK/vkutils/scratch.cpp
+		RSX/VK/vkutils/sync.cpp
+		RSX/VK/vkutils/memory.cpp
+		RSX/VK/vkutils/device.cpp
+		RSX/VK/vkutils/sampler.cpp
+		RSX/VK/vkutils/shared.cpp
 		RSX/VK/VKCommandStream.cpp
 		RSX/VK/VKCommonDecompiler.cpp
 		RSX/VK/VKDMA.cpp
@@ -455,6 +469,7 @@ if(TARGET 3rdparty_vulkan)
 		RSX/VK/VKTexture.cpp
 		RSX/VK/VKVertexBuffers.cpp
 		RSX/VK/VKVertexProgram.cpp
+		RSX/VK/VKTextureCache.cpp
 	)
 endif()
 

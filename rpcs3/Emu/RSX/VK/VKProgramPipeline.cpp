@@ -1,6 +1,6 @@
-﻿#include "stdafx.h"
-#include "VKHelpers.h"
-
+#include "stdafx.h"
+#include "VKProgramPipeline.h"
+#include "vkutils/device.h"
 #include <string>
 
 namespace vk
@@ -8,6 +8,64 @@ namespace vk
 	namespace glsl
 	{
 		using namespace ::glsl;
+
+		void shader::create(::glsl::program_domain domain, const std::string& source)
+		{
+			type     = domain;
+			m_source = source;
+		}
+
+		VkShaderModule shader::compile()
+		{
+			ensure(m_handle == VK_NULL_HANDLE);
+
+			if (!vk::compile_glsl_to_spv(m_source, type, m_compiled))
+			{
+				const std::string shader_type = type == ::glsl::program_domain::glsl_vertex_program ? "vertex" :
+					type == ::glsl::program_domain::glsl_fragment_program ? "fragment" : "compute";
+
+				rsx_log.notice("%s", m_source);
+				fmt::throw_exception("Failed to compile %s shader", shader_type);
+			}
+
+			VkShaderModuleCreateInfo vs_info;
+			vs_info.codeSize = m_compiled.size() * sizeof(u32);
+			vs_info.pNext    = nullptr;
+			vs_info.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+			vs_info.pCode    = m_compiled.data();
+			vs_info.flags    = 0;
+
+			vkCreateShaderModule(*g_render_device, &vs_info, nullptr, &m_handle);
+
+			return m_handle;
+		}
+
+		void shader::destroy()
+		{
+			m_source.clear();
+			m_compiled.clear();
+
+			if (m_handle)
+			{
+				vkDestroyShaderModule(*g_render_device, m_handle, nullptr);
+				m_handle = nullptr;
+			}
+		}
+
+		const std::string& shader::get_source() const
+		{
+			return m_source;
+		}
+
+		const std::vector<u32> shader::get_compiled() const
+		{
+			return m_compiled;
+		}
+
+		VkShaderModule shader::get_handle() const
+		{
+			return m_handle;
+		}
 
 		void program::create_impl()
 		{
@@ -41,7 +99,7 @@ namespace vk
 
 		program& program::load_uniforms(const std::vector<program_input>& inputs)
 		{
-			verify("Cannot change uniforms in already linked program!" HERE), !linked;
+			ensure(!linked); // "Cannot change uniforms in already linked program!"
 
 			for (auto &item : inputs)
 			{
@@ -133,7 +191,7 @@ namespace vk
 
 		void program::bind_uniform(const VkDescriptorImageInfo & image_descriptor, int texture_unit, ::glsl::program_domain domain, VkDescriptorSet &descriptor_set, bool is_stencil_mirror)
 		{
-			verify("Unsupported program domain" HERE, domain != ::glsl::program_domain::glsl_compute_program);
+			ensure(domain != ::glsl::program_domain::glsl_compute_program);
 
 			u32 binding;
 			if (domain == ::glsl::program_domain::glsl_fragment_program)
@@ -169,12 +227,12 @@ namespace vk
 			rsx_log.notice("texture not found in program: %stex%u", (domain == ::glsl::program_domain::glsl_vertex_program)? "v" : "", texture_unit);
 		}
 
-		void program::bind_uniform(const VkDescriptorBufferInfo &buffer_descriptor, uint32_t binding_point, VkDescriptorSet &descriptor_set)
+		void program::bind_uniform(const VkDescriptorBufferInfo &buffer_descriptor, u32 binding_point, VkDescriptorSet &descriptor_set)
 		{
 			bind_buffer(buffer_descriptor, binding_point, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, descriptor_set);
 		}
 
-		void program::bind_uniform(const VkBufferView &buffer_view, uint32_t binding_point, VkDescriptorSet &descriptor_set)
+		void program::bind_uniform(const VkBufferView &buffer_view, u32 binding_point, VkDescriptorSet &descriptor_set)
 		{
 			const VkWriteDescriptorSet descriptor_writer =
 			{
@@ -208,7 +266,7 @@ namespace vk
 			rsx_log.notice("vertex buffer not found in program: %s", binding_name.c_str());
 		}
 
-		void program::bind_buffer(const VkDescriptorBufferInfo &buffer_descriptor, uint32_t binding_point, VkDescriptorType type, VkDescriptorSet &descriptor_set)
+		void program::bind_buffer(const VkDescriptorBufferInfo &buffer_descriptor, u32 binding_point, VkDescriptorType type, VkDescriptorSet &descriptor_set)
 		{
 			const VkWriteDescriptorSet descriptor_writer =
 			{

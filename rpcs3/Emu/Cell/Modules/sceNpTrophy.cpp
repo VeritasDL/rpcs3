@@ -1,12 +1,10 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "Emu/System.h"
 #include "Emu/VFS.h"
 #include "Emu/IdManager.h"
 #include "Emu/Cell/PPUModule.h"
 
-#include "restore_new.h"
 #include "Utilities/rXml.h"
-#include "define_new_memleakdetect.h"
 #include "Loader/TRP.h"
 #include "Loader/TROPUSR.h"
 
@@ -20,6 +18,8 @@
 #include "Emu/Cell/lv2/sys_process.h"
 
 #include <cmath>
+#include <shared_mutex>
+#include "util/asm.hpp"
 
 LOG_CHANNEL(sceNpTrophy);
 
@@ -50,7 +50,7 @@ struct trophy_handle_t
 struct sce_np_trophy_manager
 {
 	shared_mutex mtx;
-	std::atomic<bool> is_initialized = false;
+	atomic_t<bool> is_initialized = false;
 
 	// Get context + check handle given
 	static std::pair<trophy_context_t*, SceNpTrophyError> get_context_ex(u32 context, u32 handle)
@@ -163,7 +163,7 @@ void fmt_class_string<SceNpCommunicationSignature>::format(std::string& out, u64
 	// Format as a C byte array for ease of use
 	fmt::append(out, "{ ");
 
-	for (std::size_t i = 0;; i++)
+	for (usz i = 0;; i++)
 	{
 		if (i == std::size(sign.data) - 1)
 		{
@@ -463,7 +463,7 @@ error_code sceNpTrophyRegisterContext(ppu_thread& ppu, u32 context, u32 handle, 
 
 	const auto trophy_manager = g_fxo->get<sce_np_trophy_manager>();
 
-	reader_lock lock(trophy_manager->mtx);
+	std::shared_lock lock(trophy_manager->mtx);
 
 	if (!trophy_manager->is_initialized)
 	{
@@ -471,6 +471,7 @@ error_code sceNpTrophyRegisterContext(ppu_thread& ppu, u32 context, u32 handle, 
 	}
 
 	const auto [ctxt, error] = trophy_manager->get_context_ex(context, handle);
+	const auto handle_ptr = idm::get<trophy_handle_t>(handle);
 
 	if (error)
 	{
@@ -490,7 +491,7 @@ error_code sceNpTrophyRegisterContext(ppu_thread& ppu, u32 context, u32 handle, 
 	}
 
 	// Rename or discard certain entries based on the files found
-	const size_t kTargetBufferLength = 31;
+	const usz kTargetBufferLength = 31;
 	char target[kTargetBufferLength + 1];
 	target[kTargetBufferLength] = 0;
 	strcpy_trunc(target, fmt::format("TROP_%02d.SFM", static_cast<s32>(g_cfg.sys.language)));
@@ -530,11 +531,45 @@ error_code sceNpTrophyRegisterContext(ppu_thread& ppu, u32 context, u32 handle, 
 	// * Installed
 
 	const std::string trophyPath = "/dev_hdd0/home/" + Emu.GetUsr() + "/trophy/" + ctxt->trp_name;
+	const s32 trp_status = fs::is_dir(vfs::get(trophyPath)) ? SCE_NP_TROPHY_STATUS_INSTALLED : SCE_NP_TROPHY_STATUS_NOT_INSTALLED;
+
+	lock.unlock();
+
+	sceNpTrophy.notice("sceNpTrophyRegisterContext(): Callback is being called (trp_status=%u)", trp_status);
 
 	// The callback is called once and then if it returns >= 0 the cb is called through events(coming from vsh) that are passed to the CB through cellSysutilCheckCallback
-	if (statusCb(ppu, context, fs::is_dir(vfs::get(trophyPath)) ? SCE_NP_TROPHY_STATUS_INSTALLED : SCE_NP_TROPHY_STATUS_NOT_INSTALLED, 0, 0, arg) < 0)
+	if (statusCb(ppu, context, trp_status, 0, 0, arg) < 0)
 	{
 		return SCE_NP_TROPHY_ERROR_PROCESSING_ABORTED;
+	}
+
+	std::unique_lock lock2(trophy_manager->mtx);
+
+	// Rerun error checks, the callback could have changed stuff by calling sceNpTrophy functions internally
+
+	if (!trophy_manager->is_initialized)
+	{
+		return SCE_NP_TROPHY_ERROR_NOT_INITIALIZED;
+	}
+
+	const auto [ctxt2, error2] = trophy_manager->get_context_ex(context, handle);
+
+	if (error2)
+	{
+		// Recheck for any errors, such as if AbortHandle was called
+		return error2;
+	}
+
+	// Paranoid checks: context/handler could have been destroyed and replaced with new ones with the same IDs
+	// Return an error for such cases
+	if (ctxt2 != ctxt)
+	{
+		return SCE_NP_TROPHY_ERROR_UNKNOWN_CONTEXT;
+	}
+
+	if (handle_ptr.get() != idm::check<trophy_handle_t>(handle))
+	{
+		return SCE_NP_TROPHY_ERROR_UNKNOWN_HANDLE;
 	}
 
 	if (!trp.Install(trophyPath))
@@ -557,6 +592,8 @@ error_code sceNpTrophyRegisterContext(ppu_thread& ppu, u32 context, u32 handle, 
 		{ SCE_NP_TROPHY_STATUS_PROCESSING_FINALIZE, 4 },
 		{ SCE_NP_TROPHY_STATUS_PROCESSING_COMPLETE, 0 }
 	};
+
+	lock2.unlock();
 
 	lv2_obj::sleep(ppu);
 
@@ -1109,7 +1146,7 @@ error_code sceNpTrophyGetGameProgress(u32 context, u32 handle, vm::ptr<s32> perc
 	const u32 trp_count = ctxt->tropusr->GetTrophiesCount();
 
 	// Round result to nearest (TODO: Check 0 trophies)
-	*percentage = trp_count ? ::rounded_div(unlocked * 100, trp_count) : 0;
+	*percentage = trp_count ? utils::rounded_div(unlocked * 100, trp_count) : 0;
 
 	if (trp_count == 0 || trp_count > 128)
 	{

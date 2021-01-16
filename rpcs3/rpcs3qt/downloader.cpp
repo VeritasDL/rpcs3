@@ -1,5 +1,3 @@
-﻿#include "stdafx.h"
-
 #include <QApplication>
 #include <QThread>
 
@@ -8,10 +6,11 @@
 #include "progress_dialog.h"
 
 #include "Crypto/sha256.h"
+#include "util/logs.hpp"
 
 LOG_CHANNEL(network_log, "NETWORK");
 
-size_t curl_write_cb_compat(char* ptr, size_t /*size*/, size_t nmemb, void* userdata)
+usz curl_write_cb_compat(char* ptr, usz /*size*/, usz nmemb, void* userdata)
 {
 	downloader* download = reinterpret_cast<downloader*>(userdata);
 	return download->update_buffer(ptr, nmemb);
@@ -20,13 +19,31 @@ size_t curl_write_cb_compat(char* ptr, size_t /*size*/, size_t nmemb, void* user
 downloader::downloader(QWidget* parent)
 	: QObject(parent)
 	, m_parent(parent)
+	, m_curl(new curl_handle(this))
 {
-	m_curl = new curl_handle(this);
+	connect(this, &downloader::signal_buffer_update, this, &downloader::handle_buffer_update);
+}
+
+downloader::~downloader()
+{
+	m_curl_abort = true;
+	if (m_thread && m_thread->isRunning())
+	{
+		m_thread->wait();
+	}
 }
 
 void downloader::start(const std::string& url, bool follow_location, bool show_progress_dialog, const QString& progress_dialog_title, bool keep_progress_dialog_open, int exptected_size)
 {
-	connect(this, &downloader::signal_buffer_update, this, &downloader::handle_buffer_update);
+	if (m_thread)
+	{
+		m_curl_abort = true;
+		if (m_thread->isRunning())
+		{
+			m_thread->wait();
+		}
+		m_thread->deleteLater();
+	}
 
 	m_keep_progress_dialog_open = keep_progress_dialog_open;
 	m_curl_buf.clear();
@@ -37,7 +54,7 @@ void downloader::start(const std::string& url, bool follow_location, bool show_p
 	curl_easy_setopt(m_curl->get_curl(), CURLOPT_WRITEDATA, this);
 	curl_easy_setopt(m_curl->get_curl(), CURLOPT_FOLLOWLOCATION, follow_location ? 1 : 0);
 
-	const auto thread = QThread::create([this]
+	m_thread = QThread::create([this]
 	{
 		const auto result = curl_easy_perform(m_curl->get_curl());
 		m_curl_success = result == CURLE_OK;
@@ -50,7 +67,7 @@ void downloader::start(const std::string& url, bool follow_location, bool show_p
 		}
 	});
 
-	connect(thread, &QThread::finished, this, [this]()
+	connect(m_thread, &QThread::finished, this, [this]()
 	{
 		if (m_curl_abort)
 		{
@@ -96,8 +113,8 @@ void downloader::start(const std::string& url, bool follow_location, bool show_p
 		}
 	}
 
-	thread->setObjectName("Compat Update");
-	thread->start();
+	m_thread->setObjectName("Download Thread");
+	m_thread->start();
 }
 
 void downloader::update_progress_dialog(const QString& title)
@@ -122,7 +139,7 @@ progress_dialog* downloader::get_progress_dialog() const
 	return m_progress_dialog;
 }
 
-std::string downloader::get_hash(const char* data, size_t size, bool lower_case)
+std::string downloader::get_hash(const char* data, usz size, bool lower_case)
 {
 	u8 res_hash[32];
 	mbedtls_sha256_context ctx;
@@ -133,7 +150,7 @@ std::string downloader::get_hash(const char* data, size_t size, bool lower_case)
 
 	std::string res_hash_string("0000000000000000000000000000000000000000000000000000000000000000");
 
-	for (size_t index = 0; index < 32; index++)
+	for (usz index = 0; index < 32; index++)
 	{
 		const auto pal                   = lower_case ? "0123456789abcdef" : "0123456789ABCDEF";
 		res_hash_string[index * 2]       = pal[res_hash[index] >> 4];
@@ -143,7 +160,7 @@ std::string downloader::get_hash(const char* data, size_t size, bool lower_case)
 	return res_hash_string;
 }
 
-size_t downloader::update_buffer(char* data, size_t size)
+usz downloader::update_buffer(char* data, usz size)
 {
 	if (m_curl_abort)
 	{

@@ -1,12 +1,14 @@
-﻿#pragma once
+#pragma once
 
 #include "Emu/CPU/CPUThread.h"
 #include "Emu/Cell/SPUInterpreter.h"
 #include "Emu/Memory/vm.h"
 #include "MFC.h"
-#include "Utilities/BEType.h"
 
 #include <map>
+#include "util/v128.hpp"
+#include "util/logs.hpp"
+#include "util/to_endian.hpp"
 
 LOG_CHANNEL(spu_log, "SPU");
 
@@ -503,7 +505,7 @@ struct spu_imm_table_t
 	public:
 		scale_table_t();
 
-		FORCE_INLINE __m128 operator [] (s32 scale) const
+		FORCE_INLINE const auto& operator [](s32 scale) const
 		{
 			return m_data[scale + 155].vf;
 		}
@@ -568,7 +570,7 @@ public:
 			return this->_u32[3] >> 10 & 0x3;
 
 		default:
-			fmt::throw_exception("Unexpected slice value (%d)" HERE, slice);
+			fmt::throw_exception("Unexpected slice value (%d)", slice);
 		}
 	}
 
@@ -747,7 +749,7 @@ public:
 	const u32 lv2_id; // The actual id that is used by syscalls
 
 	// Thread name
-	stx::atomic_cptr<std::string> spu_tname;
+	atomic_ptr<std::string> spu_tname;
 
 	std::unique_ptr<class spu_recompiler_base> jit; // Recompiler instance
 

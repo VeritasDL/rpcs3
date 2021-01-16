@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CgBinaryProgram.h"
 
 #include "Emu/RSX/RSXFragmentProgram.h"
@@ -7,7 +7,7 @@
 
 void CgBinaryDisasm::AddCodeAsm(const std::string& code)
 {
-	verify(HERE), (m_opcode < 70);
+	ensure((m_opcode < 70));
 	std::string op_name;
 
 	if (dst.dest_reg == 63)
@@ -95,10 +95,10 @@ std::string CgBinaryDisasm::GetCondDisAsm()
 	swizzle += f[src0.cond_swizzle_z];
 	swizzle += f[src0.cond_swizzle_w];
 
-	if (swizzle == ".xxxx") swizzle = ".x";
-	else if (swizzle == ".yyyy") swizzle = ".y";
-	else if (swizzle == ".zzzz") swizzle = ".z";
-	else if (swizzle == ".wwww") swizzle = ".w";
+	if (swizzle == ".xxxx"sv) swizzle = ".x";
+	else if (swizzle == ".yyyy"sv) swizzle = ".y";
+	else if (swizzle == ".zzzz"sv) swizzle = ".z";
+	else if (swizzle == ".wwww"sv) swizzle = ".w";
 
 	if (swizzle == ".xyzw"sv)
 	{
@@ -129,7 +129,6 @@ std::string CgBinaryDisasm::GetCondDisAsm()
 	{
 		cond = "FL";
 	}
-
 	else
 	{
 		cond = "TR";
@@ -212,16 +211,16 @@ template<typename T> std::string CgBinaryDisasm::GetSrcDisAsm(T src)
 	swizzle += f[src.swizzle_z];
 	swizzle += f[src.swizzle_w];
 
-	if (swizzle == ".xxxx") swizzle = ".x";
-	else if (swizzle == ".yyyy") swizzle = ".y";
-	else if (swizzle == ".zzzz") swizzle = ".z";
-	else if (swizzle == ".wwww") swizzle = ".w";
+	if (swizzle == ".xxxx"sv) swizzle = ".x";
+	else if (swizzle == ".yyyy"sv) swizzle = ".y";
+	else if (swizzle == ".zzzz"sv) swizzle = ".z";
+	else if (swizzle == ".wwww"sv) swizzle = ".w";
 
 	if (swizzle != ".xyzw"sv)
 	{
 		ret += swizzle;
 	}
-	
+
 	if (src.neg) ret = "-" + ret;
 	if (src.abs) ret = "|" + ret + "|";
 
@@ -232,7 +231,7 @@ void CgBinaryDisasm::TaskFP()
 {
 	m_size = 0;
 	u32* data = reinterpret_cast<u32*>(&m_buffer[m_offset]);
-	verify(HERE), ((m_buffer_size - m_offset) % sizeof(u32) == 0);
+	ensure(((m_buffer_size - m_offset) % sizeof(u32) == 0));
 	for (u32 i = 0; i < (m_buffer_size - m_offset) / sizeof(u32); i++)
 	{
 		// Get BE data
@@ -404,9 +403,8 @@ void CgBinaryDisasm::TaskFP()
 				m_else_offsets.push_back(src1.else_offset << 2);
 				m_end_offsets.push_back(src2.end_offset << 2);
 				AddCodeAsm("($cond)");
+				break;
 			}
-			break;
-
 			case RSX_FP_OPCODE_LOOP:
 			{
 				if (!src0.exec_if_eq && !src0.exec_if_gr && !src0.exec_if_lt)
@@ -418,9 +416,8 @@ void CgBinaryDisasm::TaskFP()
 					m_loop_end_offsets.push_back(src2.end_offset << 2);
 					AddCodeAsm(fmt::format("{ %u, %u, %u }", src1.end_counter, src1.init_counter, src1.increment));
 				}
+				break;
 			}
-			break;
-
 			case RSX_FP_OPCODE_REP:
 			{
 				if (!src0.exec_if_eq && !src0.exec_if_gr && !src0.exec_if_lt)
@@ -432,9 +429,8 @@ void CgBinaryDisasm::TaskFP()
 					m_end_offsets.push_back(src2.end_offset << 2);
 					m_arb_shader += "# RSX_FP_OPCODE_REP_2\n";
 				}
+				break;
 			}
-			break;
-
 			case RSX_FP_OPCODE_RET: AddCodeAsm("$cond"); break;
 
 			default:
@@ -481,7 +477,7 @@ void CgBinaryDisasm::TaskFP()
 			break;
 		}
 
-		verify(HERE), m_step % sizeof(u32) == 0;
+		ensure(m_step % sizeof(u32) == 0);
 		data += m_step / sizeof(u32);
 	}
 }

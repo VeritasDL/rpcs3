@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "Emu/System.h"
 #include "Emu/VFS.h"
 #include "Emu/localized_string.h"
@@ -19,6 +19,8 @@
 #include <thread>
 #include <mutex>
 #include <algorithm>
+
+#include "util/asm.hpp"
 
 LOG_CHANNEL(cellSaveData);
 
@@ -299,7 +301,7 @@ static error_code display_callback_result_error_message(ppu_thread& ppu, const C
 	lv2_obj::sleep(ppu);
 
 	// Get user confirmation by opening a blocking dialog (return value should be irrelevant here)
-	error_code res = open_msg_dialog(true, CELL_MSGDIALOG_TYPE_SE_TYPE_NORMAL | CELL_MSGDIALOG_TYPE_BUTTON_TYPE_OK, use_invalid_message ? result.invalidMsg : vm::make_str(msg));
+	[[maybe_unused]] error_code res = open_msg_dialog(true, CELL_MSGDIALOG_TYPE_SE_TYPE_NORMAL | CELL_MSGDIALOG_TYPE_BUTTON_TYPE_OK, use_invalid_message ? result.invalidMsg : vm::make_str(msg));
 
 	// Reschedule after a blocking dialog returns
 	if (ppu.check_state())
@@ -367,7 +369,7 @@ static s32 savedata_check_args(u32 operation, u32 version, vm::cptr<char> dirNam
 			return 4;
 		}
 		case 0: break;
-		default: ASSUME(0);
+		default: fmt::throw_exception("Unreachable");
 		}
 	}
 
@@ -426,7 +428,7 @@ static s32 savedata_check_args(u32 operation, u32 version, vm::cptr<char> dirNam
 						return 17;
 					}
 					case 0: break;
-					default: ASSUME(0);
+					default: fmt::throw_exception("Unreachable");
 					}
 				}
 
@@ -564,7 +566,7 @@ static NEVER_INLINE error_code savedata_op(ppu_thread& ppu, u32 operation, u32 v
 	}
 
 	// Simulate idle time while data is being sent to VSH
-	const auto lv2_sleep = [](ppu_thread& ppu, size_t sleep_time)
+	const auto lv2_sleep = [](ppu_thread& ppu, usz sleep_time)
 	{
 		lv2_obj::sleep(ppu);
 		std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
@@ -776,7 +778,7 @@ static NEVER_INLINE error_code savedata_op(ppu_thread& ppu, u32 operation, u32 v
 					break;
 				}
 				case 0: break;
-				default: ASSUME(0);
+				default: fmt::throw_exception("Unreachable");
 				}
 
 				selected_list.emplace(listSet->fixedList[i].dirName);
@@ -826,7 +828,7 @@ static NEVER_INLINE error_code savedata_op(ppu_thread& ppu, u32 operation, u32 v
 					break;
 				}
 				case 0: break;
-				default: ASSUME(0);
+				default: fmt::throw_exception("Unreachable");
 				}
 			}
 
@@ -858,7 +860,7 @@ static NEVER_INLINE error_code savedata_op(ppu_thread& ppu, u32 operation, u32 v
 					break;
 				}
 				case 0: break;
-				default: ASSUME(0);
+				default: fmt::throw_exception("Unreachable");
 				}
 
 				const std::string dirStr = listSet->focusDirName.get_ptr();
@@ -953,7 +955,7 @@ static NEVER_INLINE error_code savedata_op(ppu_thread& ppu, u32 operation, u32 v
 			{
 				if (!file.is_directory)
 				{
-					size_bytes += ::align(file.size, 1024);
+					size_bytes += utils::align(file.size, 1024);
 				}
 			}
 
@@ -1114,7 +1116,7 @@ static NEVER_INLINE error_code savedata_op(ppu_thread& ppu, u32 operation, u32 v
 				return {CELL_SAVEDATA_ERROR_PARAM, "28"};
 			}
 			case 0: break;
-			default: ASSUME(0);
+			default: fmt::throw_exception("Unreachable");
 			}
 
 			const std::string dirStr = fixedSet->dirName.get_ptr();
@@ -1220,7 +1222,7 @@ static NEVER_INLINE error_code savedata_op(ppu_thread& ppu, u32 operation, u32 v
 			}
 			else
 			{
-				fmt::throw_exception("Invalid savedata selected" HERE);
+				fmt::throw_exception("Invalid savedata selected");
 			}
 		}
 	}
@@ -1334,7 +1336,7 @@ static NEVER_INLINE error_code savedata_op(ppu_thread& ppu, u32 operation, u32 v
 			{
 				statGet->fileNum++;
 
-				size_bytes += ::align(entry.size, 1024); // firmware rounds this value up
+				size_bytes += utils::align(entry.size, 1024); // firmware rounds this value up
 
 				if (statGet->fileListNum >= setBuf->fileListMax)
 					continue;
@@ -1452,7 +1454,7 @@ static NEVER_INLINE error_code savedata_op(ppu_thread& ppu, u32 operation, u32 v
 			return {CELL_SAVEDATA_ERROR_PARAM, "50"};
 		}
 
-		switch (const u32 mode = statSet->reCreateMode & CELL_SAVEDATA_RECREATE_MASK)
+		switch (statSet->reCreateMode & CELL_SAVEDATA_RECREATE_MASK)
 		{
 		case CELL_SAVEDATA_RECREATE_NO:
 		{
@@ -1715,7 +1717,7 @@ static NEVER_INLINE error_code savedata_op(ppu_thread& ppu, u32 operation, u32 v
 		{
 			if (std::find(blist.begin(), blist.end(), to_add) == blist.end())
 			{
-				if(auto it = std::find(blist.begin(), blist.end(), ""); it != blist.end())
+				if (auto it = std::find(blist.begin(), blist.end(), ""); it != blist.end())
 					*it = to_add;
 				else
 					blist.push_back(to_add);
@@ -1765,7 +1767,7 @@ static NEVER_INLINE error_code savedata_op(ppu_thread& ppu, u32 operation, u32 v
 			}
 
 			// Read from memory file to vm
-			const u64 sr = file->second.seek(fileSet->fileOffset);
+			file->second.seek(fileSet->fileOffset);
 			const u64 rr = lv2_file::op_read(file->second, fileSet->fileBuf, fileSet->fileSize);
 			fileGet->excSize = ::narrow<u32>(rr);
 			break;
@@ -1847,7 +1849,7 @@ static NEVER_INLINE error_code savedata_op(ppu_thread& ppu, u32 operation, u32 v
 			}
 
 			// Write to memory file normally
-			const u64 sr = file.seek(fileSet->fileOffset);
+			file.seek(fileSet->fileOffset);
 			const u64 wr = lv2_file::op_write(file, fileSet->fileBuf, fileSet->fileSize);
 			fileGet->excSize = ::narrow<u32>(wr);
 			all_times.erase(file_path);
@@ -1892,7 +1894,7 @@ static NEVER_INLINE error_code savedata_op(ppu_thread& ppu, u32 operation, u32 v
 		// add file list per FS order to PARAM.SFO
 		std::string final_blist;
 		final_blist = fmt::merge(blist, "/");
-		psf::assign(psf, "RPCS3_BLIST", psf::string(::align(::size32(final_blist) + 1, 4), final_blist));
+		psf::assign(psf, "RPCS3_BLIST", psf::string(utils::align(::size32(final_blist) + 1, 4), final_blist));
 
 		// Write all files in temporary directory
 		auto& fsfo = all_files["PARAM.SFO"];
@@ -1973,7 +1975,7 @@ static NEVER_INLINE error_code savedata_get_list_item(vm::cptr<char> dirName, vm
 		return {CELL_SAVEDATA_ERROR_PARAM, "109"};
 	}
 	case 0: break;
-	default: ASSUME(0);
+	default: fmt::throw_exception("Unreachable");
 	}
 
 	const std::string base_dir = fmt::format("/dev_hdd0/home/%08u/savedata/", userId);

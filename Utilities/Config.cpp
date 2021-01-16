@@ -1,13 +1,11 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "Config.h"
-#include "Utilities/types.h"
+#include "util/types.hpp"
 
 #include "util/yaml.hpp"
 
 #include <typeinfo>
 #include <charconv>
-
-[[noreturn]] void report_fatal_error(const std::string&);
 
 LOG_CHANNEL(cfg_log, "CFG");
 
@@ -18,7 +16,7 @@ namespace cfg
 	{
 		if (_type != type::node)
 		{
-			cfg_log.fatal("Invalid root node" HERE);
+			cfg_log.fatal("Invalid root node");
 		}
 	}
 
@@ -29,7 +27,7 @@ namespace cfg
 		{
 			if (pair.first == name)
 			{
-				cfg_log.fatal("Node already exists: %s" HERE, name);
+				cfg_log.fatal("Node already exists: %s", name);
 			}
 		}
 
@@ -38,12 +36,12 @@ namespace cfg
 
 	bool _base::from_string(const std::string&, bool)
 	{
-		report_fatal_error("from_string() purecall" HERE);
+		fmt::throw_exception("from_string() purecall");
 	}
 
 	bool _base::from_list(std::vector<std::string>&&)
 	{
-		report_fatal_error("from_list() purecall" HERE);
+		fmt::throw_exception("from_list() purecall");
 	}
 
 	// Emit YAML
@@ -84,7 +82,7 @@ bool cfg::try_to_int64(s64* out, const std::string& value, s64 min, s64 max)
 
 	if (ret.ec != std::errc() || ret.ptr != end || (start[0] == '-' && sign < 0))
 	{
-		if (out) cfg_log.error("cfg::try_to_int('%s'): invalid integer", value);
+		if (out) cfg_log.error("cfg::try_to_int64('%s'): invalid integer", value);
 		return false;
 	}
 
@@ -92,7 +90,7 @@ bool cfg::try_to_int64(s64* out, const std::string& value, s64 min, s64 max)
 
 	if (result < min || result > max)
 	{
-		if (out) cfg_log.error("cfg::try_to_int('%s'): out of bounds (%d..%d)", value, min, max);
+		if (out) cfg_log.error("cfg::try_to_int64('%s'): out of bounds (%d..%d)", value, min, max);
 		return false;
 	}
 
@@ -123,13 +121,13 @@ bool cfg::try_to_uint64(u64* out, const std::string& value, u64 min, u64 max)
 
 	if (ret.ec != std::errc() || ret.ptr != end)
 	{
-		if (out) cfg_log.error("cfg::try_to_int('%s'): invalid integer", value);
+		if (out) cfg_log.error("cfg::try_to_uint64('%s'): invalid integer", value);
 		return false;
 	}
 
 	if (result < min || result > max)
 	{
-		if (out) cfg_log.error("cfg::try_to_int('%s'): out of bounds (%u..%u)", value, min, max);
+		if (out) cfg_log.error("cfg::try_to_uint64('%s'): out of bounds (%u..%u)", value, min, max);
 		return false;
 	}
 
@@ -380,7 +378,7 @@ void cfg::_bool::from_default()
 
 void cfg::string::from_default()
 {
-	m_value = m_value.make(def);
+	m_value = def;
 }
 
 void cfg::set_entry::from_default()
