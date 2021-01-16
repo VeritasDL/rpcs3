@@ -53,6 +53,8 @@ DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResoluti
 
 #include "util/sysinfo.hpp"
 
+#include "util/sysinfo.hpp"
+
 inline std::string sstr(const QString& _in) { return _in.toStdString(); }
 
 static semaphore<> s_qt_init;
