@@ -16,8 +16,6 @@ generate_post_data()
 EOF
 }
 
-																		
-
 curl -s \
     -H "Authorization: token ${RPCS3_TOKEN}" \
     -H "Accept: application/vnd.github.v3+json" \
