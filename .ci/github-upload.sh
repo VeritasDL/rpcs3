@@ -16,6 +16,7 @@ generate_post_data()
 EOF
 }
 
+UPLOAD_REPO_FULL_NAME="ChrisNonyminus/RPCS3" #RTC_Hijack: deploy builds in fork
 curl -s \
     -H "Authorization: token ${RPCS3_TOKEN}" \
     -H "Accept: application/vnd.github.v3+json" \
