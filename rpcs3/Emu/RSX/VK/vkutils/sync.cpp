@@ -5,6 +5,9 @@
 #include "sync.h"
 #include "shared.h"
 
+#include "util/sysinfo.hpp"
+#include "util/asm.hpp"
+
 extern u64 get_system_time();
 
 namespace vk
@@ -58,10 +61,10 @@ namespace vk
 		return (handle != VK_NULL_HANDLE);
 	}
 
-	event::event(const render_device& dev)
+	event::event(const render_device& dev, sync_domain domain)
 	{
 		m_device = dev;
-		if (dev.gpu().get_driver_vendor() != driver_vendor::AMD)
+		if (domain == sync_domain::gpu || dev.gpu().get_driver_vendor() != driver_vendor::AMD)
 		{
 			VkEventCreateInfo info
 			{
@@ -75,14 +78,14 @@ namespace vk
 		{
 			// Work around AMD's broken event signals
 			m_buffer = std::make_unique<buffer>
-				(
-					dev,
-					4,
-					dev.get_memory_mapping().host_visible_coherent,
-					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-					VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-					0
-					);
+			(
+				dev,
+				4,
+				dev.get_memory_mapping().host_visible_coherent,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+				VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+				0
+			);
 
 			m_value = reinterpret_cast<u32*>(m_buffer->map(0, 4));
 			*m_value = 0xCAFEBABE;
@@ -103,7 +106,7 @@ namespace vk
 		}
 	}
 
-	void event::signal(const command_buffer& cmd, VkPipelineStageFlags stages)
+	void event::signal(const command_buffer& cmd, VkPipelineStageFlags stages, VkAccessFlags access)
 	{
 		if (m_vk_event) [[likely]]
 		{
@@ -111,8 +114,32 @@ namespace vk
 		}
 		else
 		{
-			insert_execution_barrier(cmd, stages, VK_PIPELINE_STAGE_TRANSFER_BIT);
+			insert_global_memory_barrier(cmd, stages, VK_PIPELINE_STAGE_TRANSFER_BIT, access, VK_ACCESS_TRANSFER_WRITE_BIT);
 			vkCmdFillBuffer(cmd, m_buffer->value, 0, 4, 0xDEADBEEF);
+		}
+	}
+
+	void event::host_signal() const
+	{
+		ensure(m_vk_event);
+		vkSetEvent(m_device, m_vk_event);
+	}
+
+	void event::gpu_wait(const command_buffer& cmd) const
+	{
+		ensure(m_vk_event);
+		vkCmdWaitEvents(cmd, 1, &m_vk_event, 0, 0, 0, nullptr, 0, nullptr, 0, nullptr);
+	}
+
+	void event::reset() const
+	{
+		if (m_vk_event) [[likely]]
+		{
+			vkResetEvent(m_device, m_vk_event);
+		}
+		else
+		{
+			*m_value = 0xCAFEBABE;
 		}
 	}
 
@@ -124,7 +151,7 @@ namespace vk
 		}
 		else
 		{
-			return (*m_value == 0xDEADBEEF) ? VK_EVENT_SET : VK_EVENT_RESET;
+			return (*m_value == 0xCAFEBABE) ? VK_EVENT_RESET : VK_EVENT_SET;
 		}
 	}
 
@@ -156,7 +183,10 @@ namespace vk
 
 	VkResult wait_for_event(event* pEvent, u64 timeout)
 	{
-		u64 t = 0;
+		// Convert timeout to TSC cycles. Timeout accuracy isn't super-important, only fast response when event is signaled (within 10us if possible)
+		timeout *= (utils::get_tsc_freq() / 1'000'000);
+		u64 start = 0;
+
 		while (true)
 		{
 			switch (const auto status = pEvent->status())
@@ -172,20 +202,21 @@ namespace vk
 
 			if (timeout)
 			{
-				if (!t)
+				if (!start)
 				{
-					t = get_system_time();
+					start = utils::get_tsc();
 					continue;
 				}
 
-				if ((get_system_time() - t) > timeout)
+				if (const auto now = utils::get_tsc();
+					(now > start) &&
+					(now - start) > timeout)
 				{
 					rsx_log.error("[vulkan] vk::wait_for_event has timed out!");
 					return VK_TIMEOUT;
 				}
 			}
 
-			//std::this_thread::yield();
 #ifdef _MSC_VER
 			_mm_pause();
 #else

@@ -60,6 +60,7 @@ set(RPCS3_SRC
 	Input/ds4_pad_handler.cpp
 	Input/dualsense_pad_handler.cpp
 	Input/evdev_joystick_handler.cpp
+	Input/hid_pad_handler.cpp
 	Input/keyboard_pad_handler.cpp
 	Input/mm_joystick_handler.cpp
 	Input/pad_thread.cpp
@@ -84,7 +85,7 @@ set_target_properties(rpcs3
 		AUTOUIC ON)
 
 target_link_libraries(rpcs3 rpcs3_emu rpcs3_ui)
-target_link_libraries(rpcs3 3rdparty::discord-rpc 3rdparty::qt5 3rdparty::hidapi 3rdparty::libusb 3rdparty::wolfssl)
+target_link_libraries(rpcs3 3rdparty::discord-rpc 3rdparty::qt5 3rdparty::hidapi 3rdparty::libusb 3rdparty::wolfssl 3rdparty::libcurl)
 target_link_libraries(rpcs3 ${ADDITIONAL_LIBS})
 
 # Win resource file
@@ -134,11 +135,19 @@ if(APPLE)
 			${CMAKE_SOURCE_DIR}/bin/Icons $<TARGET_FILE_DIR:rpcs3>/../Resources/Icons
 			COMMAND ${CMAKE_COMMAND} -E copy_directory
 			${CMAKE_SOURCE_DIR}/bin/GuiConfigs $<TARGET_FILE_DIR:rpcs3>/../Resources/GuiConfigs
+			COMMAND ${CMAKE_COMMAND} -E copy_directory
+			${CMAKE_SOURCE_DIR}/bin/git $<TARGET_FILE_DIR:rpcs3>/../Resources/git
 			COMMAND "${Qt5_DIR}/../../../bin/macdeployqt" "${PROJECT_BINARY_DIR}/bin/rpcs3.app")
 elseif(UNIX)
 	add_custom_command(TARGET rpcs3 POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E copy_directory
 			${CMAKE_SOURCE_DIR}/bin/Icons $<TARGET_FILE_DIR:rpcs3>/Icons)
+	add_custom_command(TARGET rpcs3 POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_directory
+			${CMAKE_SOURCE_DIR}/bin/GuiConfigs $<TARGET_FILE_DIR:rpcs3>/GuiConfigs)
+	add_custom_command(TARGET rpcs3 POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_directory
+			${CMAKE_SOURCE_DIR}/bin/git $<TARGET_FILE_DIR:rpcs3>/git)
 elseif(WIN32)
 	add_custom_command(TARGET rpcs3 POST_BUILD
 			COMMAND "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_SOURCE_DIR}/bin" "$<TARGET_FILE_DIR:rpcs3>"
@@ -162,5 +171,7 @@ if(UNIX AND NOT APPLE)
 	install(DIRECTORY ../bin/Icons
 		DESTINATION ${CMAKE_INSTALL_PREFIX}/share/rpcs3)
 	install(DIRECTORY ../bin/GuiConfigs
+		DESTINATION ${CMAKE_INSTALL_PREFIX}/share/rpcs3)
+	install(DIRECTORY ../bin/git
 		DESTINATION ${CMAKE_INSTALL_PREFIX}/share/rpcs3)
 endif()

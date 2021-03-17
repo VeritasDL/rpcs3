@@ -69,6 +69,16 @@ struct ppu_segment
 // PPU Module Information
 struct ppu_module
 {
+	ppu_module() = default;
+
+	ppu_module(const ppu_module&) = delete;
+
+	ppu_module(ppu_module&&) = default;
+
+	ppu_module& operator=(const ppu_module&) = delete;
+
+	ppu_module& operator=(ppu_module&&) = default;
+
 	uchar sha1[20]{};
 	std::string name;
 	std::string path;
@@ -89,7 +99,7 @@ struct ppu_module
 		secs = info.secs;
 	}
 
-	void analyse(u32 lib_toc, u32 entry);
+	void analyse(u32 lib_toc, u32 entry, u32 end, const std::basic_string<u32>& applied);
 	void validate(u32 reloc);
 };
 

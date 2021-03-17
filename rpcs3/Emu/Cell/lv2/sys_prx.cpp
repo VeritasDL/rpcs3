@@ -17,10 +17,12 @@
 
 extern std::shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object&, const std::string&);
 extern void ppu_unload_prx(const lv2_prx& prx);
-extern void ppu_initialize(const ppu_module&);
+extern bool ppu_initialize(const ppu_module&, bool = false);
+extern void ppu_finalize(const ppu_module&);
 
 LOG_CHANNEL(sys_prx);
 
+// <string: firmware sprx, int: should hle if 1>
 extern const std::map<std::string_view, int> g_prx_list
 {
 	{ "libaacenc.sprx", 0 },
@@ -167,7 +169,7 @@ extern const std::map<std::string_view, int> g_prx_list
 	{ "libwmadec.sprx", 0 },
 };
 
-static error_code prx_load_module(const std::string& vpath, u64 flags, vm::ptr<sys_prx_load_module_option_t> pOpt, fs::file src = {})
+static error_code prx_load_module(const std::string& vpath, u64 flags, vm::ptr<sys_prx_load_module_option_t> /*pOpt*/, fs::file src = {})
 {
 	if (flags != 0)
 	{
@@ -263,9 +265,9 @@ static error_code prx_load_module(const std::string& vpath, u64 flags, vm::ptr<s
 		src = std::move(lv2_file);
 	}
 
-	u128 klic = g_fxo->get<loaded_npdrm_keys>()->devKlic.load();
+	u128 klic = g_fxo->get<loaded_npdrm_keys>().devKlic.load();
 
-	const ppu_prx_object obj = decrypt_self(std::move(src), reinterpret_cast<u8*>(&klic));
+	ppu_prx_object obj = decrypt_self(std::move(src), reinterpret_cast<u8*>(&klic));
 
 	if (obj != elf_error::ok)
 	{
@@ -273,6 +275,8 @@ static error_code prx_load_module(const std::string& vpath, u64 flags, vm::ptr<s
 	}
 
 	const auto prx = ppu_load_prx(obj, path);
+
+	obj.clear();
 
 	if (!prx)
 	{
@@ -307,6 +311,13 @@ error_code _sys_prx_load_module_by_fd(ppu_thread& ppu, s32 fd, u64 offset, u64 f
 		return CELL_EBADF;
 	}
 
+	std::lock_guard lock(file->mp->mutex);
+
+	if (!file->file)
+	{
+		return CELL_EBADF;
+	}
+
 	return prx_load_module(fmt::format("%s_x%x", file->name.data(), offset), flags, pOpt, lv2_file::make_view(file, offset));
 }
 
@@ -319,7 +330,7 @@ error_code _sys_prx_load_module_on_memcontainer_by_fd(ppu_thread& ppu, s32 fd, u
 	return _sys_prx_load_module_by_fd(ppu, fd, offset, flags, pOpt);
 }
 
-static error_code prx_load_module_list(ppu_thread& ppu, s32 count, vm::cpptr<char, u32, u64> path_list, u32 mem_ct, u64 flags, vm::ptr<sys_prx_load_module_option_t> pOpt, vm::ptr<u32> id_list)
+static error_code prx_load_module_list(ppu_thread& ppu, s32 count, vm::cpptr<char, u32, u64> path_list, u32 /*mem_ct*/, u64 flags, vm::ptr<sys_prx_load_module_option_t> pOpt, vm::ptr<u32> id_list)
 {
 	if (flags != 0)
 	{
@@ -590,6 +601,8 @@ error_code _sys_prx_unload_module(ppu_thread& ppu, u32 id, u64 flags, vm::ptr<sy
 
 	ppu_unload_prx(*prx);
 
+	ppu_finalize(*prx);
+
 	//s32 result = prx->exit ? prx->exit() : CELL_OK;
 
 	return CELL_OK;
@@ -773,7 +786,7 @@ error_code _sys_prx_get_module_id_by_name(ppu_thread& ppu, vm::cptr<char> name, 
 
 	//if (realName == "?") ...
 
-	return CELL_PRX_ERROR_UNKNOWN_MODULE;
+	return not_an_error(CELL_PRX_ERROR_UNKNOWN_MODULE);
 }
 
 error_code _sys_prx_get_module_id_by_address(ppu_thread& ppu, u32 addr)

@@ -63,11 +63,25 @@ namespace
 
 emu_settings::emu_settings()
 	: QObject()
-	, m_render_creator(new render_creator(this))
 {
+}
+
+emu_settings::~emu_settings()
+{
+}
+
+bool emu_settings::Init()
+{
+	m_render_creator = new render_creator(this);
+
 	if (!m_render_creator)
 	{
 		fmt::throw_exception("emu_settings::emu_settings() render_creator is null");
+	}
+
+	if (m_render_creator->abort_requested)
+	{
+		return false;
 	}
 
 	// Make Vulkan default setting if it is supported
@@ -78,10 +92,8 @@ emu_settings::emu_settings()
 		Emu.SetDefaultRenderer(video_renderer::vulkan);
 		Emu.SetDefaultGraphicsAdapter(adapter);
 	}
-}
 
-emu_settings::~emu_settings()
-{
+	return true;
 }
 
 void emu_settings::LoadSettings(const std::string& title_id)
@@ -96,8 +108,8 @@ void emu_settings::LoadSettings(const std::string& title_id)
 
 	if (default_error.empty())
 	{
-		m_defaultSettings = default_config;
-		m_currentSettings = YAML::Clone(default_config);
+		m_default_settings = default_config;
+		m_current_settings = YAML::Clone(default_config);
 	}
 	else
 	{
@@ -114,7 +126,7 @@ void emu_settings::LoadSettings(const std::string& title_id)
 
 	if (global_error.empty())
 	{
-		m_currentSettings += global_config;
+		m_current_settings += global_config;
 	}
 	else
 	{
@@ -148,7 +160,7 @@ void emu_settings::LoadSettings(const std::string& title_id)
 
 				if (custom_error.empty())
 				{
-					m_currentSettings += custom_config;
+					m_current_settings += custom_config;
 				}
 				else
 				{
@@ -164,7 +176,7 @@ void emu_settings::LoadSettings(const std::string& title_id)
 void emu_settings::SaveSettings()
 {
 	YAML::Emitter out;
-	emit_data(out, m_currentSettings);
+	emit_data(out, m_current_settings);
 
 	std::string config_name;
 
@@ -178,8 +190,9 @@ void emu_settings::SaveSettings()
 	}
 
 	// Save config atomically
-	fs::file(config_name + ".tmp", fs::rewrite).write(out.c_str(), out.size());
-	fs::rename(config_name + ".tmp", config_name, true);
+	fs::pending_file temp(config_name);
+	temp.file.write(out.c_str(), out.size());
+	temp.commit();
 
 	// Check if the running config/title is the same as the edited config/title.
 	if (config_name == g_cfg.name || m_title_id == Emu.GetTitleID())
@@ -652,12 +665,12 @@ void emu_settings::EnhanceRadioButton(QButtonGroup* button_group, emu_settings_t
 
 std::vector<std::string> emu_settings::GetLibrariesControl()
 {
-	return m_currentSettings["Core"]["Libraries Control"].as<std::vector<std::string>, std::initializer_list<std::string>>({});
+	return m_current_settings["Core"]["Libraries Control"].as<std::vector<std::string>, std::initializer_list<std::string>>({});
 }
 
 void emu_settings::SaveSelectedLibraries(const std::vector<std::string>& libs)
 {
-	m_currentSettings["Core"]["Libraries Control"] = libs;
+	m_current_settings["Core"]["Libraries Control"] = libs;
 }
 
 QStringList emu_settings::GetSettingOptions(emu_settings_type type) const
@@ -667,7 +680,7 @@ QStringList emu_settings::GetSettingOptions(emu_settings_type type) const
 
 std::string emu_settings::GetSettingDefault(emu_settings_type type) const
 {
-	if (auto node = cfg_adapter::get_node(m_defaultSettings, settings_location[type]); node && node.IsScalar())
+	if (auto node = cfg_adapter::get_node(m_default_settings, settings_location[type]); node && node.IsScalar())
 	{
 		return node.Scalar();
 	}
@@ -678,7 +691,7 @@ std::string emu_settings::GetSettingDefault(emu_settings_type type) const
 
 std::string emu_settings::GetSetting(emu_settings_type type) const
 {
-	if (auto node = cfg_adapter::get_node(m_currentSettings, settings_location[type]); node && node.IsScalar())
+	if (auto node = cfg_adapter::get_node(m_current_settings, settings_location[type]); node && node.IsScalar())
 	{
 		return node.Scalar();
 	}
@@ -689,7 +702,7 @@ std::string emu_settings::GetSetting(emu_settings_type type) const
 
 void emu_settings::SetSetting(emu_settings_type type, const std::string& val)
 {
-	cfg_adapter::get_node(m_currentSettings, settings_location[type]) = val;
+	cfg_adapter::get_node(m_current_settings, settings_location[type]) = val;
 }
 
 void emu_settings::OpenCorrectionDialog(QWidget* parent)
@@ -840,6 +853,14 @@ QString emu_settings::GetLocalizedSetting(const QString& original, emu_settings_
 		case move_handler::mouse: return tr("Mouse", "Move handler");
 		}
 		break;
+	case emu_settings_type::Buzz:
+		switch (static_cast<buzz_handler>(index))
+		{
+		case buzz_handler::null: return tr("Null (use real Buzzers)", "Buzz handler");
+		case buzz_handler::one_controller: return tr("1 controller (1-4 players)", "Buzz handler");
+		case buzz_handler::two_controllers: return tr("2 controllers (5-7 players)", "Buzz handler");
+		}
+		break;
 	case emu_settings_type::InternetStatus:
 		switch (static_cast<np_internet_status>(index))
 		{
@@ -866,6 +887,7 @@ QString emu_settings::GetLocalizedSetting(const QString& original, emu_settings_
 	case emu_settings_type::PerfOverlayDetailLevel:
 		switch (static_cast<detail_level>(index))
 		{
+		case detail_level::none: return tr("None", "Detail Level");
 		case detail_level::minimal: return tr("Minimal", "Detail Level");
 		case detail_level::low: return tr("Low", "Detail Level");
 		case detail_level::medium: return tr("Medium", "Detail Level");

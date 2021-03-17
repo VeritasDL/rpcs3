@@ -81,13 +81,14 @@ class main_window : public QMainWindow
 
 public:
 	explicit main_window(std::shared_ptr<gui_settings> gui_settings, std::shared_ptr<emu_settings> emu_settings, std::shared_ptr<persistent_settings> persistent_settings, QWidget *parent = 0);
-	void Init();
+	bool Init();
 	~main_window();
 	QIcon GetAppIcon();
+	bool OnMissingFw();
 
 Q_SIGNALS:
 	void RequestLanguageChange(const QString& language);
-	void RequestGlobalStylesheetChange(const QString& stylesheet_path);
+	void RequestGlobalStylesheetChange();
 	void RequestTrophyManagerRepaint();
 	void NotifyEmuSettingsChange();
 
@@ -144,6 +145,8 @@ private:
 
 	void InstallPup(QString filePath = "");
 	void HandlePupInstallation(QString file_path = "");
+
+	void ExtractMSELF();
 
 	drop_type IsValidFile(const QMimeData& md, QStringList* drop_paths = nullptr);
 	void AddGamesFromDir(const QString& path);

@@ -29,7 +29,8 @@ namespace
 {
 	// Helper converters
 	constexpr auto qstr = QString::fromStdString;
-	inline std::string sstr(const QString& _in) { return _in.toStdString(); }
+
+	[[maybe_unused]] inline std::string sstr(const QString& _in) { return _in.toStdString(); }
 
 	QString FormatTimestamp(u64 time)
 	{
@@ -110,7 +111,7 @@ save_manager_dialog::save_manager_dialog(std::shared_ptr<gui_settings> gui_setti
 /*
  * Future proofing.  Makes it easier in future if I add ability to change directories
  */
-void save_manager_dialog::Init(std::string dir)
+void save_manager_dialog::Init(std::string /*dir*/)
 {
 	// Table
 	m_list = new QTableWidget(this);

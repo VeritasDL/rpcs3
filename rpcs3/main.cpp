@@ -11,9 +11,14 @@
 #include <QTimer>
 #include <QObject>
 #include <QStyleFactory>
+#include <QByteArray>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonDocument>
 
 #include "rpcs3qt/gui_application.h"
 #include "rpcs3qt/fatal_error_dialog.h"
+#include "rpcs3qt/curl_handle.h"
 
 #include "headless_application.h"
 #include "Utilities/sema.h"
@@ -42,6 +47,7 @@ DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResoluti
 #include "Utilities/Config.h"
 #include "Utilities/Thread.h"
 #include "Utilities/File.h"
+#include "Utilities/StrUtil.h"
 #include "rpcs3_version.h"
 #include "Emu/System.h"
 #include <thread>
@@ -60,7 +66,10 @@ inline std::string sstr(const QString& _in) { return _in.toStdString(); }
 static semaphore<> s_qt_init;
 
 static atomic_t<bool> s_headless = false;
+static atomic_t<bool> s_no_gui = false;
 static atomic_t<char*> s_argv0;
+
+extern thread_local std::string(*g_tls_log_prefix)();
 
 #ifndef _WIN32
 extern char **environ;
@@ -69,18 +78,36 @@ extern char **environ;
 LOG_CHANNEL(sys_log, "SYS");
 LOG_CHANNEL(q_debug, "QDEBUG");
 
-[[noreturn]] extern void report_fatal_error(const std::string& text)
+[[noreturn]] extern void report_fatal_error(std::string_view _text)
 {
+	std::string buf;
+
+	// Check if thread id is in string
+	if (_text.find("\nThread id = "sv) == umax)
+	{
+		// Copy only when needed 
+		buf = std::string(_text);
+
+		// Always print thread id
+		fmt::append(buf, "\nThread id = %s.", std::this_thread::get_id());
+	}
+
+	const std::string_view text = buf.empty() ? _text : buf;
+
 	if (s_headless)
 	{
-		fprintf(stderr, "RPCS3: %s\n", text.c_str());
+#ifdef _WIN32
+		if (AttachConsole(ATTACH_PARENT_PROCESS) || AllocConsole())
+			[[maybe_unused]] const auto con_out = freopen("conout$", "w", stderr);
+#endif
+		std::fprintf(stderr, "RPCS3: %.*s\n", static_cast<int>(text.size()), text.data());
 		std::abort();
 	}
 
 	const bool local = s_qt_init.try_lock();
 
 	// Possibly created and assigned here
-	QScopedPointer<QCoreApplication> app;
+	static QScopedPointer<QCoreApplication> app;
 
 	if (local)
 	{
@@ -90,10 +117,10 @@ LOG_CHANNEL(q_debug, "QDEBUG");
 	}
 	else
 	{
-		fprintf(stderr, "RPCS3: %s\n", text.c_str());
+		std::fprintf(stderr, "RPCS3: %.*s\n", static_cast<int>(text.size()), text.data());
 	}
 
-	auto show_report = [](const std::string& text)
+	auto show_report = [](std::string_view text)
 	{
 		fatal_error_dialog dlg(text);
 		dlg.exec();
@@ -113,7 +140,6 @@ LOG_CHANNEL(q_debug, "QDEBUG");
 		{
 			// Since we only show an error, we can hope for a graceful exit
 			show_report(text);
-			app.reset();
 			std::exit(0);
 		}
 		else
@@ -152,7 +178,7 @@ LOG_CHANNEL(q_debug, "QDEBUG");
 			}
 			else
 			{
-				fprintf(stderr, "posix_spawn() failed: %d\n", ret);
+				std::fprintf(stderr, "posix_spawn() failed: %d\n", ret);
 			}
 #endif
 			std::abort();
@@ -176,33 +202,33 @@ struct pause_on_fatal final : logs::listener
 	}
 };
 
-const char* arg_headless   = "headless";
-const char* arg_no_gui     = "no-gui";
-const char* arg_high_dpi   = "hidpi";
-const char* arg_rounding   = "dpi-rounding";
-const char* arg_styles     = "styles";
-const char* arg_style      = "style";
-const char* arg_stylesheet = "stylesheet";
-const char* arg_config     = "config";
-const char* arg_q_debug    = "qDebug";
-const char* arg_error      = "error";
-const char* arg_updating   = "updating";
-const char* arg_decrypt    = "decrypt"; //RTC_Hijack: add decrypt command line arg
-const char* arg_getgameinfo = "getgameinfo"; //RTC_Hijack: add command line arg to get a game's info
+constexpr auto arg_headless   = "headless";
+constexpr auto arg_no_gui     = "no-gui";
+constexpr auto arg_high_dpi   = "hidpi";
+constexpr auto arg_rounding   = "dpi-rounding";
+constexpr auto arg_styles     = "styles";
+constexpr auto arg_style      = "style";
+constexpr auto arg_stylesheet = "stylesheet";
+constexpr auto arg_config     = "config";
+constexpr auto arg_q_debug    = "qDebug";
+constexpr auto arg_error      = "error";
+constexpr auto arg_updating   = "updating";
+constexpr auto arg_commit_db  = "get-commit-db";
 
+constexpr auto arg_decrypt    = "decrypt"; //RTC_Hijack: add decrypt command line arg
+constexpr auto arg_getgameinfo = "getgameinfo"; //RTC_Hijack: add command line arg to get a game's info
 int find_arg(std::string arg, int& argc, char* argv[])
 {
 	arg = "--" + arg;
-	for (int i = 1; i < argc; ++i)
+	for (int i = 0; i < argc; ++i) // It's not guaranteed that argv 0 is the executable.
 		if (!strcmp(arg.c_str(), argv[i]))
 			return i;
-	return 0;
+	return -1;
 }
 
 QCoreApplication* createApplication(int& argc, char* argv[])
 {
-	
-	if (find_arg(arg_headless, argc, argv))
+	if (find_arg(arg_headless, argc, argv) != -1)
 		return new headless_application(argc, argv);
 
 #ifdef __linux__
@@ -221,8 +247,8 @@ QCoreApplication* createApplication(int& argc, char* argv[])
 
 	bool use_high_dpi = true;
 
-	const auto i_hdpi = find_arg(arg_high_dpi, argc, argv);
-	if (i_hdpi)
+	const int i_hdpi = find_arg(arg_high_dpi, argc, argv);
+	if (i_hdpi != -1)
 	{
 		const std::string cmp_str = "0";
 		const auto i_hdpi_2 = (argc > (i_hdpi + 1)) ? (i_hdpi + 1) : 0;
@@ -240,11 +266,11 @@ QCoreApplication* createApplication(int& argc, char* argv[])
 		// Set QT_SCALE_FACTOR_ROUNDING_POLICY from environment. Defaults to cli argument, which defaults to RoundPreferFloor.
 		auto rounding_val = Qt::HighDpiScaleFactorRoundingPolicy::PassThrough;
 		auto rounding_str = std::to_string(static_cast<int>(rounding_val));
-		const auto i_rounding = find_arg(arg_rounding, argc, argv);
+		const int i_rounding = find_arg(arg_rounding, argc, argv);
 
-		if (i_rounding)
+		if (i_rounding != -1)
 		{
-			const auto i_rounding_2 = (argc > (i_rounding + 1)) ? (i_rounding + 1) : 0;
+			const int i_rounding_2 = (argc > (i_rounding + 1)) ? (i_rounding + 1) : 0;
 
 			if (i_rounding_2)
 			{
@@ -315,7 +341,7 @@ int main(int argc, char** argv)
 	s_argv0 = argv[0]; // Save for report_fatal_error
 
 	// Only run RPCS3 to display an error
-	if (int err_pos = find_arg(arg_error, argc, argv))
+	if (int err_pos = find_arg(arg_error, argc, argv); err_pos != -1)
 	{
 		// Reconstruction of the error from multiple args
 		std::string error;
@@ -331,10 +357,10 @@ int main(int argc, char** argv)
 
 	const std::string lock_name = fs::get_cache_dir() + "RPCS3.buf";
 
-	fs::file instance_lock;
+	static fs::file instance_lock;
 
 	// True if an argument --updating found
-	const bool is_updating = find_arg(arg_updating, argc, argv) != 0;
+	const bool is_updating = find_arg(arg_updating, argc, argv) != -1;
 
 	// Keep trying to lock the file for ~2s normally, and for ~10s in the case of --updating
 	for (u32 num = 0; num < (is_updating ? 500u : 100u) && !instance_lock.open(lock_name, fs::rewrite + fs::lock); num++)
@@ -377,10 +403,15 @@ int main(int argc, char** argv)
 	}
 #endif
 
-	// Initialize thread pool finalizer (on first use)
-	named_thread("", []{})();
+	ensure(thread_ctrl::is_main());
 
-	std::unique_ptr<logs::listener> log_file;
+	// Initialize TSC freq (in case it isn't)
+	static_cast<void>(utils::get_tsc_freq());
+
+	// Initialize thread pool finalizer (on first use)
+	static_cast<void>(named_thread("", [](int) {}));
+
+	static std::unique_ptr<logs::listener> log_file;
 	{
 		// Check free space
 		fs::device_stat stats{};
@@ -394,12 +425,12 @@ int main(int argc, char** argv)
 		log_file = logs::make_file_listener(fs::get_cache_dir() + "RPCS3.log", stats.avail_free / 4);
 	}
 
-	std::unique_ptr<logs::listener> log_pauser = std::make_unique<pause_on_fatal>();
+	static std::unique_ptr<logs::listener> log_pauser = std::make_unique<pause_on_fatal>();
 	logs::listener::add(log_pauser.get());
 
 	{
 		const std::string firmware_version = utils::get_firmware_version();
-		const std::string firmware_string  = firmware_version.empty() ? "" : (" | Firmware version: " + firmware_version);
+		const std::string firmware_string  = firmware_version.empty() ? " | Missing Firmware" : (" | Firmware version: " + firmware_version);
 
 		// Write initial message
 		logs::stored_message ver;
@@ -431,6 +462,14 @@ int main(int argc, char** argv)
 	sys_log.notice("Initialization times before main(): %fs", intro_time / 1000000000.);
 #endif
 
+	std::string argument_str;
+	for (int i = 0; i < argc; i++)
+	{
+		argument_str += "'" + std::string(argv[i]) + "'";
+		if (i != argc - 1) argument_str += " ";
+	}
+	sys_log.notice("argc: %d, argv: %s", argc, argument_str);
+
 #ifdef __linux__
 	struct ::rlimit rlim;
 	rlim.rlim_cur = 4096;
@@ -455,14 +494,14 @@ int main(int argc, char** argv)
 	// The constructor of QApplication eats the --style and --stylesheet arguments.
 	// By checking for stylesheet().isEmpty() we could implicitly know if a stylesheet was passed,
 	// but I haven't found an implicit way to check for style yet, so we naively check them both here for now.
-	const bool use_cli_style = find_arg(arg_style, argc, argv) || find_arg(arg_stylesheet, argc, argv);
+	const bool use_cli_style = find_arg(arg_style, argc, argv) != -1 || find_arg(arg_stylesheet, argc, argv) != -1;
 
 	QScopedPointer<QCoreApplication> app(createApplication(argc, argv));
 	app->setApplicationVersion(QString::fromStdString(rpcs3::get_version().to_string()));
 	app->setApplicationName("RPCS3");
 
 	// Command line args
-	QCommandLineParser parser;
+	static QCommandLineParser parser;
 	parser.setApplicationDescription("Welcome to RPCS3 command line.");
 	parser.addPositionalArgument("(S)ELF", "Path for directly executing a (S)ELF");
 	parser.addPositionalArgument("[Args...]", "Optional args for the executable");
@@ -483,11 +522,180 @@ int main(int argc, char** argv)
 	parser.addOption(QCommandLineOption(arg_updating, "For internal usage."));
 	parser.addOption(QCommandLineOption(arg_decrypt, "Automatically decrypt a chosen self file.")); //RTC_Hijack: Describe decryption arg
 	parser.addOption(QCommandLineOption(arg_getgameinfo, "Automatically output a game's serial number.")); //RTC_Hijack: Describe --getgameinfo
+	parser.addOption(QCommandLineOption(arg_commit_db, "Update commits.lst cache."));
 	parser.process(app->arguments());
 
 	// Don't start up the full rpcs3 gui if we just want the version or help.
 	if (parser.isSet(version_option) || parser.isSet(help_option))
 		return 0;
+
+	if (parser.isSet(arg_commit_db))
+	{
+		fs::file file(argc > 2 ? argv[2] : "bin/git/commits.lst", fs::read + fs::write + fs::append + fs::create);
+
+		if (file)
+		{
+			// Get existing list
+			std::string data = file.to_string();
+			std::vector<std::string> list = fmt::split(data, {"\n"});
+
+			const bool was_empty = data.empty();
+
+			// SHA to start
+			std::string from, last;
+
+			if (argc > 3)
+			{
+				from = argv[3];
+			}
+
+			if (!list.empty())
+			{
+				// Decode last entry to check last written commit
+				QByteArray buf(list.back().c_str(), list.back().size());
+				QJsonDocument doc = QJsonDocument::fromJson(buf);
+
+				if (doc.isObject())
+				{
+					last = doc["sha"].toString().toStdString();
+				}
+			}
+
+			list.clear();
+
+			// JSON buffer
+			QByteArray buf;
+
+			// CURL handle to work with GitHub API
+			curl_handle curl;
+
+			struct curl_slist* hhdr{};
+			hhdr = curl_slist_append(hhdr, "Accept: application/vnd.github.v3+json");
+			hhdr = curl_slist_append(hhdr, "User-Agent: curl/7.37.0");
+
+			curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hhdr);
+			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, +[](const char* ptr, usz, usz size, void* json) -> usz
+			{
+				reinterpret_cast<QByteArray*>(json)->append(ptr, size);
+				return size;
+			});
+			curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+
+			u32 page = 1;
+
+			constexpr u32 per_page = 100;
+
+			while (page <= 55)
+			{
+				std::string url = "https://api.github.com/repos/RPCS3/rpcs3/commits?per_page=";
+				fmt::append(url, "%u&page=%u", per_page, page++);
+				if (!from.empty())
+					fmt::append(url, "&sha=%s", from);
+
+				curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+				curl_easy_perform(curl);
+
+				QJsonDocument info = QJsonDocument::fromJson(buf);
+
+				if (!info.isArray()) [[unlikely]]
+				{
+					fprintf(stderr, "Bad response:\n%s", buf.data());
+					break;
+				}
+
+				u32 count = 0;
+
+				for (auto&& ref : info.array())
+				{
+					if (ref.isObject())
+					{
+						count++;
+
+						QJsonObject result, author, committer;
+						QJsonObject commit = ref.toObject();
+
+						auto commit_ = commit["commit"].toObject();
+						auto author_ = commit_["author"].toObject();
+						auto committer_ = commit_["committer"].toObject();
+						auto _author = commit["author"].toObject();
+						auto _committer = commit["committer"].toObject();
+
+						result["sha"] = commit["sha"];
+						result["msg"] = commit_["message"];
+
+						author["name"] = author_["name"];
+						author["date"] = author_["date"];
+						author["email"] = author_["email"];
+						author["login"] = _author["login"];
+						author["avatar"] = _author["avatar_url"];
+
+						committer["name"] = committer_["name"];
+						committer["date"] = committer_["date"];
+						committer["email"] = committer_["email"];
+						committer["login"] = _committer["login"];
+						committer["avatar"] = _committer["avatar_url"];
+
+						result["author"] = author;
+						result["committer"] = committer;
+
+						QJsonDocument out(result);
+						buf = out.toJson(QJsonDocument::JsonFormat::Compact);
+						buf += "\n";
+
+						if (was_empty || !from.empty())
+						{
+							data = buf.toStdString() + std::move(data);
+						}
+						else if (commit["sha"].toString().toStdString() == last)
+						{
+							page = -1;
+							break;
+						}
+						else
+						{
+							// Append to the list
+							list.emplace_back(buf.data(), buf.size());
+						}
+					}
+					else
+					{
+						page = -1;
+						break;
+					}
+				}
+
+				buf.clear();
+
+				if (count < per_page)
+				{
+					break;
+				}
+			}
+
+			if (was_empty || !from.empty())
+			{
+				file.trunc(0);
+				file.write(data);
+			}
+			else
+			{
+				// Append list in reverse order
+				for (usz i = list.size() - 1; ~i; --i)
+				{
+					file.write(list[i]);
+				}
+			}
+
+			curl_slist_free_all(hhdr);
+		}
+		else
+		{
+			fprintf(stderr, "Failed to open file: %s.\n", argv[2]);
+			return 1;
+		}
+
+		return 0;
+	}
 
 	if (parser.isSet(arg_q_debug))
 	{
@@ -506,20 +714,38 @@ int main(int argc, char** argv)
 		return 0;
 	}
 
+	s_no_gui = parser.isSet(arg_no_gui);
+
 	if (auto gui_app = qobject_cast<gui_application*>(app.data()))
 	{
 		gui_app->setAttribute(Qt::AA_UseHighDpiPixmaps);
 		gui_app->setAttribute(Qt::AA_DisableWindowContextHelpButton);
 		gui_app->setAttribute(Qt::AA_DontCheckOpenGLContextThreadAffinity);
 
-		gui_app->SetShowGui(!parser.isSet(arg_no_gui));
+		gui_app->SetShowGui(!s_no_gui);
 		gui_app->SetUseCliStyle(use_cli_style);
-		gui_app->Init();
+
+		if (!gui_app->Init())
+		{
+			Emu.Quit(true);
+			return 0;
+		}
 	}
 	else if (auto headless_app = qobject_cast<headless_application*>(app.data()))
 	{
 		s_headless = true;
-		headless_app->Init();
+
+		if (!headless_app->Init())
+		{
+			Emu.Quit(true);
+			return 0;
+		}
+	}
+	else
+	{
+		// Should be unreachable
+		report_fatal_error("RPCS3 initialization failed!");
+		return 1;
 	}
 
 #ifdef _WIN32
@@ -550,10 +776,10 @@ int main(int argc, char** argv)
 
 	for (const auto& opt : parser.optionNames())
 	{
-		sys_log.notice("Option passed via command line: %s = %s", opt.toStdString(), parser.value(opt).toStdString());
+		sys_log.notice("Option passed via command line: %s %s", opt.toStdString(), parser.value(opt).toStdString());
 	}
 
-	if (const QStringList args = parser.positionalArguments(); !args.isEmpty())
+	if (const QStringList args = parser.positionalArguments(); !args.isEmpty() && !is_updating)
 	{	//RTC_Hijack: Implement arguments for file decryption and gameinfo getting
 		if (find_arg(arg_decrypt, argc, argv))
 		{
@@ -653,30 +879,19 @@ int main(int argc, char** argv)
 		//RTC_Hijack end
 		{
 			sys_log.notice("Booting application from command line: %s", args.at(0).toStdString());
+			Emu.argv = std::move(argv);
+			Emu.SetForceBoot(true);
 
-			// Propagate command line arguments
-			std::vector<std::string> argv;
-
-			if (args.length() > 1)
+			if (const game_boot_result error = Emu.BootGame(path, ""); error != game_boot_result::no_errors)
 			{
-				argv.emplace_back();
+				sys_log.error("Booting '%s' with cli argument failed: reason: %s", path, error);
 
-				for (int i = 1; i < args.length(); i++)
+				if (s_headless || s_no_gui)
 				{
-					const std::string arg = args[i].toStdString();
-					argv.emplace_back(arg);
-					sys_log.notice("Optional command line argument %d: %s", i, arg);
+					report_fatal_error(fmt::format("Booting '%s' failed!\n\nReason: %s", path, error));
 				}
 			}
-
-			// Ugly workaround
-			QTimer::singleShot(2, [config_override_path, path = sstr(QFileInfo(args.at(0)).absoluteFilePath()), argv = std::move(argv)]() mutable {
-				Emu.argv = std::move(argv);
-				Emu.SetForceBoot(true);
-				Emu.BootGame(path, "", true);
-			});
-		}
-
+		});
 	}
 
 	// run event loop (maybe only needed for the gui application)

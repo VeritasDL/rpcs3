@@ -36,7 +36,7 @@ namespace vm
 	};
 
 	// Get reservation status for further atomic update: last update timestamp
-	inline atomic_t<u64>& reservation_acquire(u32 addr, u32 size)
+	inline atomic_t<u64>& reservation_acquire(u32 addr)
 	{
 		// Access reservation info: stamp and the lock bit
 		return *reinterpret_cast<atomic_t<u64>*>(g_reservations + (addr & 0xff80) / 2);
@@ -46,7 +46,7 @@ namespace vm
 	void reservation_update(u32 addr);
 
 	// Get reservation sync variable
-	inline atomic_t<u64>& reservation_notifier(u32 addr, u32 size)
+	inline atomic_t<u64>& reservation_notifier(u32 addr)
 	{
 		return *reinterpret_cast<atomic_t<u64>*>(g_reservations + (addr & 0xff80) / 2);
 	}
@@ -67,7 +67,7 @@ namespace vm
 
 	inline std::pair<atomic_t<u64>&, u64> reservation_lock(u32 addr)
 	{
-		auto res = &vm::reservation_acquire(addr, 1);
+		auto res = &vm::reservation_acquire(addr);
 		auto rtime = res->load();
 
 		if (rtime & 127 || !reservation_try_lock(*res, rtime)) [[unlikely]]
@@ -89,7 +89,7 @@ namespace vm
 	void reservation_op_internal(u32 addr, std::function<bool()> func);
 
 	template <bool Ack = false, typename CPU, typename T, typename AT = u32, typename F>
-	SAFE_BUFFERS inline auto reservation_op(CPU& cpu, _ptr_base<T, AT> ptr, F op)
+	inline SAFE_BUFFERS(auto) reservation_op(CPU& cpu, _ptr_base<T, AT> ptr, F op)
 	{
 		// Atomic operation will be performed on aligned 128 bytes of data, so the data size and alignment must comply
 		static_assert(sizeof(T) <= 128 && alignof(T) == sizeof(T), "vm::reservation_op: unsupported type");
@@ -105,7 +105,7 @@ namespace vm
 		// Use 128-byte aligned addr
 		const u32 addr = static_cast<u32>(ptr.addr()) & -128;
 
-		auto& res = vm::reservation_acquire(addr, 128);
+		auto& res = vm::reservation_acquire(addr);
 		//_m_prefetchw(&res);
 
 		if (g_use_rtm)
@@ -328,7 +328,7 @@ namespace vm
 
 	// Read memory value in pseudo-atomic manner
 	template <typename CPU, typename T, typename AT = u32, typename F>
-	SAFE_BUFFERS inline auto peek_op(CPU&& cpu, _ptr_base<T, AT> ptr, F op)
+	inline SAFE_BUFFERS(auto) peek_op(CPU&& cpu, _ptr_base<T, AT> ptr, F op)
 	{
 		// Atomic operation will be performed on aligned 128 bytes of data, so the data size and alignment must comply
 		static_assert(sizeof(T) <= 128 && alignof(T) == sizeof(T), "vm::peek_op: unsupported type");
@@ -346,7 +346,7 @@ namespace vm
 				}
 			}
 
-			const u64 rtime = vm::reservation_acquire(addr, 128);
+			const u64 rtime = vm::reservation_acquire(addr);
 
 			if (rtime & 127)
 			{
@@ -358,7 +358,7 @@ namespace vm
 			{
 				std::invoke(op, *ptr);
 
-				if (rtime == vm::reservation_acquire(addr, 128))
+				if (rtime == vm::reservation_acquire(addr))
 				{
 					return;
 				}
@@ -367,7 +367,7 @@ namespace vm
 			{
 				auto res = std::invoke(op, *ptr);
 
-				if (rtime == vm::reservation_acquire(addr, 128))
+				if (rtime == vm::reservation_acquire(addr))
 				{
 					return res;
 				}
@@ -376,7 +376,7 @@ namespace vm
 	}
 
 	template <bool Ack = false, typename T, typename F>
-	SAFE_BUFFERS inline auto light_op(T& data, F op)
+	inline SAFE_BUFFERS(auto) light_op(T& data, F op)
 	{
 		// Optimized real ptr -> vm ptr conversion, simply UB if out of range
 		const u32 addr = static_cast<u32>(reinterpret_cast<const u8*>(&data) - g_base_addr);
@@ -385,7 +385,7 @@ namespace vm
 		const auto sptr = vm::get_super_ptr<T>(addr);
 
 		// "Lock" reservation
-		auto& res = vm::reservation_acquire(addr, 128);
+		auto& res = vm::reservation_acquire(addr);
 
 		auto [_old, _ok] = res.fetch_op([&](u64& r)
 		{
@@ -428,7 +428,7 @@ namespace vm
 	}
 
 	template <bool Ack = false, typename T, typename F>
-	SAFE_BUFFERS inline auto atomic_op(T& data, F op)
+	inline SAFE_BUFFERS(auto) atomic_op(T& data, F op)
 	{
 		return light_op<Ack, T>(data, [&](T& data)
 		{
@@ -437,7 +437,7 @@ namespace vm
 	}
 
 	template <bool Ack = false, typename T, typename F>
-	SAFE_BUFFERS inline auto fetch_op(T& data, F op)
+	inline SAFE_BUFFERS(auto) fetch_op(T& data, F op)
 	{
 		return light_op<Ack, T>(data, [&](T& data)
 		{

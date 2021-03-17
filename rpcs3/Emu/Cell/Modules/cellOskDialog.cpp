@@ -53,39 +53,39 @@ struct osk_info
 // TODO: don't use this function
 std::shared_ptr<OskDialogBase> _get_osk_dialog(bool create = false)
 {
-	const auto osk = g_fxo->get<osk_info>();
+	auto& osk = g_fxo->get<osk_info>();
 
 	if (create)
 	{
-		const auto init = osk->init.init();
+		const auto init = osk.init.init();
 
 		if (!init)
 		{
 			return nullptr;
 		}
 
-		if (auto manager = g_fxo->get<rsx::overlays::display_manager>())
+		if (auto manager = g_fxo->try_get<rsx::overlays::display_manager>())
 		{
 			std::shared_ptr<rsx::overlays::osk_dialog> dlg = std::make_shared<rsx::overlays::osk_dialog>();
-			osk->dlg = manager->add(dlg);
+			osk.dlg = manager->add(dlg);
 		}
 		else
 		{
-			osk->dlg = Emu.GetCallbacks().get_osk_dialog();
+			osk.dlg = Emu.GetCallbacks().get_osk_dialog();
 		}
 
-		return osk->dlg;
+		return osk.dlg;
 	}
 	else
 	{
-		const auto init = osk->init.access();
+		const auto init = osk.init.access();
 
 		if (!init)
 		{
 			return nullptr;
 		}
 
-		return osk->dlg;
+		return osk.dlg;
 	}
 }
 
@@ -138,7 +138,7 @@ error_code cellOskDialogLoadAsync(u32 container, vm::ptr<CellOskDialogParam> dia
 		}
 	}
 
-	bool result = false;
+	atomic_t<bool> result = false;
 
 	osk->on_osk_close = [maxLength, wptr = std::weak_ptr<OskDialogBase>(osk)](s32 status)
 	{
@@ -164,7 +164,7 @@ error_code cellOskDialogLoadAsync(u32 container, vm::ptr<CellOskDialogParam> dia
 
 		if (accepted)
 		{
-			if (auto ccb = g_fxo->get<osk_info>()->osk_confirm_callback.exchange({}))
+			if (auto ccb = g_fxo->get<osk_info>().osk_confirm_callback.exchange({}))
 			{
 				vm::ptr<u16> string_to_send = vm::cast(vm::alloc(CELL_OSKDIALOG_STRING_SIZE * 2, vm::main));
 				atomic_t<bool> done = false;
@@ -192,13 +192,13 @@ error_code cellOskDialogLoadAsync(u32 container, vm::ptr<CellOskDialogParam> dia
 				});
 
 				// wait for check callback
-				while (!done)
+				while (!done && !Emu.IsStopped())
 				{
 					std::this_thread::yield();
 				}
 			}
 
-			if (g_fxo->get<osk_info>()->use_separate_windows.load() && osk->osk_text[0] == 0)
+			if (g_fxo->get<osk_info>().use_separate_windows.load() && osk->osk_text[0] == 0)
 			{
 				cellOskDialog.warning("cellOskDialogLoadAsync: input result is CELL_OSKDIALOG_INPUT_FIELD_RESULT_NO_INPUT_TEXT");
 				osk->osk_input_result = CELL_OSKDIALOG_INPUT_FIELD_RESULT_NO_INPUT_TEXT;
@@ -214,7 +214,7 @@ error_code cellOskDialogLoadAsync(u32 container, vm::ptr<CellOskDialogParam> dia
 		}
 
 		// Send OSK status
-		if (g_fxo->get<osk_info>()->use_separate_windows.load() && (g_fxo->get<osk_info>()->osk_continuous_mode.load() != CELL_OSKDIALOG_CONTINUOUS_MODE_NONE))
+		if (g_fxo->get<osk_info>().use_separate_windows.load() && (g_fxo->get<osk_info>().osk_continuous_mode.load() != CELL_OSKDIALOG_CONTINUOUS_MODE_NONE))
 		{
 			if (accepted)
 			{
@@ -237,7 +237,7 @@ error_code cellOskDialogLoadAsync(u32 container, vm::ptr<CellOskDialogParam> dia
 	{
 		const auto osk = wptr.lock();
 
-		if (g_fxo->get<osk_info>()->use_separate_windows.load())
+		if (g_fxo->get<osk_info>().use_separate_windows.load())
 		{
 			sysutil_send_system_cmd(CELL_SYSUTIL_OSKDIALOG_INPUT_ENTERED, 0);
 		}
@@ -249,13 +249,14 @@ error_code cellOskDialogLoadAsync(u32 container, vm::ptr<CellOskDialogParam> dia
 	{
 		osk->Create(get_localized_string(localized_string_id::CELL_OSK_DIALOG_TITLE), message, osk->osk_text, maxLength, prohibitFlgs, allowOskPanelFlg, firstViewPanel);
 		result = true;
+		result.notify_one();
 	});
 
 	sysutil_send_system_cmd(CELL_SYSUTIL_OSKDIALOG_LOADED, 0);
 
-	while (!result)
+	while (!result && !Emu.IsStopped())
 	{
-		thread_ctrl::wait_for(1000);
+		thread_ctrl::wait_on(result, false);
 	}
 
 	return CELL_OK;
@@ -324,10 +325,10 @@ error_code getText(vm::ptr<CellOskDialogCallbackReturnParam> OutputInfo, bool is
 	if (is_unload)
 	{
 		// Unload should be called last, so remove the dialog here
-		if (const auto reset_lock = g_fxo->get<osk_info>()->init.reset())
+		if (const auto reset_lock = g_fxo->get<osk_info>().init.reset())
 		{
 			// TODO
-			g_fxo->get<osk_info>()->dlg.reset();
+			g_fxo->get<osk_info>().dlg.reset();
 		}
 
 		sysutil_send_system_cmd(CELL_SYSUTIL_OSKDIALOG_UNLOADED, 0);
@@ -421,10 +422,10 @@ error_code cellOskDialogSetSeparateWindowOption(vm::ptr<CellOskDialogSeparateWin
 		return CELL_OSKDIALOG_ERROR_PARAM;
 	}
 
-	if (const auto osk = g_fxo->get<osk_info>(); true)
+	if (auto& osk = g_fxo->get<osk_info>(); true)
 	{
-		osk->use_separate_windows = true;
-		osk->osk_continuous_mode  = static_cast<CellOskDialogContinuousMode>(+windowOption->continuousMode);
+		osk.use_separate_windows = true;
+		osk.osk_continuous_mode  = static_cast<CellOskDialogContinuousMode>(+windowOption->continuousMode);
 	}
 
 	return CELL_OK;
@@ -582,9 +583,9 @@ error_code cellOskDialogExtRegisterConfirmWordFilterCallback(vm::ptr<cellOskDial
 		return CELL_OSKDIALOG_ERROR_PARAM;
 	}
 
-	if (const auto osk = g_fxo->get<osk_info>(); true)
+	if (auto& osk = g_fxo->get<osk_info>(); true)
 	{
-		osk->osk_confirm_callback = pCallback;
+		osk.osk_confirm_callback = pCallback;
 	}
 
 	return CELL_OK;

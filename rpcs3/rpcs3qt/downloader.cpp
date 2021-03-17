@@ -21,14 +21,13 @@ downloader::downloader(QWidget* parent)
 	, m_parent(parent)
 	, m_curl(new curl_handle(this))
 {
-	connect(this, &downloader::signal_buffer_update, this, &downloader::handle_buffer_update);
 }
 
 downloader::~downloader()
 {
-	m_curl_abort = true;
 	if (m_thread && m_thread->isRunning())
 	{
+		m_curl_abort = true;
 		m_thread->wait();
 	}
 }
@@ -37,9 +36,9 @@ void downloader::start(const std::string& url, bool follow_location, bool show_p
 {
 	if (m_thread)
 	{
-		m_curl_abort = true;
 		if (m_thread->isRunning())
 		{
+			m_curl_abort = true;
 			m_thread->wait();
 		}
 		m_thread->deleteLater();
@@ -86,6 +85,10 @@ void downloader::start(const std::string& url, bool follow_location, bool show_p
 		}
 	});
 
+	// The downloader's signals are expected to be disconnected and customized before start is called.
+	// Therefore we need to (re)connect its signal(s) here and not in the constructor.
+	connect(this, &downloader::signal_buffer_update, this, &downloader::handle_buffer_update);
+
 	if (show_progress_dialog)
 	{
 		const int maximum = exptected_size > 0 ? exptected_size : 100;
@@ -114,6 +117,7 @@ void downloader::start(const std::string& url, bool follow_location, bool show_p
 	}
 
 	m_thread->setObjectName("Download Thread");
+	m_thread->setParent(this);
 	m_thread->start();
 }
 

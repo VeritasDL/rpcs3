@@ -1,9 +1,13 @@
 #include "shared.h"
 #include "util/logs.hpp"
 
+#ifndef _WIN32
+#include <signal.h>
+#endif
+
 namespace vk
 {
-	void die_with_error(VkResult error_code,
+	void die_with_error(VkResult error_code, std::string message,
 		const char* file,
 		const char* func,
 		u32 line,
@@ -99,7 +103,8 @@ namespace vk
 		{
 		default:
 		case 0:
-			fmt::throw_exception("Assertion Failed! Vulkan API call failed with unrecoverable error: %s%s", error_message, src_loc{line, col, file, func});
+			if (!message.empty()) message += "\n\n";
+			fmt::throw_exception("%sAssertion Failed! Vulkan API call failed with unrecoverable error: %s%s", message, error_message, src_loc{line, col, file, func});
 		case 1:
 			rsx_log.error("Vulkan API call has failed with an error but will continue: %s%s", error_message, src_loc{line, col, file, func});
 			break;
@@ -108,9 +113,9 @@ namespace vk
 		}
 	}
 
-	VKAPI_ATTR VkBool32 VKAPI_CALL dbgFunc(VkFlags msgFlags, VkDebugReportObjectTypeEXT objType,
-	                                       u64 srcObject, usz location, s32 msgCode,
-	                                       const char* pLayerPrefix, const char* pMsg, void* pUserData)
+	VKAPI_ATTR VkBool32 VKAPI_CALL dbgFunc(VkFlags msgFlags, VkDebugReportObjectTypeEXT /*objType*/,
+	                                       u64 /*srcObject*/, usz /*location*/, s32 msgCode,
+	                                       const char* pLayerPrefix, const char* pMsg, void* /*pUserData*/)
 	{
 		if (msgFlags & VK_DEBUG_REPORT_ERROR_BIT_EXT)
 		{
@@ -132,12 +137,19 @@ namespace vk
 		return false;
 	}
 
+	// Temporarily
+#ifndef _MSC_VER
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#endif
+
 	VkBool32 BreakCallback(VkFlags msgFlags, VkDebugReportObjectTypeEXT objType,
 		u64 srcObject, usz location, s32 msgCode,
 		const char* pLayerPrefix, const char* pMsg, void* pUserData)
 	{
 #ifdef _WIN32
 		DebugBreak();
+#else
+		raise(SIGTRAP);
 #endif
 
 		return false;

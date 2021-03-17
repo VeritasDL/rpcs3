@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <cstring>
 #include <cerrno>
-#include <typeinfo>
 #include <map>
 
 #include "util/asm.hpp"
@@ -18,6 +17,11 @@ using namespace std::literals::string_literals;
 
 #include <cwchar>
 #include <Windows.h>
+
+namespace utils
+{
+	u64 get_unique_tsc();
+}
 
 static std::unique_ptr<wchar_t[]> to_wchar(const std::string& source)
 {
@@ -228,7 +232,7 @@ namespace fs
 
 	stat_t file_base::stat()
 	{
-		fmt::throw_exception("fs::file::stat() not supported for %s", typeid(*this).name());
+		fmt::throw_exception("fs::file::stat() not supported.");
 	}
 
 	void file_base::sync()
@@ -323,12 +327,53 @@ std::shared_ptr<fs::device_base> fs::set_virtual_device(const std::string& name,
 
 std::string fs::get_parent_dir(const std::string& path)
 {
-	// Get (basically) processed path
-	const auto real_path = fs::escape_path(path);
+	std::string_view result = path;
 
-	const auto pos = real_path.find_last_of(delim);
+	// Number of path components to remove
+	usz to_remove = 1;
 
-	return real_path.substr(0, pos == umax ? 0 : pos);
+	while (to_remove--)
+	{
+		// Trim contiguous delimiters at the end
+		if (usz sz = result.find_last_not_of(delim) + 1)
+		{
+			result = result.substr(0, sz);
+		}
+		else
+		{
+			return "/";
+		}
+
+		const auto elem = result.substr(result.find_last_of(delim) + 1);
+
+		if (elem.empty() || elem.size() == result.size())
+		{
+			break;
+		}
+
+		if (elem == ".")
+		{
+			to_remove += 1;
+		}
+
+		if (elem == "..")
+		{
+			to_remove += 2;
+		}
+
+		result.remove_suffix(elem.size());
+	}
+
+	if (usz sz = result.find_last_not_of(delim) + 1)
+	{
+		result = result.substr(0, sz);
+	}
+	else
+	{
+		return "/";
+	}
+
+	return std::string{result};
 }
 
 bool fs::stat(const std::string& path, stat_t& info)
@@ -901,6 +946,16 @@ bool fs::utime(const std::string& path, s64 atime, s64 mtime)
 #endif
 }
 
+void fs::sync()
+{
+#ifdef _WIN32
+	fs::g_tls_error = fs::error::unknown;
+#else
+	::sync();
+	fs::g_tls_error = fs::error::ok;
+#endif
+}
+
 [[noreturn]] void fs::xnull(const src_loc& loc)
 {
 	fmt::throw_exception("Null object.%s", loc);
@@ -1055,14 +1110,17 @@ fs::file::file(const std::string& path, bs_t<open_mode> mode)
 
 		u64 seek(s64 offset, seek_mode whence) override
 		{
+			if (whence > seek_end)
+			{
+				fmt::throw_exception("Invalid whence (0x%x)", whence);
+			}
+
 			LARGE_INTEGER pos;
 			pos.QuadPart = offset;
 
 			const DWORD mode =
 				whence == seek_set ? FILE_BEGIN :
-				whence == seek_cur ? FILE_CURRENT :
-				whence == seek_end ? FILE_END :
-				(fmt::throw_exception("Invalid whence (0x%x)", whence), 0);
+				whence == seek_cur ? FILE_CURRENT : FILE_END;
 
 			if (!SetFilePointerEx(m_handle, pos, &pos, mode))
 			{
@@ -1097,13 +1155,22 @@ fs::file::file(const std::string& path, bs_t<open_mode> mode)
 
 	if (mode & fs::append) flags |= O_APPEND;
 	if (mode & fs::create) flags |= O_CREAT;
-	if (mode & fs::trunc && !(mode & (fs::lock + fs::unread))) flags |= O_TRUNC;
+	if (mode & fs::trunc && !(mode & fs::lock)) flags |= O_TRUNC;
 	if (mode & fs::excl) flags |= O_EXCL;
 
 	int perm = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
 
 	if (mode & fs::write && mode & fs::unread)
 	{
+		if (!(mode & (fs::excl + fs::lock)) && mode & fs::trunc)
+		{
+			// Alternative to truncation for "unread" flag (TODO)
+			if (mode & fs::create)
+			{
+				::unlink(path.c_str());
+			}
+		}
+
 		perm = 0;
 	}
 
@@ -1115,14 +1182,14 @@ fs::file::file(const std::string& path, bs_t<open_mode> mode)
 		return;
 	}
 
-	if (mode & fs::write && mode & (fs::lock + fs::unread) && ::flock(fd, LOCK_EX | LOCK_NB) != 0)
+	if (mode & fs::write && mode & fs::lock && ::flock(fd, LOCK_EX | LOCK_NB) != 0)
 	{
 		g_tls_error = errno == EWOULDBLOCK ? fs::error::acces : to_error(errno);
 		::close(fd);
 		return;
 	}
 
-	if (mode & fs::trunc && mode & (fs::lock + fs::unread) && mode & fs::write)
+	if (mode & fs::trunc && mode & fs::lock && mode & fs::write)
 	{
 		// Postpone truncation in order to avoid using O_TRUNC on a locked file
 		ensure(::ftruncate(fd, 0) == 0);
@@ -1196,11 +1263,14 @@ fs::file::file(const std::string& path, bs_t<open_mode> mode)
 
 		u64 seek(s64 offset, seek_mode whence) override
 		{
+			if (whence > seek_end)
+			{
+				fmt::throw_exception("Invalid whence (0x%x)", whence);
+			}
+
 			const int mode =
 				whence == seek_set ? SEEK_SET :
-				whence == seek_cur ? SEEK_CUR :
-				whence == seek_end ? SEEK_END :
-				(fmt::throw_exception("Invalid whence (0x%x)", whence), 0);
+				whence == seek_cur ? SEEK_CUR : SEEK_END;
 
 			const auto result = ::lseek(m_fd, offset, mode);
 
@@ -1231,8 +1301,19 @@ fs::file::file(const std::string& path, bs_t<open_mode> mode)
 			static_assert(sizeof(iovec) == sizeof(iovec_clone), "Weird iovec size");
 			static_assert(offsetof(iovec, iov_len) == offsetof(iovec_clone, iov_len), "Weird iovec::iov_len offset");
 
-			const auto result = ::writev(m_fd, reinterpret_cast<const iovec*>(buffers), buf_count);
-			ensure(result != -1); // "file::write_gather"
+			u64 result = 0;
+
+			while (buf_count)
+			{
+				iovec arg[256];
+				const auto count = std::min<u64>(buf_count, 256);
+				std::memcpy(&arg, buffers, sizeof(iovec) * count);
+				const auto added = ::writev(m_fd, arg, count);
+				ensure(added != -1); // "file::write_gather"
+				result += added;
+				buf_count -= count;
+				buffers += count;
+			}
 
 			return result;
 		}
@@ -1258,7 +1339,7 @@ fs::file::file(const void* ptr, usz size)
 		{
 		}
 
-		bool trunc(u64 length) override
+		bool trunc(u64) override
 		{
 			return false;
 		}
@@ -1279,7 +1360,7 @@ fs::file::file(const void* ptr, usz size)
 			return 0;
 		}
 
-		u64 write(const void* buffer, u64 count) override
+		u64 write(const void*, u64) override
 		{
 			return 0;
 		}
@@ -1784,7 +1865,7 @@ fs::file fs::make_gather(std::vector<fs::file> files)
 			return result;
 		}
 
-		bool trunc(u64 length) override
+		bool trunc(u64) override
 		{
 			return false;
 		}
@@ -1827,7 +1908,7 @@ fs::file fs::make_gather(std::vector<fs::file> files)
 			return 0;
 		}
 
-		u64 write(const void* buffer, u64 size) override
+		u64 write(const void*, u64) override
 		{
 			return 0;
 		}
@@ -1858,6 +1939,55 @@ fs::file fs::make_gather(std::vector<fs::file> files)
 	fs::file result;
 	result.reset(std::make_unique<gather_stream>(std::move(files)));
 	return result;
+}
+
+fs::pending_file::pending_file(const std::string& path)
+{
+	do
+	{
+		m_path = fmt::format(u8"%s/＄%s.%s.tmp", get_parent_dir(path), std::string_view(path).substr(path.find_last_of(fs::delim) + 1), fmt::base57(utils::get_unique_tsc()));
+
+		if (file.open(m_path, fs::create + fs::write + fs::read + fs::excl))
+		{
+			m_dest = path;
+			break;
+		}
+
+		m_path.clear();
+	}
+	while (fs::g_tls_error == fs::error::exist); // Only retry if failed due to existing file
+}
+
+fs::pending_file::~pending_file()
+{
+	file.close();
+
+	if (!m_path.empty())
+	{
+		fs::remove_file(m_path);
+	}
+}
+
+bool fs::pending_file::commit(bool overwrite)
+{
+	if (!file || m_path.empty())
+	{
+		fs::g_tls_error = fs::error::noent;
+		return false;
+	}
+
+	// The temporary file's contents must be on disk before rename
+	file.sync();
+	file.close();
+
+	if (fs::rename(m_path, m_dest, overwrite))
+	{
+		// Disable the destructor
+		m_path.clear();
+		return true;
+	}
+
+	return false;
 }
 
 template<>

@@ -53,6 +53,7 @@ namespace rsx
 		u16 width;
 		u16 height;
 		u16 depth;
+		u16 mipmaps;
 		u16 pitch;
 		u16 slice_h;
 		u8  bpp;
@@ -165,7 +166,7 @@ namespace rsx
 			}
 		}
 
-		static blit_target_properties get_optimal_blit_target_properties(
+		static inline blit_target_properties get_optimal_blit_target_properties(
 			bool src_is_render_target,
 			address_range dst_range,
 			u32 dst_pitch,
@@ -186,7 +187,7 @@ namespace rsx
 						continue;
 					}
 
-					const u32 bpp = g_fxo->get<rsx::avconf>()->get_bpp();
+					const u32 bpp = g_fxo->get<rsx::avconf>().get_bpp();
 
 					const u32 pitch = buffer.pitch ? +buffer.pitch : bpp * buffer.width;
 					if (pitch != dst_pitch)
@@ -237,7 +238,7 @@ namespace rsx
 			const surface_store_list_type& fbos,
 			const std::vector<section_storage_type*>& local,
 			const image_section_attributes_t& attr,
-			u16 count, bool is_depth)
+			u16 count, bool /*is_depth*/)
 		{
 			// Need to preserve sorting order
 			struct sort_helper
@@ -588,7 +589,7 @@ namespace rsx
 			const image_section_attributes_t& attr,
 			const size2f& scale,
 			texture_dimension_extended extended_dimension,
-			u32 encoded_remap, const texture_channel_remap_t& decoded_remap,
+			u32 /*encoded_remap*/, const texture_channel_remap_t& decoded_remap,
 			int select_hint = -1)
 		{
 			ensure((select_hint & 0x1) == select_hint);

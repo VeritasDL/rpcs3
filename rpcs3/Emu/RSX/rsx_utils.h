@@ -230,8 +230,8 @@ namespace rsx
 		{ CELL_GCM_TEXTURE_REMAP_REMAP, CELL_GCM_TEXTURE_REMAP_REMAP, CELL_GCM_TEXTURE_REMAP_REMAP, CELL_GCM_TEXTURE_REMAP_REMAP }
 	};
 
-	template<typename T>
-	void pad_texture(void* input_pixels, void* output_pixels, u16 input_width, u16 input_height, u16 output_width, u16 output_height)
+	template <typename T>
+	void pad_texture(void* input_pixels, void* output_pixels, u16 input_width, u16 input_height, u16 output_width, u16 /*output_height*/)
 	{
 		T *src = static_cast<T*>(input_pixels);
 		T *dst = static_cast<T*>(output_pixels);
@@ -578,12 +578,12 @@ namespace rsx
 		}
 	}
 
-	static inline const f32 get_resolution_scale()
+	static inline f32 get_resolution_scale()
 	{
 		return g_cfg.video.strict_rendering_mode ? 1.f : (g_cfg.video.resolution_scale_percent / 100.f);
 	}
 
-	static inline const int get_resolution_scale_percent()
+	static inline int get_resolution_scale_percent()
 	{
 		return g_cfg.video.strict_rendering_mode ? 100 : g_cfg.video.resolution_scale_percent;
 	}
@@ -695,7 +695,7 @@ namespace rsx
 	{
 		// Converts a stream e.g [1, 2, 3, -1, 4, 5, 6] to a stream with degenerate splits
 		// Output is e.g [1, 2, 3, 3, 3, 4, 4, 5, 6] (5 bogus triangles)
-		T last_index, index;
+		T last_index{}, index;
 		u32 dst_index = 0;
 		for (int n = 0; n < count;)
 		{
@@ -951,8 +951,8 @@ namespace rsx
 	struct simple_array
 	{
 	public:
-		using iterator = Ty * ;
-		using const_iterator = Ty * const;
+		using iterator = Ty*;
+		using const_iterator = const Ty*;
 
 	private:
 		u32 _capacity = 0;

@@ -172,7 +172,7 @@ namespace rsx
 
 	u32 get_vertex_type_size_on_host(vertex_base_type type, u32 size);
 
-	u32 get_address(u32 offset, u32 location,
+	u32 get_address(u32 offset, u32 location, bool allow_failure = false,
 		u32 line = __builtin_LINE(),
 		u32 col = __builtin_COLUMN(),
 		const char* file = __builtin_FILE(),
@@ -592,13 +592,14 @@ namespace rsx
 
 	struct sampled_image_descriptor_base;
 
-	class thread
+	class thread : public cpu_thread
 	{
 		u64 timestamp_ctrl = 0;
 		u64 timestamp_subvalue = 0;
 
 		display_flip_info_t m_queued_flip{};
 
+		void cpu_task() override;
 	protected:
 		std::thread::id m_rsx_thread;
 		atomic_t<bool> m_rsx_thread_exiting{ true };
@@ -615,6 +616,8 @@ namespace rsx
 		// FIFO
 	public:
 		std::unique_ptr<FIFO::FIFO_control> fifo_ctrl;
+		std::vector<std::pair<u32, u32>> dump_callstack_list() const override;
+
 	protected:
 		FIFO::flattening_helper m_flattener;
 		u32 fifo_ret_addr = RSX_CALL_STACK_EMPTY;
@@ -645,6 +648,7 @@ namespace rsx
 		u32 dma_address{0};
 		rsx_iomap_table iomap_table;
 		u32 restore_point = 0;
+		u32 dbg_step_pc = 0;
 		atomic_t<u32> external_interrupt_lock{ 0 };
 		atomic_t<bool> external_interrupt_ack{ false };
 		bool is_fifo_idle() const;
@@ -652,6 +656,9 @@ namespace rsx
 		void recover_fifo();
 		static void fifo_wake_delay(u64 div = 1);
 		u32 get_fifo_cmd() const;
+
+		std::string dump_regs() const override;
+		void cpu_wait(bs_t<cpu_flag> old) override;
 
 		// Performance approximation counters
 		struct
@@ -779,7 +786,6 @@ namespace rsx
 
 		reports::conditional_render_eval cond_render_ctrl;
 
-		void operator()();
 		virtual u64 get_cycles() = 0;
 		virtual ~thread();
 
@@ -805,7 +811,6 @@ namespace rsx
 		virtual void end();
 		virtual void execute_nop_draw();
 
-		virtual void on_init_rsx() = 0;
 		virtual void on_init_thread() = 0;
 		virtual void on_frame_end(u32 buffer, bool forced = false);
 		virtual void flip(const display_flip_info_t& info) = 0;
@@ -895,18 +900,18 @@ namespace rsx
 		* Fill buffer with vertex program constants.
 		* Buffer must be at least 512 float4 wide.
 		*/
-		void fill_vertex_program_constants_data(void *buffer);
+		void fill_vertex_program_constants_data(void* buffer);
 
 		/**
 		 * Fill buffer with fragment rasterization state.
 		 * Fills current fog values, alpha test parameters and texture scaling parameters
 		 */
-		void fill_fragment_state_buffer(void *buffer, const RSXFragmentProgram &fragment_program);
+		void fill_fragment_state_buffer(void* buffer, const RSXFragmentProgram& fragment_program);
 
 		/**
 		 * Fill buffer with fragment texture parameter constants (texture matrix)
 		 */
-		void fill_fragment_texture_parameters(void *buffer, const RSXFragmentProgram &fragment_program);
+		void fill_fragment_texture_parameters(void* buffer, const RSXFragmentProgram& fragment_program);
 
 		/**
 		 * Notify that a section of memory has been mapped
@@ -969,7 +974,7 @@ namespace rsx
 
 	inline thread* get_current_renderer()
 	{
-		return g_fxo->get<rsx::thread>();
+		return g_fxo->try_get<rsx::thread>();
 	}
 
 	template<bool IsFullLock = false>

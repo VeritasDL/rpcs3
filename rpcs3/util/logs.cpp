@@ -2,6 +2,7 @@
 #include "Utilities/File.h"
 #include "Utilities/mutex.h"
 #include "Utilities/Thread.h"
+#include "Utilities/StrFmt.h"
 #include <cstring>
 #include <cstdarg>
 #include <string>
@@ -25,13 +26,18 @@ using namespace std::literals::chrono_literals;
 
 #include <zlib.h>
 
-static std::string empty_string()
+static std::string default_string()
 {
-	return {};
+	if (thread_ctrl::is_main())
+	{
+		return {};
+	}
+
+	return fmt::format("TID: %s", std::this_thread::get_id());
 }
 
 // Thread-specific log prefix provider
-thread_local std::string(*g_tls_log_prefix)() = &empty_string;
+thread_local std::string(*g_tls_log_prefix)() = &default_string;
 
 // Another thread-specific callback
 thread_local void(*g_tls_log_control)(const char* fmt, u64 progress) = [](const char*, u64){};
@@ -106,7 +112,7 @@ namespace logs
 		~root_listener() override = default;
 
 		// Encode level, current thread name, channel name and write log message
-		void log(u64 stamp, const message& msg, const std::string& prefix, const std::string& text) override
+		void log(u64, const message&, const std::string&, const std::string&) override
 		{
 			// Do nothing
 		}
@@ -421,7 +427,7 @@ logs::file_writer::file_writer(const std::string& name, u64 max_size)
 
 	m_writer = std::thread([this]()
 	{
-		thread_ctrl::set_native_priority(-1);
+		thread_ctrl::scoped_priority low_prio(-1);
 
 		while (true)
 		{
@@ -550,7 +556,7 @@ void logs::file_writer::log(const char* text, usz size)
 	// TODO: write bigger fragment directly in blocking manner
 	while (size && size <= 0xffffff)
 	{
-		u64 bufv;
+		u64 bufv = 0;
 
 		const auto pos = m_buf.atomic_op([&](u64& v) -> uchar*
 		{

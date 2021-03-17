@@ -16,7 +16,7 @@ namespace rsx
 			dlg->type.bg_invisible = true;
 			dlg->type.progress_bar_count = 2;
 			dlg->ProgressBarSetTaskbarIndex(-1); // -1 to combine all progressbars in the taskbar progress
-			dlg->on_close = [](s32 status) { Emu.CallAfter([]() { Emu.Stop(); }); };
+			dlg->on_close = [](s32 /*status*/) { Emu.CallAfter([]() { Emu.Stop(); }); };
 
 			ref_cnt++;
 
@@ -61,6 +61,22 @@ namespace rsx
 		Emu.CallAfter([&, index, value]()
 		{
 			dlg->ProgressBarInc(index, value);
+			ref_cnt--;
+		});
+	}
+
+	void shader_loading_dialog::set_value(u32 index, u32 value)
+	{
+		if (!dlg)
+		{
+			return;
+		}
+
+		ref_cnt++;
+
+		Emu.CallAfter([&, index, value]()
+		{
+			dlg->ProgressBarSetValue(index, value);
 			ref_cnt--;
 		});
 	}

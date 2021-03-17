@@ -16,6 +16,7 @@
 #include "Utilities/StrUtil.h"
 #include "Utilities/span.h"
 #include "util/init_mutex.hpp"
+#include "util/asm.hpp"
 
 #include <thread>
 
@@ -167,7 +168,7 @@ struct content_permission final
 
 error_code cellHddGameCheck(ppu_thread& ppu, u32 version, vm::cptr<char> dirName, u32 errDialog, vm::ptr<CellHddGameStatCallback> funcStat, u32 container)
 {
-	cellGame.error("cellHddGameCheck(version=%d, dirName=%s, errDialog=%d, funcStat=*0x%x, container=%d)", version, dirName, errDialog, funcStat, container);
+	cellGame.warning("cellHddGameCheck(version=%d, dirName=%s, errDialog=%d, funcStat=*0x%x, container=%d)", version, dirName, errDialog, funcStat, container);
 
 	if (!dirName || !funcStat || sysutil_check_name_string(dirName.get_ptr(), 1, CELL_GAME_DIRNAME_SIZE) != 0)
 	{
@@ -459,9 +460,9 @@ error_code cellGameBootCheck(vm::ptr<u32> type, vm::ptr<u32> attributes, vm::ptr
 		return CELL_GAME_ERROR_PARAM;
 	}
 
-	const auto perm = g_fxo->get<content_permission>();
+	auto& perm = g_fxo->get<content_permission>();
 
-	const auto init = perm->init.init();
+	const auto init = perm.init.init();
 
 	if (!init)
 	{
@@ -510,10 +511,10 @@ error_code cellGameBootCheck(vm::ptr<u32> type, vm::ptr<u32> attributes, vm::ptr
 		strcpy_trunc(*dirName, Emu.GetTitleID());
 	}
 
-	perm->dir = std::move(dir);
-	perm->sfo = std::move(sfo);
-	perm->restrict_sfo_params = *type == u32{CELL_GAME_GAMETYPE_HDD}; // Ratchet & Clank: All 4 One (PSN versions) rely on this error checking (TODO: Needs proper hw tests)
-	perm->exists = true;
+	perm.dir = std::move(dir);
+	perm.sfo = std::move(sfo);
+	perm.restrict_sfo_params = *type == u32{CELL_GAME_GAMETYPE_HDD}; // Ratchet & Clank: All 4 One (PSN versions) rely on this error checking (TODO: Needs proper hw tests)
+	perm.exists = true;
 
 	return CELL_OK;
 }
@@ -529,9 +530,9 @@ error_code cellGamePatchCheck(vm::ptr<CellGameContentSize> size, vm::ptr<void> r
 
 	psf::registry sfo = psf::load_object(fs::file(vfs::get(Emu.GetDir() + "PARAM.SFO")));
 
-	const auto perm = g_fxo->get<content_permission>();
+	auto& perm = g_fxo->get<content_permission>();
 
-	const auto init = perm->init.init();
+	const auto init = perm.init.init();
 
 	if (!init)
 	{
@@ -548,10 +549,10 @@ error_code cellGamePatchCheck(vm::ptr<CellGameContentSize> size, vm::ptr<void> r
 		size->sysSizeKB = 0; // TODO
 	}
 
-	perm->restrict_sfo_params = false;
-	perm->dir = Emu.GetTitleID();
-	perm->sfo = std::move(sfo);
-	perm->exists = true;
+	perm.restrict_sfo_params = false;
+	perm.dir = Emu.GetTitleID();
+	perm.sfo = std::move(sfo);
+	perm.exists = true;
 
 	return CELL_OK;
 }
@@ -576,9 +577,9 @@ error_code cellGameDataCheck(u32 type, vm::cptr<char> dirName, vm::ptr<CellGameC
 
 	// TODO: not sure what should be checked there
 
-	const auto perm = g_fxo->get<content_permission>();
+	auto& perm = g_fxo->get<content_permission>();
 
-	auto init = perm->init.init();
+	auto init = perm.init.init();
 
 	if (!init)
 	{
@@ -615,14 +616,14 @@ error_code cellGameDataCheck(u32 type, vm::cptr<char> dirName, vm::ptr<CellGameC
 		size->sysSizeKB = 0; // TODO
 	}
 
-	perm->dir = std::move(name);
+	perm.dir = std::move(name);
 
 	if (type == CELL_GAME_GAMETYPE_GAMEDATA)
 	{
-		perm->can_create = true;
+		perm.can_create = true;
 	}
 
-	perm->restrict_sfo_params = false;
+	perm.restrict_sfo_params = false;
 
 	if (sfo.empty())
 	{
@@ -630,8 +631,8 @@ error_code cellGameDataCheck(u32 type, vm::cptr<char> dirName, vm::ptr<CellGameC
 		return not_an_error(CELL_GAME_RET_NONE);
 	}
 
-	perm->exists = true;
-	perm->sfo = std::move(sfo);
+	perm.exists = true;
+	perm.sfo = std::move(sfo);
 	return CELL_OK;
 }
 
@@ -644,51 +645,55 @@ error_code cellGameContentPermit(vm::ptr<char[CELL_GAME_PATH_MAX]> contentInfoPa
 		return CELL_GAME_ERROR_PARAM;
 	}
 
-	const auto perm = g_fxo->get<content_permission>();
+	auto& perm = g_fxo->get<content_permission>();
 
-	const auto init = perm->init.reset();
+	const auto init = perm.init.reset();
 
 	if (!init)
 	{
 		return CELL_GAME_ERROR_FAILURE;
 	}
 
-	const std::string dir = perm->dir.empty() ? "/dev_bdvd/PS3_GAME"s : "/dev_hdd0/game/" + perm->dir;
+	const std::string dir = perm.dir.empty() ? "/dev_bdvd/PS3_GAME"s : "/dev_hdd0/game/" + perm.dir;
 
-	if (perm->temp.empty() && !perm->exists)
+	if (perm.temp.empty() && !perm.exists)
 	{
-		perm->reset();
+		perm.reset();
 		strcpy_trunc(*contentInfoPath, "");
 		strcpy_trunc(*usrdirPath, "");
 		return CELL_OK;
 	}
 
-	if (!perm->temp.empty())
+	if (!perm.temp.empty())
 	{
 		// Create PARAM.SFO
-		psf::save_object(fs::file(perm->temp + "/PARAM.SFO", fs::rewrite), perm->sfo);
+		fs::pending_file temp(perm.temp + "/PARAM.SFO");
+		temp.file.write(psf::save_object(perm.sfo));
+		ensure(temp.commit());
 
 		// Make temporary directory persistent (atomically)
-		if (vfs::host::rename(perm->temp, vfs::get(dir), &g_mp_sys_dev_hdd0, false))
+		if (vfs::host::rename(perm.temp, vfs::get(dir), &g_mp_sys_dev_hdd0, false))
 		{
 			cellGame.success("cellGameContentPermit(): directory '%s' has been created", dir);
 
 			// Prevent cleanup
-			perm->temp.clear();
+			perm.temp.clear();
 		}
 		else
 		{
 			cellGame.error("cellGameContentPermit(): failed to initialize directory '%s' (%s)", dir, fs::g_tls_error);
 		}
 	}
-	else if (perm->can_create)
+	else if (perm.can_create)
 	{
 		// Update PARAM.SFO
-		psf::save_object(fs::file(vfs::get(dir + "/PARAM.SFO"), fs::rewrite), perm->sfo);
+		fs::pending_file temp(vfs::get(dir + "/PARAM.SFO"));
+		temp.file.write(psf::save_object(perm.sfo));
+		ensure(temp.commit());
 	}
 
 	// Cleanup
-	perm->reset();
+	perm.reset();
 
 	strcpy_trunc(*contentInfoPath, dir);
 	strcpy_trunc(*usrdirPath, dir + "/USRDIR");
@@ -806,7 +811,9 @@ error_code cellGameDataCheckCreate2(ppu_thread& ppu, u32 version, vm::cptr<char>
 				psf::assign(sfo, fmt::format("TITLE_%02d", i), psf::string(CELL_GAME_SYSP_TITLE_SIZE, setParam->titleLang[i]));
 			}
 
-			psf::save_object(fs::file(vfs::get(dir + "/PARAM.SFO"), fs::rewrite), sfo);
+			fs::pending_file temp(vfs::get(dir + "/PARAM.SFO"));
+			temp.file.write(psf::save_object(sfo));
+			ensure(temp.commit());
 		}
 
 		return CELL_OK;
@@ -877,21 +884,21 @@ error_code cellGameCreateGameData(vm::ptr<CellGameSetInitParams> init, vm::ptr<c
 		return CELL_GAME_ERROR_PARAM;
 	}
 
-	const auto prm = g_fxo->get<content_permission>();
+	auto& perm = g_fxo->get<content_permission>();
 
-	const auto _init = prm->init.access();
+	const auto _init = perm.init.access();
 
-	if (!_init || prm->dir.empty())
+	if (!_init || perm.dir.empty())
 	{
 		return CELL_GAME_ERROR_FAILURE;
 	}
 
-	if (!prm->can_create)
+	if (!perm.can_create)
 	{
 		return CELL_GAME_ERROR_NOTSUPPORTED;
 	}
 
-	if (prm->exists)
+	if (perm.exists)
 	{
 		return CELL_GAME_ERROR_EXIST;
 	}
@@ -917,11 +924,11 @@ error_code cellGameCreateGameData(vm::ptr<CellGameSetInitParams> init, vm::ptr<c
 
 	if (tmp_usrdirPath) strcpy_trunc(*tmp_usrdirPath, tmp_usrdir);
 
-	prm->temp = vfs::get(tmp_contentInfo);
+	perm.temp = vfs::get(tmp_contentInfo);
 	cellGame.success("cellGameCreateGameData(): temporary directory '%s' has been created", tmp_contentInfo);
 
 	// Initial PARAM.SFO parameters (overwrite)
-	prm->sfo =
+	perm.sfo =
 	{
 		{ "CATEGORY", psf::string(3, "GD") },
 		{ "TITLE_ID", psf::string(CELL_GAME_SYSP_TITLEID_SIZE, init->titleId) },
@@ -944,7 +951,7 @@ error_code cellGameDeleteGameData(vm::cptr<char> dirName)
 	const std::string name = dirName.get_ptr();
 	const std::string dir = vfs::get("/dev_hdd0/game/"s + name);
 
-	const auto prm = g_fxo->get<content_permission>();
+	auto& perm = g_fxo->get<content_permission>();
 
 	auto remove_gd = [&]() -> error_code
 	{
@@ -984,16 +991,16 @@ error_code cellGameDeleteGameData(vm::cptr<char> dirName)
 	while (true)
 	{
 		// Obtain exclusive lock and cancel init
-		auto _init = prm->init.init();
+		auto _init = perm.init.init();
 
 		if (!_init)
 		{
 			// Or access it
-			if (auto access = prm->init.access(); access)
+			if (auto access = perm.init.access(); access)
 			{
 				// Cannot remove it when it is accessed by cellGameDataCheck
 				// If it is HG data then resort to remove_gd for ERROR_BROKEN
-				if (prm->dir == name && prm->can_create)
+				if (perm.dir == name && perm.can_create)
 				{
 					return CELL_GAME_ERROR_NOTSUPPORTED;
 				}
@@ -1022,9 +1029,9 @@ error_code cellGameGetParamInt(s32 id, vm::ptr<s32> value)
 		return CELL_GAME_ERROR_PARAM;
 	}
 
-	const auto prm = g_fxo->get<content_permission>();
+	auto& perm = g_fxo->get<content_permission>();
 
-	const auto init = prm->init.access();
+	const auto init = perm.init.access();
 
 	if (!init)
 	{
@@ -1044,13 +1051,13 @@ error_code cellGameGetParamInt(s32 id, vm::ptr<s32> value)
 	}
 	}
 
-	if (!prm->sfo.count(key))
+	if (!perm.sfo.count(key))
 	{
 		// TODO: Check if special values need to be set here
 		cellGame.warning("cellGameGetParamInt(): id=%d was not found", id);
 	}
 
-	*value = psf::get_integer(prm->sfo, key, 0);
+	*value = psf::get_integer(perm.sfo, key, 0);
 	return CELL_OK;
 }
 
@@ -1116,9 +1123,9 @@ error_code cellGameGetParamString(s32 id, vm::ptr<char> buf, u32 bufsize)
 		return CELL_GAME_ERROR_PARAM;
 	}
 
-	const auto prm = g_fxo->get<content_permission>();
+	auto& perm = g_fxo->get<content_permission>();
 
-	const auto init = prm->init.access();
+	const auto init = perm.init.access();
 
 	if (!init)
 	{
@@ -1132,14 +1139,14 @@ error_code cellGameGetParamString(s32 id, vm::ptr<char> buf, u32 bufsize)
 		return CELL_GAME_ERROR_INVALID_ID;
 	}
 
-	if (key.flags & strkey_flag::get && prm->restrict_sfo_params)
+	if (key.flags & strkey_flag::get && perm.restrict_sfo_params)
 	{
 		return CELL_GAME_ERROR_NOTSUPPORTED;
 	}
 
-	const auto value = psf::get_string(prm->sfo, std::string(key.name));
+	const auto value = psf::get_string(perm.sfo, std::string(key.name));
 
-	if (value.empty() && !prm->sfo.count(std::string(key.name)))
+	if (value.empty() && !perm.sfo.count(std::string(key.name)))
 	{
 		// TODO: Check if special values need to be set here
 		cellGame.warning("cellGameGetParamString(): id=%d was not found", id);
@@ -1159,9 +1166,9 @@ error_code cellGameSetParamString(s32 id, vm::cptr<char> buf)
 		return CELL_GAME_ERROR_PARAM;
 	}
 
-	const auto prm = g_fxo->get<content_permission>();
+	auto& perm = g_fxo->get<content_permission>();
 
-	const auto init = prm->init.access();
+	const auto init = perm.init.access();
 
 	if (!init)
 	{
@@ -1175,12 +1182,12 @@ error_code cellGameSetParamString(s32 id, vm::cptr<char> buf)
 		return CELL_GAME_ERROR_INVALID_ID;
 	}
 
-	if (!prm->can_create || key.flags & strkey_flag::read_only || (key.flags & strkey_flag::set && prm->restrict_sfo_params))
+	if (!perm.can_create || key.flags & strkey_flag::read_only || (key.flags & strkey_flag::set && perm.restrict_sfo_params))
 	{
 		return CELL_GAME_ERROR_NOTSUPPORTED;
 	}
 
-	psf::assign(prm->sfo, std::string(key.name), psf::string(key.max_size, buf.get_ptr()));
+	psf::assign(perm.sfo, std::string(key.name), psf::string(key.max_size, buf.get_ptr()));
 
 	return CELL_OK;
 }
@@ -1197,16 +1204,16 @@ error_code cellGameGetSizeKB(vm::ptr<s32> size)
 	// Always reset to 0 at start
 	*size = 0;
 
-	const auto prm = g_fxo->get<content_permission>();
+	auto& perm = g_fxo->get<content_permission>();
 
-	const auto init = prm->init.access();
+	const auto init = perm.init.access();
 
 	if (!init)
 	{
 		return CELL_GAME_ERROR_FAILURE;
 	}
 
-	const std::string local_dir = !prm->temp.empty() ? prm->temp : vfs::get("/dev_hdd0/game/" + prm->dir);
+	const std::string local_dir = !perm.temp.empty() ? perm.temp : vfs::get("/dev_hdd0/game/" + perm.dir);
 
 	const auto dirsz = fs::get_dir_size(local_dir, 1024);
 
@@ -1337,7 +1344,7 @@ error_code cellDiscGameGetBootDiscInfo(vm::ptr<CellDiscGameSystemFileParam> getP
 	}
 
 	// Always sets 0 at first dword
-	reinterpret_cast<nse_t<u32, 1>*>(getParam->titleId)[0] = 0;
+	*utils::bless<nse_t<u32, 1>>(getParam->titleId + 0) = 0;
 
 	// This is also called by non-disc games, see NPUB90029
 	static const std::string dir = "/dev_bdvd/PS3_GAME"s;

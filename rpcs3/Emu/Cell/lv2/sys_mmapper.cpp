@@ -50,7 +50,7 @@ error_code sys_mmapper_allocate_address(ppu_thread& ppu, u64 size, u64 flags, u6
 {
 	ppu.state += cpu_flag::wait;
 
-	sys_mmapper.error("sys_mmapper_allocate_address(size=0x%x, flags=0x%x, alignment=0x%x, alloc_addr=*0x%x)", size, flags, alignment, alloc_addr);
+	sys_mmapper.warning("sys_mmapper_allocate_address(size=0x%x, flags=0x%x, alignment=0x%x, alloc_addr=*0x%x)", size, flags, alignment, alloc_addr);
 
 	if (size % 0x10000000)
 	{
@@ -93,7 +93,7 @@ error_code sys_mmapper_allocate_fixed_address(ppu_thread& ppu)
 {
 	ppu.state += cpu_flag::wait;
 
-	sys_mmapper.error("sys_mmapper_allocate_fixed_address()");
+	sys_mmapper.warning("sys_mmapper_allocate_fixed_address()");
 
 	if (!vm::map(0xB0000000, 0x10000000, SYS_MEMORY_PAGE_SIZE_1M))
 	{
@@ -143,16 +143,16 @@ error_code sys_mmapper_allocate_shared_memory(ppu_thread& ppu, u64 ipc_key, u64 
 	}
 
 	// Get "default" memory container
-	const auto dct = g_fxo->get<lv2_memory_container>();
+	auto& dct = g_fxo->get<lv2_memory_container>();
 
-	if (!dct->take(size))
+	if (!dct.take(size))
 	{
 		return CELL_ENOMEM;
 	}
 
-	if (auto error = create_lv2_shm(ipc_key != SYS_MMAPPER_NO_SHM_KEY, ipc_key, size, flags & SYS_MEMORY_PAGE_SIZE_64K ? 0x10000 : 0x100000, flags, dct))
+	if (auto error = create_lv2_shm(ipc_key != SYS_MMAPPER_NO_SHM_KEY, ipc_key, size, flags & SYS_MEMORY_PAGE_SIZE_64K ? 0x10000 : 0x100000, flags, &dct))
 	{
-		dct->used -= size;
+		dct.used -= size;
 		return error;
 	}
 
@@ -317,16 +317,16 @@ error_code sys_mmapper_allocate_shared_memory_ext(ppu_thread& ppu, u64 ipc_key, 
 	}
 
 	// Get "default" memory container
-	const auto dct = g_fxo->get<lv2_memory_container>();
+	auto& dct = g_fxo->get<lv2_memory_container>();
 
-	if (!dct->take(size))
+	if (!dct.take(size))
 	{
 		return CELL_ENOMEM;
 	}
 
-	if (auto error = create_lv2_shm<true>(true, ipc_key, size, flags & SYS_MEMORY_PAGE_SIZE_64K ? 0x10000 : 0x100000, flags, dct))
+	if (auto error = create_lv2_shm<true>(true, ipc_key, size, flags & SYS_MEMORY_PAGE_SIZE_64K ? 0x10000 : 0x100000, flags, &dct))
 	{
-		dct->used -= size;
+		dct.used -= size;
 		return error;
 	}
 
@@ -459,7 +459,7 @@ error_code sys_mmapper_free_address(ppu_thread& ppu, u32 addr)
 {
 	ppu.state += cpu_flag::wait;
 
-	sys_mmapper.error("sys_mmapper_free_address(addr=0x%x)", addr);
+	sys_mmapper.warning("sys_mmapper_free_address(addr=0x%x)", addr);
 
 	if (addr < 0x20000000 || addr >= 0xC0000000)
 	{
@@ -467,10 +467,10 @@ error_code sys_mmapper_free_address(ppu_thread& ppu, u32 addr)
 	}
 
 	// If page fault notify exists and an address in this area is faulted, we can't free the memory.
-	auto pf_events = g_fxo->get<page_fault_event_entries>();
-	std::lock_guard pf_lock(pf_events->pf_mutex);
+	auto& pf_events = g_fxo->get<page_fault_event_entries>();
+	std::lock_guard pf_lock(pf_events.pf_mutex);
 
-	for (const auto& ev : pf_events->events)
+	for (const auto& ev : pf_events.events)
 	{
 		auto mem = vm::get(vm::any, addr);
 		if (mem && addr <= ev.second && ev.second <= addr + mem->size - 1)
@@ -493,20 +493,20 @@ error_code sys_mmapper_free_address(ppu_thread& ppu, u32 addr)
 	}
 
 	// If a memory block is freed, remove it from page notification table.
-	auto pf_entries = g_fxo->get<page_fault_notification_entries>();
-	std::lock_guard lock(pf_entries->mutex);
+	auto& pf_entries = g_fxo->get<page_fault_notification_entries>();
+	std::lock_guard lock(pf_entries.mutex);
 
-	auto ind_to_remove = pf_entries->entries.begin();
-	for (; ind_to_remove != pf_entries->entries.end(); ++ind_to_remove)
+	auto ind_to_remove = pf_entries.entries.begin();
+	for (; ind_to_remove != pf_entries.entries.end(); ++ind_to_remove)
 	{
 		if (addr == ind_to_remove->start_addr)
 		{
 			break;
 		}
 	}
-	if (ind_to_remove != pf_entries->entries.end())
+	if (ind_to_remove != pf_entries.entries.end())
 	{
-		pf_entries->entries.erase(ind_to_remove);
+		pf_entries.entries.erase(ind_to_remove);
 	}
 
 	return CELL_OK;
@@ -725,11 +725,11 @@ error_code sys_mmapper_enable_page_fault_notification(ppu_thread& ppu, u32 start
 		return CELL_EAGAIN;
 	}
 
-	auto pf_entries = g_fxo->get<page_fault_notification_entries>();
-	std::unique_lock lock(pf_entries->mutex);
+	auto& pf_entries = g_fxo->get<page_fault_notification_entries>();
+	std::unique_lock lock(pf_entries.mutex);
 
 	// Return error code if page fault notifications are already enabled
-	for (const auto& entry : pf_entries->entries)
+	for (const auto& entry : pf_entries.entries)
 	{
 		if (entry.start_addr == start_addr)
 		{
@@ -741,7 +741,7 @@ error_code sys_mmapper_enable_page_fault_notification(ppu_thread& ppu, u32 start
 	}
 
 	page_fault_notification_entry entry{ start_addr, event_queue_id, port_id->value() };
-	pf_entries->entries.emplace_back(entry);
+	pf_entries.entries.emplace_back(entry);
 
 	return CELL_OK;
 }
@@ -749,18 +749,18 @@ error_code sys_mmapper_enable_page_fault_notification(ppu_thread& ppu, u32 start
 error_code mmapper_thread_recover_page_fault(cpu_thread* cpu)
 {
 	// We can only wake a thread if it is being suspended for a page fault.
-	auto pf_events = g_fxo->get<page_fault_event_entries>();
+	auto& pf_events = g_fxo->get<page_fault_event_entries>();
 	{
-		std::lock_guard pf_lock(pf_events->pf_mutex);
-		const auto pf_event_ind = pf_events->events.find(cpu);
+		std::lock_guard pf_lock(pf_events.pf_mutex);
+		const auto pf_event_ind = pf_events.events.find(cpu);
 
-		if (pf_event_ind == pf_events->events.end())
+		if (pf_event_ind == pf_events.events.end())
 		{
 			// if not found...
 			return CELL_EINVAL;
 		}
 
-		pf_events->events.erase(pf_event_ind);
+		pf_events.events.erase(pf_event_ind);
 	}
 
 	if (cpu->id_type() == 1u)
@@ -770,7 +770,7 @@ error_code mmapper_thread_recover_page_fault(cpu_thread* cpu)
 	else
 	{
 		cpu->state += cpu_flag::signal;
-		cpu->notify();
+		cpu->state.notify_one(cpu_flag::signal);
 	}
 
 	return CELL_OK;

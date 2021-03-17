@@ -394,8 +394,6 @@ void keyboard_pad_handler::mouseMoveEvent(QMouseEvent* event)
 		deadzone_y = std::abs(m * deadzone_x);
 	}
 
-	input_log.error("movement_x=%d, movement_y=%d => deadzone_x=%d, deadzone_y=%d", movement_x, movement_y, deadzone_x, deadzone_y);
-
 	if (movement_x < 0)
 	{
 		Key(mouse::move_right, false);
@@ -615,7 +613,7 @@ u32 keyboard_pad_handler::GetKeyCode(const QString& keyName)
 	return key_code;
 }
 
-int keyboard_pad_handler::native_scan_code_from_string(const std::string& key)
+int keyboard_pad_handler::native_scan_code_from_string([[maybe_unused]] const std::string& key)
 {
 	// NOTE: Qt throws a Ctrl key at us when using Alt Gr, so there is no point in distinguishing left and right Alt at the moment
 #ifdef _WIN32

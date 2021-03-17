@@ -24,11 +24,15 @@ using namespace std::literals;
 #endif
 
 #ifdef _MSC_VER
-#define SAFE_BUFFERS __declspec(safebuffers)
+#define SAFE_BUFFERS(...) __declspec(safebuffers) __VA_ARGS__
 #define NEVER_INLINE __declspec(noinline)
 #define FORCE_INLINE __forceinline
 #else // not _MSC_VER
-#define SAFE_BUFFERS __attribute__((no_stack_protector))
+#ifdef __clang__
+#define SAFE_BUFFERS(...) __attribute__((no_stack_protector)) __VA_ARGS__
+#else
+#define SAFE_BUFFERS(...) __VA_ARGS__ __attribute__((__optimize__("no-stack-protector")))
+#endif
 #define NEVER_INLINE __attribute__((noinline)) inline
 #define FORCE_INLINE __attribute__((always_inline)) inline
 #endif // _MSC_VER
@@ -529,7 +533,7 @@ constexpr inline struct umax_helper
 #if __cpp_impl_three_way_comparison >= 201711 && !__INTELLISENSE__
 #else
 	template <typename T>
-	friend constexpr std::enable_if_t<std::is_unsigned_v<simple_t<T>>, bool> operator==(const T& lhs, const umax_helper& rhs)
+	friend constexpr std::enable_if_t<std::is_unsigned_v<simple_t<T>>, bool> operator==(const T& lhs, const umax_helper&)
 	{
 		return lhs == static_cast<simple_t<T>>(-1);
 	}
@@ -544,7 +548,7 @@ constexpr inline struct umax_helper
 	}
 
 	template <typename T>
-	friend constexpr std::enable_if_t<std::is_unsigned_v<simple_t<T>>, bool> operator!=(const T& lhs, const umax_helper& rhs)
+	friend constexpr std::enable_if_t<std::is_unsigned_v<simple_t<T>>, bool> operator!=(const T& lhs, const umax_helper&)
 	{
 		return lhs != static_cast<simple_t<T>>(-1);
 	}
@@ -721,7 +725,7 @@ struct narrow_impl
 	static_assert(std::is_void<To>::value, "narrow_impl<> specialization not found");
 
 	// Returns true if value cannot be represented in type To
-	static constexpr bool test(const From& value)
+	static constexpr bool test(const From&)
 	{
 		// Unspecialized cases (including cast to void) always considered narrowing
 		return true;

@@ -132,6 +132,7 @@ void fmt_class_string<detail_level>::format(std::string& out, u64 arg)
 	{
 		switch (value)
 		{
+		case detail_level::none: return "None";
 		case detail_level::minimal: return "Minimal";
 		case detail_level::low: return "Low";
 		case detail_level::medium: return "Medium";
@@ -356,6 +357,22 @@ void fmt_class_string<move_handler>::format(std::string& out, u64 arg)
 }
 
 template <>
+void fmt_class_string<buzz_handler>::format(std::string& out, u64 arg)
+{
+	format_enum(out, arg, [](auto value)
+	{
+		switch (value)
+		{
+		case buzz_handler::null: return "Null";
+		case buzz_handler::one_controller: return "1 controller";
+		case buzz_handler::two_controllers: return "2 controllers";
+		}
+
+		return unknown;
+	});
+}
+
+template <>
 void fmt_class_string<ppu_decoder_type>::format(std::string& out, u64 arg)
 {
 	format_enum(out, arg, [](ppu_decoder_type type)
@@ -399,6 +416,21 @@ void fmt_class_string<audio_downmix>::format(std::string& out, u64 arg)
 		case audio_downmix::downmix_to_stereo: return "Downmix to Stereo";
 		case audio_downmix::downmix_to_5_1: return "Downmix to 5.1";
 		case audio_downmix::use_application_settings: return "Use application settings";
+		}
+
+		return unknown;
+	});
+}
+
+template <>
+void fmt_class_string<vk_gpu_scheduler_mode>::format(std::string& out, u64 arg)
+{
+	format_enum(out, arg, [](vk_gpu_scheduler_mode value)
+	{
+		switch (value)
+		{
+		case vk_gpu_scheduler_mode::host: return "Host";
+		case vk_gpu_scheduler_mode::device: return "Device";
 		}
 
 		return unknown;

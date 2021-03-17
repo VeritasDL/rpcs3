@@ -272,7 +272,7 @@ error_code _sys_process_get_paramsfo(vm::ptr<char> buffer)
 	return CELL_OK;
 }
 
-s32 process_get_sdk_version(u32 pid, s32& ver)
+s32 process_get_sdk_version(u32 /*pid*/, s32& ver)
 {
 	// get correct SDK version for selected pid
 	ver = g_ps3_process_info.sdk_ver;
@@ -342,11 +342,22 @@ void _sys_process_exit(ppu_thread& ppu, s32 status, u32 arg2, u32 arg3)
 		Emu.Stop();
 	});
 
-	ppu.state += cpu_flag::dbg_global_stop;
+	// Wait for GUI thread
+	while (auto state = +ppu.state)
+	{
+		if (is_stopped(state))
+		{
+			break;
+		}
+
+		thread_ctrl::wait_on(ppu.state, state);
+	}
 }
 
 void _sys_process_exit2(ppu_thread& ppu, s32 status, vm::ptr<sys_exit2_param> arg, u32 arg_size, u32 arg4)
 {
+	ppu.state += cpu_flag::wait;
+
 	sys_process.warning("_sys_process_exit2(status=%d, arg=*0x%x, arg_size=0x%x, arg4=0x%x)", status, arg, arg_size, arg4);
 
 	auto pstr = +arg->args;
@@ -390,9 +401,7 @@ void _sys_process_exit2(ppu_thread& ppu, s32 status, vm::ptr<sys_exit2_param> ar
 	if (disc.empty() && !Emu.GetTitleID().empty())
 		disc = vfs::get(Emu.GetDir());
 
-	ppu.state += cpu_flag::wait;
-
-	Emu.CallAfter([path = std::move(path), argv = std::move(argv), envp = std::move(envp), data = std::move(data), disc = std::move(disc), hdd1 = std::move(hdd1), klic = g_fxo->get<loaded_npdrm_keys>()->devKlic.load()]() mutable
+	Emu.CallAfter([path = std::move(path), argv = std::move(argv), envp = std::move(envp), data = std::move(data), disc = std::move(disc), hdd1 = std::move(hdd1), klic = g_fxo->get<loaded_npdrm_keys>().devKlic.load()]() mutable
 	{
 		sys_process.success("Process finished -> %s", argv[0]);
 		Emu.SetForceBoot(true);
@@ -419,7 +428,16 @@ void _sys_process_exit2(ppu_thread& ppu, s32 status, vm::ptr<sys_exit2_param> ar
 		}
 	});
 
-	ppu.state += cpu_flag::dbg_global_stop;
+	// Wait for GUI thread
+	while (auto state = +ppu.state)
+	{
+		if (is_stopped(state))
+		{
+			break;
+		}
+
+		thread_ctrl::wait_on(ppu.state, state);
+	}
 }
 
 error_code sys_process_spawns_a_self2(vm::ptr<u32> pid, u32 primary_prio, u64 flags, vm::ptr<void> stack, u32 stack_size, u32 mem_id, vm::ptr<void> param_sfo, vm::ptr<void> dbg_data)

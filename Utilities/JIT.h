@@ -13,6 +13,11 @@
 #pragma GCC diagnostic ignored "-Wall"
 #pragma GCC diagnostic ignored "-Wextra"
 #pragma GCC diagnostic ignored "-Wold-style-cast"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#ifndef __clang__
+#pragma GCC diagnostic ignored "-Wduplicated-branches"
+#endif
 #include <asmjit/asmjit.h>
 #pragma GCC diagnostic pop
 #endif
@@ -177,6 +182,12 @@ inline FT build_function_asm(F&& builder)
 #pragma GCC diagnostic ignored "-Wall"
 #pragma GCC diagnostic ignored "-Wextra"
 #pragma GCC diagnostic ignored "-Wold-style-cast"
+#pragma GCC diagnostic ignored "-Wsuggest-override"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Winconsistent-missing-override"
+#endif
 #endif
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"

@@ -54,7 +54,7 @@ namespace rsx
 		return contextInfo->context_id;
 	}
 
-	std::vector<u32> rsx_replay_thread::alloc_write_fifo(be_t<u32> context_id)
+	std::vector<u32> rsx_replay_thread::alloc_write_fifo(be_t<u32> /*context_id*/)
 	{
 		// copy commands into fifo buffer
 		// todo: could change rsx_command to just be values to avoid this loop,
@@ -190,7 +190,7 @@ namespace rsx
 			for (const auto& replay_cmd : frame->replay_commands)
 			{
 				while (Emu.IsPaused())
-					std::this_thread::sleep_for(10ms);
+					thread_ctrl::wait_for(10'000);
 
 				if (Emu.IsStopped())
 					break;
@@ -203,7 +203,7 @@ namespace rsx
 				while (!Emu.IsStopped() && !render->is_fifo_idle() && (render->ctrl->get != fifo_stops[stopIdx]))
 				{
 					while (Emu.IsPaused())
-						std::this_thread::sleep_for(10ms);
+						thread_ctrl::wait_for(10'000);
 					std::this_thread::yield();
 				}
 
@@ -225,7 +225,7 @@ namespace rsx
 			while (!render->is_fifo_idle() && !Emu.IsStopped())
 			{
 				while (Emu.IsPaused())
-					std::this_thread::sleep_for(10ms);
+					thread_ctrl::wait_for(10'000);
 			}
 
 			// Check if the captured application used syscall instead of a gcm command to flip
@@ -236,7 +236,7 @@ namespace rsx
 			}
 
 			// random pause to not destroy gpu
-			std::this_thread::sleep_for(10ms);
+			thread_ctrl::wait_for(10'000);
 		}
 
 		get_current_cpu_thread()->state += (cpu_flag::exit + cpu_flag::wait);

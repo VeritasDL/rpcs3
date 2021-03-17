@@ -10,7 +10,7 @@
     <x>0</x>
     <y>0</y>
     <width>753</width>
-    <height>650</height>
+    <height>730</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -39,13 +39,13 @@
       </sizepolicy>
      </property>
      <property name="currentIndex">
-      <number>1</number>
+      <number>6</number>
      </property>
      <widget class="QWidget" name="coreTab">
       <attribute name="title">
        <string>CPU</string>
       </attribute>
-      <layout class="QVBoxLayout" name="coreTabLayout">
+      <layout class="QVBoxLayout" name="coreTabLayout" stretch="0,1,0">
        <item>
         <layout class="QHBoxLayout" name="coreTabItemLayout" stretch="1,1,1">
          <item>
@@ -325,7 +325,7 @@
       <attribute name="title">
        <string>GPU</string>
       </attribute>
-      <layout class="QVBoxLayout" name="gpuTab_layout">
+      <layout class="QVBoxLayout" name="gpuTab_layout" stretch="0,1,0">
        <item>
         <layout class="QHBoxLayout" name="gpuTabLayout" stretch="1,1,1">
          <item>
@@ -758,6 +758,13 @@
                <widget class="QCheckBox" name="multithreadedRSX">
                 <property name="text">
                  <string>Multithreaded RSX</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QCheckBox" name="asyncTextureStreaming">
+                <property name="text">
+                 <string>Asynchronous Texture Streaming</string>
                 </property>
                </widget>
               </item>
@@ -1277,7 +1284,7 @@
       <attribute name="title">
        <string>I/O</string>
       </attribute>
-      <layout class="QVBoxLayout" name="inputTab_layout">
+      <layout class="QVBoxLayout" name="inputTab_layout" stretch="0,0,1,0">
        <item>
         <layout class="QHBoxLayout" name="inputTabLayoutTop" stretch="1,1,1">
          <item>
@@ -1345,7 +1352,16 @@
           </widget>
          </item>
          <item>
-          <widget class="QWidget" name="inputTabSpacerWidget" native="true"/>
+          <widget class="QGroupBox" name="gb_buzz_emulated">
+           <property name="title">
+            <string>Buzz! emulated controller</string>
+           </property>
+           <layout class="QVBoxLayout" name="gb_buzz_emulated_layout">
+            <item>
+             <widget class="QComboBox" name="buzzBox"/>
+            </item>
+           </layout>
+          </widget>
          </item>
         </layout>
        </item>
@@ -1399,7 +1415,7 @@
       <attribute name="title">
        <string>System</string>
       </attribute>
-      <layout class="QVBoxLayout" name="systemTab_layout">
+      <layout class="QVBoxLayout" name="systemTab_layout" stretch="0,0,0,0,1,0">
        <item>
         <layout class="QHBoxLayout" name="systemTabLayout1" stretch="1,1,1">
          <item>
@@ -1652,7 +1668,7 @@
       <attribute name="title">
        <string>Network</string>
       </attribute>
-      <layout class="QVBoxLayout" name="networkTab_layout">
+      <layout class="QVBoxLayout" name="networkTab_layout" stretch="0,1,0">
        <item>
         <layout class="QHBoxLayout" name="networkTabLayout" stretch="0,0">
          <item>
@@ -1716,10 +1732,13 @@
               <property name="orientation">
                <enum>Qt::Vertical</enum>
               </property>
+              <property name="sizeType">
+               <enum>QSizePolicy::MinimumExpanding</enum>
+              </property>
               <property name="sizeHint" stdset="0">
                <size>
-                <width>20</width>
-                <height>40</height>
+                <width>0</width>
+                <height>0</height>
                </size>
               </property>
              </spacer>
@@ -1750,10 +1769,13 @@
               <property name="orientation">
                <enum>Qt::Vertical</enum>
               </property>
+              <property name="sizeType">
+               <enum>QSizePolicy::MinimumExpanding</enum>
+              </property>
               <property name="sizeHint" stdset="0">
                <size>
-                <width>20</width>
-                <height>40</height>
+                <width>0</width>
+                <height>0</height>
                </size>
               </property>
              </spacer>
@@ -1813,7 +1835,7 @@
       <attribute name="title">
        <string>Advanced</string>
       </attribute>
-      <layout class="QVBoxLayout" name="advancedTab_layout">
+      <layout class="QVBoxLayout" name="advancedTab_layout" stretch="1,0,0">
        <item>
         <layout class="QHBoxLayout" name="advancedTabLayout" stretch="1,1,1">
          <item>
@@ -1909,6 +1931,9 @@
              <property name="orientation">
               <enum>Qt::Vertical</enum>
              </property>
+             <property name="sizeType">
+              <enum>QSizePolicy::MinimumExpanding</enum>
+             </property>
              <property name="sizeHint" stdset="0">
               <size>
                <width>0</width>
@@ -1923,12 +1948,6 @@
           <layout class="QVBoxLayout" name="advancedTabLayoutMiddle">
            <item>
             <widget class="QGroupBox" name="gb_libs">
-             <property name="sizePolicy">
-              <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-               <horstretch>0</horstretch>
-               <verstretch>0</verstretch>
-              </sizepolicy>
-             </property>
              <property name="title">
               <string>Firmware Libraries</string>
              </property>
@@ -1974,8 +1993,7 @@
                  <enum>QLayout::SetNoConstraint</enum>
                 </property>
                 <item>
-                 <widget class="QLineEdit" name="searchBox">
-                 </widget>
+                 <widget class="QLineEdit" name="searchBox"/>
                 </item>
                 <item>
                  <widget class="QPushButton" name="resetLleList">
@@ -2050,6 +2068,25 @@
              </layout>
             </widget>
            </item>
+		   <item>
+		    <widget class="QGroupBox" name="gb_vulkansched">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Minimum">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="title">
+              <string>Vulkan Queue Scheduler</string>
+             </property>
+             <layout class="QVBoxLayout" name="gb_vksched_layout">
+              <item>
+               <widget class="QComboBox" name="vulkansched">
+               </widget>
+              </item>
+             </layout>
+            </widget>
+		   </item>
            <item>
             <widget class="QGroupBox" name="gb_wakeupDelay">
              <property name="sizePolicy">
@@ -2180,14 +2217,17 @@
             </widget>
            </item>
            <item>
-            <spacer name="verticalSpacer_22">
+            <spacer name="advancedTabSpacerRight">
              <property name="orientation">
               <enum>Qt::Vertical</enum>
              </property>
+             <property name="sizeType">
+              <enum>QSizePolicy::MinimumExpanding</enum>
+             </property>
              <property name="sizeHint" stdset="0">
               <size>
-               <width>0</width>
-               <height>0</height>
+               <width>13</width>
+               <height>13</height>
               </size>
              </property>
             </spacer>
@@ -2243,7 +2283,7 @@
       <attribute name="title">
        <string>Emulator</string>
       </attribute>
-      <layout class="QVBoxLayout" name="emulatorTab_layout">
+      <layout class="QVBoxLayout" name="emulatorTab_layout" stretch="0,1,0">
        <item>
         <layout class="QHBoxLayout" name="emulatorTabLayout" stretch="1,1,1">
          <item>
@@ -2850,6 +2890,64 @@
                </widget>
               </item>
               <item>
+               <widget class="QWidget" name="perf_overlay_framerate_datapoints" native="true">
+                <layout class="QVBoxLayout" name="layout_perf_overlay_framerate_datapoints">
+                 <property name="leftMargin">
+                  <number>0</number>
+                 </property>
+                 <property name="topMargin">
+                  <number>0</number>
+                 </property>
+                 <property name="bottomMargin">
+                  <number>0</number>
+                 </property>
+                 <item>
+                  <widget class="QLabel" name="label_framerate_datapoints">
+                   <property name="text">
+                    <string>Framerate datapoints:</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QSlider" name="slider_framerate_datapoints">
+                   <property name="orientation">
+                    <enum>Qt::Horizontal</enum>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </widget>
+              </item>
+              <item>
+               <widget class="QWidget" name="perf_overlay_frametime_datapoints" native="true">
+                <layout class="QVBoxLayout" name="layout_perf_overlay_frametime_datapoints">
+                 <property name="leftMargin">
+                  <number>0</number>
+                 </property>
+                 <property name="topMargin">
+                  <number>0</number>
+                 </property>
+                 <property name="bottomMargin">
+                  <number>0</number>
+                 </property>
+                 <item>
+                  <widget class="QLabel" name="label_frametime_datapoints">
+                   <property name="text">
+                    <string>Frametime datapoints:</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QSlider" name="slider_frametime_datapoints">
+                   <property name="orientation">
+                    <enum>Qt::Horizontal</enum>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </widget>
+              </item>
+              <item>
                <spacer name="emulatorTabSpacerRight">
                 <property name="orientation">
                  <enum>Qt::Vertical</enum>
@@ -2922,7 +3020,7 @@
       <attribute name="title">
        <string>GUI</string>
       </attribute>
-      <layout class="QVBoxLayout" name="guiTab_layout">
+      <layout class="QVBoxLayout" name="guiTab_layout" stretch="0,1,0">
        <item>
         <layout class="QHBoxLayout" name="guiTabLayout" stretch="1,1,1">
          <item>
@@ -3326,7 +3424,7 @@
       <attribute name="title">
        <string>Debug</string>
       </attribute>
-      <layout class="QVBoxLayout" name="debugTab_layout">
+      <layout class="QVBoxLayout" name="debugTab_layout" stretch="0,1,0">
        <item>
         <layout class="QHBoxLayout" name="debugTabLayout" stretch="1,1,1">
          <item>
@@ -3421,6 +3519,22 @@
               </property>
              </widget>
             </item>
+            <item>
+             <spacer name="verticalSpacerDebugGPU">
+              <property name="orientation">
+               <enum>Qt::Vertical</enum>
+              </property>
+              <property name="sizeType">
+               <enum>QSizePolicy::MinimumExpanding</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>0</width>
+                <height>0</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
            </layout>
           </widget>
          </item>
@@ -3441,6 +3555,13 @@
              <widget class="QCheckBox" name="spuDebug">
               <property name="text">
                <string>SPU Debug</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QCheckBox" name="mfcDebug">
+              <property name="text">
+               <string>MFC Debug</string>
               </property>
              </widget>
             </item>
@@ -3490,6 +3611,9 @@
              <spacer name="verticalSpacerDebugCore">
               <property name="orientation">
                <enum>Qt::Vertical</enum>
+              </property>
+              <property name="sizeType">
+               <enum>QSizePolicy::MinimumExpanding</enum>
               </property>
               <property name="sizeHint" stdset="0">
                <size>
@@ -3554,6 +3678,9 @@
         <spacer name="debugTabSpacer">
          <property name="orientation">
           <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeType">
+          <enum>QSizePolicy::MinimumExpanding</enum>
          </property>
          <property name="sizeHint" stdset="0">
           <size>

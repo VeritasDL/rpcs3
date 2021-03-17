@@ -76,6 +76,8 @@
     <ClCompile Include="Emu\Audio\Pulse\PulseBackend.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="Emu\Cell\Modules\sys_crashdump.cpp" />
+    <ClCompile Include="Emu\Io\Turntable.cpp" />
     <ClCompile Include="Emu\Io\GHLtar.cpp" />
     <ClCompile Include="Emu\Io\Buzz.cpp" />
     <ClCompile Include="Emu\Audio\AudioBackend.cpp" />
@@ -85,10 +87,12 @@
     <ClCompile Include="Emu\Io\pad_config_types.cpp" />
     <ClCompile Include="Emu\localized_string.cpp" />
     <ClCompile Include="Emu\NP\rpcn_config.cpp" />
+    <ClCompile Include="Emu\RSX\Common\texture_cache.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\overlay_osk_panel.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\overlay_utils.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\Shaders\shader_loading_dialog.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\Shaders\shader_loading_dialog_native.cpp" />
+    <ClCompile Include="Emu\RSX\RSXDisAsm.cpp" />
     <ClCompile Include="Emu\system_config_types.cpp" />
     <ClCompile Include="Emu\perf_meter.cpp" />
     <ClCompile Include="Emu\title.cpp" />
@@ -108,9 +112,7 @@
     </ClCompile>
     <ClCompile Include="util\cereal.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-    </ClCompile>
-    <ClCompile Include="util\fixed_typemap.cpp">
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
     </ClCompile>
     <ClCompile Include="..\Utilities\bin_patch.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -145,6 +147,9 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="util\sysinfo.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="util\cpu_stats.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="..\Utilities\Thread.cpp" />
@@ -420,6 +425,7 @@
     <ClCompile Include="Loader\PSF.cpp" />
     <ClCompile Include="Loader\PUP.cpp" />
     <ClCompile Include="Loader\TAR.cpp" />
+    <ClCompile Include="Loader\mself.cpp" />
     <ClCompile Include="Loader\TROPUSR.cpp" />
     <ClCompile Include="Loader\TRP.cpp" />
     <ClCompile Include="rpcs3_version.cpp" />
@@ -446,6 +452,8 @@
     <ClInclude Include="Emu\Cell\Modules\cellRemotePlay.h" />
     <ClInclude Include="Emu\Cell\Modules\cellSsl.h" />
     <ClInclude Include="Emu\Cell\Modules\cellStorage.h" />
+    <ClInclude Include="Emu\Cell\Modules\sys_crashdump.h" />
+    <ClInclude Include="Emu\Io\Turntable.h" />
     <ClInclude Include="Emu\Io\GHLtar.h" />
     <ClInclude Include="Emu\Io\Buzz.h" />
     <ClInclude Include="Emu\Io\interception.h" />
@@ -463,6 +471,7 @@
     <ClInclude Include="Emu\NP\rpcn_config.h" />
     <ClInclude Include="Emu\RSX\Common\ShaderInterpreter.h" />
     <ClInclude Include="Emu\RSX\Common\texture_cache_helpers.h" />
+    <ClInclude Include="Emu\RSX\Common\texture_cache_types.h" />
     <ClInclude Include="Emu\RSX\display.h" />
     <ClInclude Include="Emu\RSX\GSFrameBase.h" />
     <ClInclude Include="Emu\RSX\Overlays\overlay_fonts.h" />
@@ -476,9 +485,11 @@
     <ClInclude Include="Emu\RSX\Overlays\overlay_utils.h" />
     <ClInclude Include="Emu\RSX\Overlays\Shaders\shader_loading_dialog.h" />
     <ClInclude Include="Emu\RSX\Overlays\Shaders\shader_loading_dialog_native.h" />
+    <ClInclude Include="Emu\RSX\RSXDisAsm.h" />
     <ClInclude Include="Emu\title.h" />
     <ClInclude Include="Emu\system_config.h" />
     <ClInclude Include="Emu\system_config_types.h" />
+    <ClInclude Include="Loader\mself.hpp" />
     <ClInclude Include="util\atomic.hpp" />
     <ClInclude Include="util\v128.hpp" />
     <ClInclude Include="util\v128sse.hpp" />
@@ -491,7 +502,7 @@
     <ClInclude Include="..\Utilities\CRC.h" />
     <ClInclude Include="..\Utilities\date_time.h" />
     <ClInclude Include="..\Utilities\geometry.h" />
-    <ClInclude Include="..\Utilities\hash.h" />
+    <ClInclude Include="util\fnv_hash.hpp" />
     <ClInclude Include="..\Utilities\JIT.h" />
     <ClInclude Include="..\Utilities\lockless.h" />
     <ClInclude Include="..\Utilities\mutex.h" />
@@ -504,6 +515,7 @@
     <ClInclude Include="util\slow_mutex.hpp" />
     <ClInclude Include="util\fifo_mutex.hpp" />
     <ClInclude Include="util\logs.hpp" />
+    <ClInclude Include="util\cpu_stats.hpp" />
     <ClInclude Include="..\Utilities\dyn_lib.hpp" />
     <ClInclude Include="..\Utilities\File.h" />
     <ClInclude Include="..\Utilities\Config.h" />

@@ -6,6 +6,8 @@
 
 #include <thread>
 
+#include "util/sysinfo.hpp"
+
 namespace vk
 {
 	// Global list of worker threads
@@ -46,7 +48,7 @@ namespace vk
 				}
 			}
 
-			m_work_queue.wait();
+			thread_ctrl::wait_on(m_work_queue, nullptr);
 		}
 	}
 
@@ -186,7 +188,7 @@ namespace vk
 		if (num_worker_threads == 0)
 		{
 			// Select optimal number of compiler threads
-			const auto hw_threads = std::thread::hardware_concurrency();
+			const auto hw_threads = utils::get_thread_count();
 			if (hw_threads > 12)
 			{
 				num_worker_threads = 6;

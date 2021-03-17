@@ -40,11 +40,11 @@ namespace utils
 #endif
 
 #ifdef MADV_FREE
-	constexpr int c_madv_free = MADV_FREE;
+	[[maybe_unused]] constexpr int c_madv_free = MADV_FREE;
 #elif defined(MADV_DONTNEED)
-	constexpr int c_madv_free = MADV_DONTNEED;
+	[[maybe_unused]] constexpr int c_madv_free = MADV_DONTNEED;
 #else
-	constexpr int c_madv_free = 0;
+	[[maybe_unused]] constexpr int c_madv_free = 0;
 #endif
 
 #ifdef MADV_HUGEPAGE
@@ -120,7 +120,7 @@ namespace utils
 
 		auto ptr = ::mmap(use_addr, size, PROT_NONE, MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0);
 
-		if (ptr == reinterpret_cast<void*>(-1))
+		if (ptr == reinterpret_cast<void*>(UINT64_MAX))
 		{
 			return nullptr;
 		}
@@ -179,7 +179,7 @@ namespace utils
 		ensure(::VirtualFree(pointer, size, MEM_DECOMMIT));
 #else
 		const u64 ptr64 = reinterpret_cast<u64>(pointer);
-		ensure(::mmap(pointer, size, PROT_NONE, MAP_FIXED | MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0) != reinterpret_cast<void*>(-1));
+		ensure(::mmap(pointer, size, PROT_NONE, MAP_FIXED | MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0) != reinterpret_cast<void*>(UINT64_MAX));
 
 		if constexpr (c_madv_no_dump != 0)
 		{
@@ -195,7 +195,7 @@ namespace utils
 		memory_commit(pointer, size, prot);
 #else
 		const u64 ptr64 = reinterpret_cast<u64>(pointer);
-		ensure(::mmap(pointer, size, +prot, MAP_FIXED | MAP_ANON | MAP_PRIVATE, -1, 0) != reinterpret_cast<void*>(-1));
+		ensure(::mmap(pointer, size, +prot, MAP_FIXED | MAP_ANON | MAP_PRIVATE, -1, 0) != reinterpret_cast<void*>(UINT64_MAX));
 
 		if constexpr (c_madv_hugepage != 0)
 		{
@@ -205,7 +205,7 @@ namespace utils
 			}
 		}
 
-		ensure(::madvise(reinterpret_cast<void*>(ptr64 & -4096), size + (ptr64 & 4095), MADV_WILLNEED) != -1);
+		ensure(::madvise(reinterpret_cast<void*>(ptr64 & -4096), size + (ptr64 & 4095), MADV_WILLNEED | c_madv_dump) != -1);
 #endif
 	}
 
@@ -221,12 +221,18 @@ namespace utils
 	void memory_protect(void* pointer, usz size, protection prot)
 	{
 #ifdef _WIN32
+
+		DWORD old;
+		if (::VirtualProtect(pointer, size, +prot, &old))
+		{
+			return;
+		}
+
 		for (u64 addr = reinterpret_cast<u64>(pointer), end = addr + size; addr < end;)
 		{
 			const u64 boundary = (addr + 0x10000) & -0x10000;
 			const u64 block_size = std::min(boundary, end) - addr;
 
-			DWORD old;
 			if (!::VirtualProtect(reinterpret_cast<LPVOID>(addr), block_size, +prot, &old))
 			{
 				fmt::throw_exception("VirtualProtect failed (%p, 0x%x, addr=0x%x, error=%#x)", pointer, size, addr, GetLastError());
@@ -262,7 +268,7 @@ namespace utils
 		m_file = -1;
 
 		// Try to use 2MB pages for 2M-aligned shm
-		if constexpr (c_mfd_huge_2mb)
+		if constexpr (c_mfd_huge_2mb != 0)
 		{
 			if (m_size % 0x200000 == 0 && flags & 2)
 			{
@@ -367,6 +373,25 @@ namespace utils
 
 			return reinterpret_cast<u8*>(result);
 		}
+#endif
+	}
+
+	u8* shm::try_map(void* ptr, protection prot) const
+	{
+		// Non-null pointer shall be specified
+		const auto target = ensure(reinterpret_cast<u8*>(reinterpret_cast<u64>(ptr) & -0x10000));
+
+#ifdef _WIN32
+		return this->map(target, prot);
+#else
+		const auto result = reinterpret_cast<u8*>(::mmap(reinterpret_cast<void*>(target), m_size, +prot, MAP_SHARED, m_file, 0));
+
+		if (result == reinterpret_cast<void*>(UINT64_MAX))
+		{
+			[[unlikely]] return nullptr;
+		}
+
+		return result;
 #endif
 	}
 

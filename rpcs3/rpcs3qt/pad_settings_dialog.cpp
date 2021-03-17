@@ -102,7 +102,7 @@ pad_settings_dialog::pad_settings_dialog(std::shared_ptr<gui_settings> gui_setti
 	connect(ui->chooseHandler, &QComboBox::currentTextChanged, this, &pad_settings_dialog::ChangeInputType);
 
 	// Combobox: Devices
-	connect(ui->chooseDevice, QOverload<int>::of(&QComboBox::currentIndexChanged), [this](int index)
+	connect(ui->chooseDevice, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index)
 	{
 		if (index < 0)
 		{
@@ -119,7 +119,7 @@ pad_settings_dialog::pad_settings_dialog(std::shared_ptr<gui_settings> gui_setti
 	});
 
 	// Combobox: Profiles
-	connect(ui->chooseProfile, &QComboBox::currentTextChanged, [this](const QString& prof)
+	connect(ui->chooseProfile, &QComboBox::currentTextChanged, this, [this](const QString& prof)
 	{
 		if (prof.isEmpty())
 		{
@@ -136,7 +136,7 @@ pad_settings_dialog::pad_settings_dialog(std::shared_ptr<gui_settings> gui_setti
 	});
 
 	// Pushbutton: Add Profile
-	connect(ui->b_addProfile, &QAbstractButton::clicked, [this]()
+	connect(ui->b_addProfile, &QAbstractButton::clicked, this, [this]()
 	{
 		const int i = ui->tabWidget->currentIndex();
 
@@ -175,7 +175,7 @@ pad_settings_dialog::pad_settings_dialog(std::shared_ptr<gui_settings> gui_setti
 
 	ui->buttonBox->button(QDialogButtonBox::Reset)->setText(tr("Filter Noise"));
 
-	connect(ui->buttonBox, &QDialogButtonBox::clicked, [this](QAbstractButton* button)
+	connect(ui->buttonBox, &QDialogButtonBox::clicked, this, [this](QAbstractButton* button)
 	{
 		if (button == ui->buttonBox->button(QDialogButtonBox::Save))
 		{
@@ -304,7 +304,7 @@ void pad_settings_dialog::InitButtons()
 
 	connect(m_pad_buttons, &QButtonGroup::idClicked, this, &pad_settings_dialog::OnPadButtonClicked);
 
-	connect(&m_timer, &QTimer::timeout, [this]()
+	connect(&m_timer, &QTimer::timeout, this, [this]()
 	{
 		if (--m_seconds <= 0)
 		{
@@ -314,7 +314,7 @@ void pad_settings_dialog::InitButtons()
 		m_pad_buttons->button(m_button_id)->setText(tr("[ Waiting %1 ]").arg(m_seconds));
 	});
 
-	connect(ui->chb_vibration_large, &QCheckBox::clicked, [this](bool checked)
+	connect(ui->chb_vibration_large, &QCheckBox::clicked, this, [this](bool checked)
 	{
 		if (!checked)
 		{
@@ -330,7 +330,7 @@ void pad_settings_dialog::InitButtons()
 		});
 	});
 
-	connect(ui->chb_vibration_small, &QCheckBox::clicked, [this](bool checked)
+	connect(ui->chb_vibration_small, &QCheckBox::clicked, this, [this](bool checked)
 	{
 		if (!checked)
 		{
@@ -346,7 +346,7 @@ void pad_settings_dialog::InitButtons()
 		});
 	});
 
-	connect(ui->chb_vibration_switch, &QCheckBox::clicked, [this](bool checked)
+	connect(ui->chb_vibration_switch, &QCheckBox::clicked, this, [this](bool checked)
 	{
 		checked ? SetPadData(m_min_force, m_max_force)
 		        : SetPadData(m_max_force, m_min_force);
@@ -363,22 +363,23 @@ void pad_settings_dialog::InitButtons()
 		});
 	});
 
-	connect(ui->slider_stick_left, &QSlider::valueChanged, [&](int value)
+	connect(ui->slider_stick_left, &QSlider::valueChanged, this, [&](int value)
 	{
 		RepaintPreviewLabel(ui->preview_stick_left, value, ui->slider_stick_left->size().width(), m_lx, m_ly, ui->squircle_left->value(), ui->stick_multi_left->value());
 	});
 
-	connect(ui->slider_stick_right, &QSlider::valueChanged, [&](int value)
+	connect(ui->slider_stick_right, &QSlider::valueChanged, this, [&](int value)
 	{
 		RepaintPreviewLabel(ui->preview_stick_right, value, ui->slider_stick_right->size().width(), m_rx, m_ry, ui->squircle_right->value(), ui->stick_multi_right->value());
 	});
 
 	// Open LED settings
-	connect(ui->b_led_settings, &QPushButton::clicked, [this]()
+	connect(ui->b_led_settings, &QPushButton::clicked, this, [this]()
 	{
 		// Allow LED battery indication while the dialog is open
-		m_handler->SetPadData(m_device_name, 0, 0, m_handler_cfg.colorR, m_handler_cfg.colorG, m_handler_cfg.colorB, static_cast<bool>(m_handler_cfg.led_battery_indicator), m_handler_cfg.led_battery_indicator_brightness);
-		pad_led_settings_dialog dialog(m_handler_cfg.colorR, m_handler_cfg.colorG, m_handler_cfg.colorB, static_cast<bool>(m_handler_cfg.led_low_battery_blink), static_cast<bool>(m_handler_cfg.led_battery_indicator), m_handler_cfg.led_battery_indicator_brightness, this);
+		ensure(m_handler);
+		m_handler->SetPadData(m_device_name, 0, 0, m_handler_cfg.colorR, m_handler_cfg.colorG, m_handler_cfg.colorB, m_handler_cfg.led_battery_indicator.get(), m_handler_cfg.led_battery_indicator_brightness);
+		pad_led_settings_dialog dialog(this, m_handler_cfg.colorR, m_handler_cfg.colorG, m_handler_cfg.colorB, m_handler->has_rgb(), m_handler->has_battery(), m_handler_cfg.led_low_battery_blink.get(), m_handler_cfg.led_battery_indicator.get(), m_handler_cfg.led_battery_indicator_brightness);
 		connect(&dialog, &pad_led_settings_dialog::pass_led_settings, this, &pad_settings_dialog::apply_led_settings);
 		dialog.exec();
 		m_handler->SetPadData(m_device_name, 0, 0, m_handler_cfg.colorR, m_handler_cfg.colorG, m_handler_cfg.colorB, false, m_handler_cfg.led_battery_indicator_brightness);
@@ -411,10 +412,7 @@ void pad_settings_dialog::InitButtons()
 			}
 		}
 
-		if (m_enable_battery)
-		{
-			ui->pb_battery->setValue(battery_level);
-		}
+		ui->pb_battery->setValue(m_enable_battery ? battery_level : 0);
 
 		if (val <= 0)
 		{
@@ -435,14 +433,14 @@ void pad_settings_dialog::InitButtons()
 	const auto& fail_callback = [this](const std::string& pad_name)
 	{
 		SwitchPadInfo(pad_name, false);
+
 		if (m_enable_buttons)
 		{
 			SwitchButtons(false);
 		}
-		if (m_enable_battery)
-		{
-			ui->pb_battery->setValue(0);
-		}
+
+		ui->pb_battery->setValue(0);
+
 		if (m_handler->has_deadzones())
 		{
 			ui->preview_trigger_left->setValue(0);
@@ -462,7 +460,7 @@ void pad_settings_dialog::InitButtons()
 	};
 
 	// Use timer to get button input
-	connect(&m_timer_input, &QTimer::timeout, [this, callback, fail_callback]()
+	connect(&m_timer_input, &QTimer::timeout, this, [this, callback, fail_callback]()
 	{
 		const std::vector<std::string> buttons =
 		{
@@ -475,7 +473,7 @@ void pad_settings_dialog::InitButtons()
 	});
 
 	// Use timer to refresh pad connection status
-	connect(&m_timer_pad_refresh, &QTimer::timeout, [this]()
+	connect(&m_timer_pad_refresh, &QTimer::timeout, this, [this]()
 	{
 		for (int i = 0; i < ui->chooseDevice->count(); i++)
 		{
@@ -494,6 +492,7 @@ void pad_settings_dialog::InitButtons()
 
 void pad_settings_dialog::SetPadData(u32 large_motor, u32 small_motor)
 {
+	ensure(m_handler);
 	const QColor led_color(m_handler_cfg.colorR, m_handler_cfg.colorG, m_handler_cfg.colorB);
 	m_handler->SetPadData(m_device_name, large_motor, small_motor, led_color.red(), led_color.green(), led_color.blue(), static_cast<bool>(m_handler_cfg.led_battery_indicator), m_handler_cfg.led_battery_indicator_brightness);
 }
@@ -501,6 +500,7 @@ void pad_settings_dialog::SetPadData(u32 large_motor, u32 small_motor)
 // Slot to handle the data from a signal in the led settings dialog
 void pad_settings_dialog::apply_led_settings(int colorR, int colorG, int colorB, bool led_low_battery_blink, bool led_battery_indicator, int led_battery_indicator_brightness)
 {
+	ensure(m_handler);
 	m_handler_cfg.colorR.set(colorR);
 	m_handler_cfg.colorG.set(colorG);
 	m_handler_cfg.colorB.set(colorB);
@@ -961,8 +961,6 @@ void pad_settings_dialog::UpdateLabels(bool is_reset)
 		ui->slider_stick_right->setRange(0, m_handler->thumb_max);
 		ui->slider_stick_right->setValue(m_handler_cfg.rstickdeadzone);
 
-		m_handler->SetPadData(m_device_name, 0, 0, m_handler_cfg.colorR, m_handler_cfg.colorG, m_handler_cfg.colorB, false, m_handler_cfg.led_battery_indicator_brightness);
-
 		// Update Mouse Deadzones
 		std::vector<std::string> mouse_dz_range_x = m_handler_cfg.mouse_deadzone_x.to_list();
 		ui->mouse_dz_x->setRange(std::stoi(mouse_dz_range_x.front()), std::stoi(mouse_dz_range_x.back()));
@@ -1122,47 +1120,38 @@ void pad_settings_dialog::OnTabChanged(int index)
 
 std::shared_ptr<PadHandlerBase> pad_settings_dialog::GetHandler(pad_handler type)
 {
-	std::shared_ptr<PadHandlerBase> ret_handler;
-
 	switch (type)
 	{
 	case pad_handler::null:
-		ret_handler = std::make_unique<NullPadHandler>();
-		break;
+		return std::make_unique<NullPadHandler>();
 	case pad_handler::keyboard:
-		ret_handler = std::make_unique<keyboard_pad_handler>();
-		break;
+		return std::make_unique<keyboard_pad_handler>();
 	case pad_handler::ds3:
-		ret_handler = std::make_unique<ds3_pad_handler>();
-		break;
+		return std::make_unique<ds3_pad_handler>();
 	case pad_handler::ds4:
-		ret_handler = std::make_unique<ds4_pad_handler>();
-		break;
+		return std::make_unique<ds4_pad_handler>();
 	case pad_handler::dualsense:
-		ret_handler = std::make_unique<dualsense_pad_handler>();
-		break;
+		return std::make_unique<dualsense_pad_handler>();
 #ifdef _WIN32
 	case pad_handler::xinput:
-		ret_handler = std::make_unique<xinput_pad_handler>();
-		break;
+		return std::make_unique<xinput_pad_handler>();
 	case pad_handler::mm:
-		ret_handler = std::make_unique<mm_joystick_handler>();
-		break;
+		return std::make_unique<mm_joystick_handler>();
 #endif
 #ifdef HAVE_LIBEVDEV
 	case pad_handler::evdev:
-		ret_handler = std::make_unique<evdev_joystick_handler>();
-		break;
+		return std::make_unique<evdev_joystick_handler>();
 #endif
 	}
 
-	return ret_handler;
+	return nullptr;
 }
 
 void pad_settings_dialog::ChangeInputType()
 {
 	bool force_enable = false; // enable configs even with disconnected devices
 	const int player = ui->tabWidget->currentIndex();
+	ensure(player >= 0);
 	const bool is_ldd_pad = GetIsLddPad(player);
 
 	std::string handler;
@@ -1193,6 +1182,8 @@ void pad_settings_dialog::ChangeInputType()
 
 	// Get this player's current handler and it's currently available devices
 	m_handler = GetHandler(g_cfg_input.player[player]->handler);
+	ensure(m_handler);
+	m_handler->set_player(player);
 	const auto device_list = m_handler->ListDevices();
 
 	// Localized tooltips
@@ -1464,6 +1455,11 @@ void pad_settings_dialog::HandleDeviceClassChange(int index)
 		case input::product_type::harmonix_rockband_drum_kit:
 		{
 			ui->chooseProduct->addItem(tr("Rockband", "Harmonix Rockband Drum Kit"), static_cast<int>(product.type));
+			break;
+		}
+		case input::product_type::harmonix_rockband_drum_kit_2:
+		{
+			ui->chooseProduct->addItem(tr("Rockband Pro", "Harmonix Rockband Pro-Drum Kit"), static_cast<int>(product.type));
 			break;
 		}
 		case input::product_type::harmonix_rockband_guitar:
