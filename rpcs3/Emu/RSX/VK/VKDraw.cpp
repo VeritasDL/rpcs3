@@ -71,6 +71,8 @@ void VKGSRender::update_draw_state()
 	m_profiler.start();
 
 	float actual_line_width = rsx::method_registers.line_width();
+	//	vkCmdSetLineWidth(*m_current_command_buffer, actual_line_width * 5);
+	//vkCmdSetLineWidth(*m_current_command_buffer, actual_line_width * 3);
 	vkCmdSetLineWidth(*m_current_command_buffer, actual_line_width);
 
 	if (rsx::method_registers.poly_offset_fill_enabled())

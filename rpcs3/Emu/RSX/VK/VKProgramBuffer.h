@@ -21,6 +21,15 @@ namespace vk
 			void recompile_fragment_program(const RSXFragmentProgram& RSXFP, fragment_program_type& fragmentProgramData, usz ID)
 		{
 			fragmentProgramData.Decompile(RSXFP);
+#if 0
+		if (RSXFP.ucode_length == 0xd0)
+		{
+			//__debugbreak();
+			fs::file patched_shader(R"(D:\Nikos\Reversing\Sly\Renderdoc\sly2_fs_vk.glsl)");
+			const std::string patched_shader_str = patched_shader.to_string();
+			fragmentProgramData.shader.create(glsl::glsl_fragment_program, patched_shader_str);
+		}
+#endif
 			fragmentProgramData.id = static_cast<u32>(ID);
 			fragmentProgramData.Compile();
 		}

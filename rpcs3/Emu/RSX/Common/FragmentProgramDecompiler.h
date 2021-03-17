@@ -146,6 +146,7 @@ class FragmentProgramDecompiler
 
 	std::string main;
 	u32& m_size;
+	u32 m_ins_count = 0;
 	u32 m_const_index = 0;
 	u32 m_offset;
 	u32 m_location = 0;

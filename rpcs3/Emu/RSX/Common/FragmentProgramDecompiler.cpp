@@ -4,6 +4,52 @@
 #include "FragmentProgramDecompiler.h"
 
 #include <algorithm>
+#include <string>
+#include <sstream>
+
+namespace neolib
+{
+	template<class Elem, class Traits>
+	inline void hex_dump(const void* aData, std::size_t aLength, std::basic_ostream<Elem, Traits>& aStream, std::size_t aWidth = 16, ::std::string prepend_line = "")
+	{
+		const char* const start = static_cast<const char*>(aData);
+		const char* const end = start + aLength;
+		const char* line = start;
+		while (line != end)
+		{
+			aStream << prepend_line;
+			aStream.width(4);
+			aStream.fill('0');
+			aStream << std::hex << line - start << " ";
+			std::size_t lineLength = std::min(aWidth, static_cast<std::size_t>(end - line));
+			for (std::size_t pass = 1; pass <= 2; ++pass)
+			{	
+				for (const char* next = line; next != end && next != line + aWidth; ++next)
+				{
+					char ch = *next;
+					switch(pass)
+					{
+					case 1:
+						aStream << (ch < 32 ? '.' : ch);
+						break;
+					case 2:
+						if (next != line)
+							aStream << " ";
+						aStream.width(2);
+						aStream.fill('0');
+						aStream << std::hex << std::uppercase << static_cast<int>(static_cast<unsigned char>(ch));
+						break;
+					}
+				}
+				if (pass == 1 && lineLength != aWidth)
+					aStream << std::string(aWidth - lineLength, ' ');
+				aStream << " ";
+			}
+			aStream << std::endl;
+			line = line + lineLength;
+		}
+	}
+}
 
 FragmentProgramDecompiler::FragmentProgramDecompiler(const RSXFragmentProgram &prog, u32& size)
 	: m_size(size)
@@ -888,6 +934,14 @@ std::string FragmentProgramDecompiler::BuildCode()
 	OS << main << std::endl;
 	insertMainEnd(OS);
 
+	std::stringstream shader_hex_str;
+	neolib::hex_dump((const void*)m_prog.data.data_ptr, m_size, shader_hex_str, 16, "// ");
+
+	OS << "\n// Instruction Count: " << m_ins_count << "\n\n";
+
+	OS << "// Hex dump:\n";
+	OS << shader_hex_str.str();
+
 	return OS.str();
 }
 
@@ -1273,6 +1327,7 @@ std::string FragmentProgramDecompiler::Decompile()
 		}
 
 		m_size += m_offset;
+		m_ins_count += 1;
 
 		if (dst.end) break;
 
