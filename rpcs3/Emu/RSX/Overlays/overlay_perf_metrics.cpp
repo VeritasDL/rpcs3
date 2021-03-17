@@ -10,6 +10,7 @@
 #include <charconv>
 
 #include "util/sysinfo.hpp"
+#include "util/cpu_stats.hpp"
 
 namespace rsx
 {
@@ -165,9 +166,8 @@ namespace rsx
 			}
 
 			// Set body/titles transform
-			if (m_is_initialised && m_force_repaint)
+			if (m_force_repaint)
 			{
-				m_force_repaint = false;
 				reset_body(bottom_margin);
 				reset_titles(bottom_margin);
 			}
@@ -182,10 +182,19 @@ namespace rsx
 				// Position the graphs within the body
 				const u16 graphs_width = m_body.w;
 				const u16 body_left = m_body.x;
-				u16 y_offset = m_body.y + m_body.h + perf_overlay_padding;
+				u16 y_offset = m_body.y;
+
+				if (m_body.h > 0)
+				{
+					y_offset += m_body.h + perf_overlay_padding;
+				}
 
 				if (m_framerate_graph_enabled)
 				{
+					if (m_force_repaint)
+					{
+						m_fps_graph.set_font_size(static_cast<u16>(m_font_size * 0.8));
+					}
 					m_fps_graph.update();
 					m_fps_graph.set_pos(body_left, y_offset);
 					m_fps_graph.set_size(graphs_width, fps_graph_h);
@@ -195,11 +204,17 @@ namespace rsx
 
 				if (m_frametime_graph_enabled)
 				{
+					if (m_force_repaint)
+					{
+						m_frametime_graph.set_font_size(static_cast<u16>(m_font_size * 0.8));
+					}
 					m_frametime_graph.update();
 					m_frametime_graph.set_pos(body_left, y_offset);
 					m_frametime_graph.set_size(graphs_width, frametime_graph_h);
 				}
 			}
+
+			m_force_repaint = false;
 		}
 
 		void perf_metrics_overlay::reset_body(u16 bottom_margin)
@@ -219,7 +234,8 @@ namespace rsx
 
 			switch (m_detail)
 			{
-			case detail_level::minimal:
+			case detail_level::none: [[fallthrough]];
+			case detail_level::minimal: [[fallthrough]];
 			case detail_level::low: m_titles.set_text(""); break;
 			case detail_level::medium: m_titles.set_text(fmt::format("\n\n%s", title1_medium)); break;
 			case detail_level::high: m_titles.set_text(fmt::format("\n\n%s\n\n\n\n\n\n%s", title1_high, title2)); break;
@@ -232,6 +248,12 @@ namespace rsx
 		{
 			reset_transforms();
 			force_next_update();
+
+			if (m_is_initialised)
+			{
+				update();
+				return;
+			}
 
 			m_update_timer.Start();
 			m_frametime_timer.Start();
@@ -253,7 +275,6 @@ namespace rsx
 			{
 				m_fps_graph.set_title("   Framerate");
 				m_fps_graph.set_font_size(static_cast<u16>(m_font_size * 0.8));
-				m_fps_graph.set_count(50);
 				m_fps_graph.set_color(convert_color_code(m_color_body, m_opacity));
 				m_fps_graph.set_guide_interval(10);
 			}
@@ -272,11 +293,28 @@ namespace rsx
 			{
 				m_frametime_graph.set_title("   Frametime");
 				m_frametime_graph.set_font_size(static_cast<u16>(m_font_size * 0.8));
-				m_frametime_graph.set_count(170);
 				m_frametime_graph.set_color(convert_color_code(m_color_body, m_opacity));
 				m_frametime_graph.set_guide_interval(8);
 			}
 
+			m_force_repaint = true;
+		}
+
+		void perf_metrics_overlay::set_framerate_datapoint_count(u32 datapoint_count)
+		{
+			if (m_fps_graph.get_datapoint_count() == datapoint_count)
+				return;
+
+			m_fps_graph.set_count(datapoint_count);
+			m_force_repaint = true;
+		}
+
+		void perf_metrics_overlay::set_frametime_datapoint_count(u32 datapoint_count)
+		{
+			if (m_frametime_graph.get_datapoint_count() == datapoint_count)
+				return;
+
+			m_frametime_graph.set_count(datapoint_count);
 			m_force_repaint = true;
 		}
 
@@ -382,9 +420,10 @@ namespace rsx
 
 			if (m_is_initialised)
 			{
-				if (m_frametime_graph_enabled)
+				if (m_frametime_graph_enabled && !m_force_update)
 				{
 					const auto elapsed_frame = m_frametime_timer.GetElapsedTimeInMilliSec();
+					m_frametime_timer.Start();
 					m_frametime_graph.record_datapoint(static_cast<float>(elapsed_frame));
 				}
 
@@ -401,98 +440,88 @@ namespace rsx
 
 			if (elapsed_update >= m_update_interval || m_force_update)
 			{
-				if (!m_force_update)
+				// 1. Fetch/calculate metrics we'll need
+				if (!m_is_initialised || !m_force_update)
 				{
 					m_update_timer.Start();
-				}
 
-				f32 fps{0};
-				f32 frametime{0};
+					auto& rsx_thread = g_fxo->get<rsx::thread>();
 
-				u64 ppu_cycles{0};
-				u64 spu_cycles{0};
-				u64 rsx_cycles{0};
-				u64 total_cycles{0};
-
-				u32 ppus{0};
-				u32 spus{0};
-
-				f32 cpu_usage{-1.f};
-				u32 total_threads{0};
-
-				f32 ppu_usage{0};
-				f32 spu_usage{0};
-				f32 rsx_usage{0};
-				u32 rsx_load{0};
-
-				const auto rsx_thread = g_fxo->get<rsx::thread>();
-
-				std::string perf_text;
-
-				// 1. Fetch/calculate metrics we'll need
-				switch (m_detail)
-				{
-				case detail_level::high:
-				{
-					frametime = m_force_update ? 0.f : std::max(0.f, static_cast<float>(elapsed_update / m_frames));
-
-					rsx_load = rsx_thread->get_load();
-
-					total_threads = CPUStats::get_thread_count();
-
-					[[fallthrough]];
-				}
-				case detail_level::medium:
-				{
-					ppus = idm::select<named_thread<ppu_thread>>([&ppu_cycles](u32, named_thread<ppu_thread>& ppu)
+					switch (m_detail)
 					{
-						ppu_cycles += thread_ctrl::get_cycles(ppu);
-					});
-
-					spus = idm::select<named_thread<spu_thread>>([&spu_cycles](u32, named_thread<spu_thread>& spu)
+					case detail_level::high:
 					{
-						spu_cycles += thread_ctrl::get_cycles(spu);
-					});
+						m_frametime = std::max(0.f, static_cast<float>(elapsed_update / m_frames));
 
-					rsx_cycles += rsx_thread->get_cycles();
+						m_rsx_load = rsx_thread.get_load();
 
-					total_cycles = std::max<u64>(1, ppu_cycles + spu_cycles + rsx_cycles);
-					cpu_usage = static_cast<f32>(m_cpu_stats.get_usage());
+						m_total_threads = utils::cpu_stats::get_thread_count();
 
-					ppu_usage = std::clamp(cpu_usage * ppu_cycles / total_cycles, 0.f, 100.f);
-					spu_usage = std::clamp(cpu_usage * spu_cycles / total_cycles, 0.f, 100.f);
-					rsx_usage = std::clamp(cpu_usage * rsx_cycles / total_cycles, 0.f, 100.f);
+						[[fallthrough]];
+					}
+					case detail_level::medium:
+					{
+						m_ppus = idm::select<named_thread<ppu_thread>>([this](u32, named_thread<ppu_thread>& ppu)
+						{
+							m_ppu_cycles += thread_ctrl::get_cycles(ppu);
+						});
 
-					[[fallthrough]];
-				}
-				case detail_level::low:
-				{
-					if (cpu_usage < 0.)
-						cpu_usage = static_cast<f32>(m_cpu_stats.get_usage());
+						m_spus = idm::select<named_thread<spu_thread>>([this](u32, named_thread<spu_thread>& spu)
+						{
+							m_spu_cycles += thread_ctrl::get_cycles(spu);
+						});
 
-					[[fallthrough]];
-				}
-				case detail_level::minimal:
-				{
-					fps = m_force_update ? 0.f : std::max(0.f, static_cast<f32>(m_frames / (elapsed_update / 1000)));
-					if (m_is_initialised && m_framerate_graph_enabled)
-						m_fps_graph.record_datapoint(fps);
-				}
+						m_rsx_cycles += rsx_thread.get_cycles();
+
+						m_total_cycles = std::max<u64>(1, m_ppu_cycles + m_spu_cycles + m_rsx_cycles);
+						m_cpu_usage    = static_cast<f32>(m_cpu_stats.get_usage());
+
+						m_ppu_usage = std::clamp(m_cpu_usage * m_ppu_cycles / m_total_cycles, 0.f, 100.f);
+						m_spu_usage = std::clamp(m_cpu_usage * m_spu_cycles / m_total_cycles, 0.f, 100.f);
+						m_rsx_usage = std::clamp(m_cpu_usage * m_rsx_cycles / m_total_cycles, 0.f, 100.f);
+
+						[[fallthrough]];
+					}
+					case detail_level::low:
+					{
+						if (m_detail == detail_level::low) // otherwise already acquired in medium
+							m_cpu_usage = static_cast<f32>(m_cpu_stats.get_usage());
+
+						[[fallthrough]];
+					}
+					case detail_level::minimal:
+					{
+						[[fallthrough]];
+					}
+					case detail_level::none:
+					{
+						m_fps = std::max(0.f, static_cast<f32>(m_frames / (elapsed_update / 1000)));
+						if (m_is_initialised && m_framerate_graph_enabled)
+							m_fps_graph.record_datapoint(m_fps);
+						break;
+					}
+					}
 				}
 
 				// 2. Format output string
+				std::string perf_text;
+
 				switch (m_detail)
 				{
+				case detail_level::none:
+				{
+					break;
+				}
 				case detail_level::minimal:
 				{
-					perf_text += fmt::format("FPS : %05.2f", fps);
+					perf_text += fmt::format("FPS : %05.2f", m_fps);
 					break;
 				}
 				case detail_level::low:
 				{
 					perf_text += fmt::format("FPS : %05.2f\n"
 					                         "CPU : %04.1f %%",
-					    fps, cpu_usage);
+					    m_fps, m_cpu_usage);
 					break;
 				}
 				case detail_level::medium:
@@ -503,7 +532,7 @@ namespace rsx
 					                         " SPU   : %04.1f %%\n"
 					                         " RSX   : %04.1f %%\n"
 					                         " Total : %04.1f %%",
-					    fps, std::string(title1_medium.size(), ' '), ppu_usage, spu_usage, rsx_usage, cpu_usage, std::string(title2.size(), ' '));
+					    m_fps, std::string(title1_medium.size(), ' '), m_ppu_usage, m_spu_usage, m_rsx_usage, m_cpu_usage, std::string(title2.size(), ' '));
 					break;
 				}
 				case detail_level::high:
@@ -516,14 +545,22 @@ namespace rsx
 					                         " Total : %04.1f %% (%2u)\n\n"
 					                         "%s\n"
 					                         " RSX   : %02u %%",
-					    fps, frametime, std::string(title1_high.size(), ' '), ppu_usage, ppus, spu_usage, spus, rsx_usage, cpu_usage, total_threads, std::string(title2.size(), ' '), rsx_load);
+					    m_fps, m_frametime, std::string(title1_high.size(), ' '), m_ppu_usage, m_ppus, m_spu_usage, m_spus, m_rsx_usage, m_cpu_usage, m_total_threads, std::string(title2.size(), ' '), m_rsx_load);
 					break;
 				}
 				}
 
 				m_body.set_text(perf_text);
 
-				if (m_body.auto_resize())
+				if (perf_text.empty())
+				{
+					if (m_body.w > 0 || m_body.h > 0)
+					{
+						m_body.set_size(0, 0);
+						reset_transforms();
+					}
+				}
+				else if (m_body.auto_resize())
 				{
 					reset_transforms();
 				}
@@ -549,13 +586,17 @@ namespace rsx
 			if (m_frametime_graph_enabled)
 			{
 				m_frametime_graph.update();
-				m_frametime_timer.Start();
 			}
 		}
 
 		compiled_resource perf_metrics_overlay::get_compiled()
 		{
-			auto compiled_resources = m_body.get_compiled();
+			if (!visible)
+			{
+				return {};
+			}
+
+			compiled_resource compiled_resources = m_body.get_compiled();
 
 			compiled_resources.add(m_titles.get_compiled());
 
@@ -615,7 +656,20 @@ namespace rsx
 		void graph::set_count(u32 datapoint_count)
 		{
 			m_datapoint_count = datapoint_count;
-			m_datapoints.resize(datapoint_count, 0);
+
+			if (m_datapoints.empty())
+			{
+				m_datapoints.resize(m_datapoint_count, -1.0f);
+			}
+			else if (m_datapoints.empty() || m_datapoint_count < m_datapoints.size())
+			{
+				std::copy(m_datapoints.begin() + m_datapoints.size() - m_datapoint_count, m_datapoints.end(), m_datapoints.begin());
+				m_datapoints.resize(m_datapoint_count);
+			}
+			else
+			{
+				m_datapoints.insert(m_datapoints.begin(), m_datapoint_count - m_datapoints.size(), -1.0f);
+			}
 		}
 
 		void graph::set_color(color4f color)
@@ -633,17 +687,37 @@ namespace rsx
 			return h + m_label.h + m_label.padding_top + m_label.padding_bottom;
 		}
 
+		u32 graph::get_datapoint_count() const
+		{
+			return m_datapoint_count;
+		}
+
 		void graph::record_datapoint(f32 datapoint)
 		{
+			ensure(datapoint >= 0.0f);
+
 			// std::dequeue is only faster for large sizes, so just use a std::vector and resize once in while
 
 			// Record datapoint
 			m_datapoints.push_back(datapoint);
 
 			// Calculate new min/max
+			m_min = std::numeric_limits<float>::max();
+			m_max = 0.0f;
+
 			// Make sure min/max reflects the data being displayed, not the entire datapoints vector
-			m_min = *std::min_element(m_datapoints.end() - m_datapoint_count, m_datapoints.end());
-			m_max = *std::max_element(m_datapoints.end() - m_datapoint_count, m_datapoints.end());
+			for (usz i = m_datapoints.size() - m_datapoint_count; i < m_datapoints.size(); i++)
+			{
+				const f32& dp = m_datapoints[i];
+
+				if (dp < 0) continue; // Skip initial negative values. They don't count.
+
+				m_min = std::min(m_min, dp);
+				m_max = std::max(m_max, dp);
+			}
+
+			// Sanitize min value
+			m_min = std::min(m_min, m_max);
 
 			// Cull vector when it gets large
 			if (m_datapoints.size() > m_datapoint_count * 16ull)
@@ -670,10 +744,10 @@ namespace rsx
 			refresh();
 			overlay_element::get_compiled();
 
-			const f32 normalize_factor = f32(h) / m_max;
+			const f32 normalize_factor = f32(h) / (m_max != 0.0f ? m_max : 1.0f);
 
 			// Don't show guide lines if they'd be more dense than 1 guide line every 3 pixels
-			const bool guides_too_dense = (m_max / m_guide_interval) > (h / 3);
+			const bool guides_too_dense = (m_max / m_guide_interval) > (h / 3.0f);
 
 			if (m_guide_interval > 0 && !guides_too_dense)
 			{
@@ -701,13 +775,18 @@ namespace rsx
 
 			auto& verts_graph = compiled_resources.draw_commands.back().verts;
 
-			const f32 x_stride = w * 1.f / m_datapoint_count;
-			const u32 tail_index_offset = ::size32(m_datapoints) - m_datapoint_count;
+			f32 x_stride = w;
+			if (m_datapoint_count > 2)
+			{
+				x_stride /= (m_datapoint_count - 1);
+			}
+
+			const usz tail_index_offset = m_datapoints.size() - m_datapoint_count;
 
 			for (u32 i = 0; i < m_datapoint_count; ++i)
 			{
 				const f32 x_line = x + i * x_stride;
-				const f32 y_line = y + h - (m_datapoints[tail_index_offset + i] * normalize_factor);
+				const f32 y_line = y + h - (std::max(0.0f, m_datapoints[i + tail_index_offset]) * normalize_factor);
 				verts_graph.emplace_back(x_line, y_line);
 			}
 
@@ -721,10 +800,10 @@ namespace rsx
 			if (!g_cfg.misc.use_native_interface)
 				return;
 
-			if (auto manager = g_fxo->get<rsx::overlays::display_manager>())
+			if (auto& manager = g_fxo->get<rsx::overlays::display_manager>(); g_fxo->is_init<rsx::overlays::display_manager>())
 			{
 				auto& perf_settings = g_cfg.video.perf_overlay;
-				auto perf_overlay = manager->get<rsx::overlays::perf_metrics_overlay>();
+				auto perf_overlay = manager.get<rsx::overlays::perf_metrics_overlay>();
 
 				if (perf_settings.perf_overlay_enabled)
 				{
@@ -732,10 +811,10 @@ namespace rsx
 
 					if (!existed)
 					{
-						perf_overlay = manager->create<rsx::overlays::perf_metrics_overlay>();
+						perf_overlay = manager.create<rsx::overlays::perf_metrics_overlay>();
 					}
 
-					std::scoped_lock lock(*manager);
+					std::lock_guard lock(manager);
 
 					perf_overlay->set_detail_level(perf_settings.level);
 					perf_overlay->set_position(perf_settings.position);
@@ -746,17 +825,15 @@ namespace rsx
 					perf_overlay->set_opacity(perf_settings.opacity / 100.f);
 					perf_overlay->set_body_colors(perf_settings.color_body, perf_settings.background_body);
 					perf_overlay->set_title_colors(perf_settings.color_title, perf_settings.background_title);
+					perf_overlay->set_framerate_datapoint_count(perf_settings.framerate_datapoint_count);
+					perf_overlay->set_frametime_datapoint_count(perf_settings.frametime_datapoint_count);
 					perf_overlay->set_framerate_graph_enabled(perf_settings.framerate_graph_enabled.get());
 					perf_overlay->set_frametime_graph_enabled(perf_settings.frametime_graph_enabled.get());
-
-					if (!existed)
-					{
-						perf_overlay->init();
-					}
+					perf_overlay->init();
 				}
 				else if (perf_overlay)
 				{
-					manager->remove<rsx::overlays::perf_metrics_overlay>();
+					manager.remove<rsx::overlays::perf_metrics_overlay>();
 				}
 			}
 		}

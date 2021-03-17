@@ -7,7 +7,9 @@ const ppu_decoder<PPUDisAsm> s_ppu_disasm;
 u32 PPUDisAsm::disasm(u32 pc)
 {
 	dump_pc = pc;
-	m_op = *reinterpret_cast<const atomic_be_t<u32>*>(m_offset + pc);
+	be_t<u32> op{};
+	std::memcpy(&op, m_offset + pc, 4);
+	m_op = op;
 	(this->*(s_ppu_disasm.decode(m_op)))({ m_op });
 	return 4;
 }
@@ -935,7 +937,7 @@ void PPUDisAsm::BC(ppu_opcode_t op)
 	const u32 aa = op.aa;
 	const u32 lk = op.lk;
 
-	if (m_mode == CPUDisAsm_CompilerElfMode)
+	if (m_mode == cpu_disasm_mode::compiler_elf)
 	{
 		Write(fmt::format("bc 0x%x, 0x%x, 0x%x, %d, %d", bo, bi, bd, aa, lk));
 		return;
@@ -995,7 +997,7 @@ void PPUDisAsm::B(ppu_opcode_t op)
 	const u32 aa = op.aa;
 	const u32 lk = op.lk;
 
-	if (m_mode == CPUDisAsm_CompilerElfMode)
+	if (m_mode == cpu_disasm_mode::compiler_elf)
 	{
 		Write(fmt::format("b 0x%x, %d, %d", li, aa, lk));
 		return;
@@ -1076,7 +1078,7 @@ void PPUDisAsm::CRANDC(ppu_opcode_t op)
 	DisAsm_BI3("crandc", op.crbd, op.crba, op.crbb);
 }
 
-void PPUDisAsm::ISYNC(ppu_opcode_t op)
+void PPUDisAsm::ISYNC(ppu_opcode_t)
 {
 	Write("isync");
 }
@@ -1938,7 +1940,7 @@ void PPUDisAsm::LVRXL(ppu_opcode_t op)
 	DisAsm_V1_R2("lvrxl", op.vd, op.ra, op.rb);
 }
 
-void PPUDisAsm::DSS(ppu_opcode_t op)
+void PPUDisAsm::DSS(ppu_opcode_t)
 {
 	Write("dss()");
 }
@@ -1953,7 +1955,7 @@ void PPUDisAsm::SRADI(ppu_opcode_t op)
 	DisAsm_R2_INT1_RC("sradi", op.ra, op.rs, op.sh64, op.rc);
 }
 
-void PPUDisAsm::EIEIO(ppu_opcode_t op)
+void PPUDisAsm::EIEIO(ppu_opcode_t)
 {
 	Write("eieio");
 }
@@ -2345,7 +2347,7 @@ void PPUDisAsm::FCFID(ppu_opcode_t op)
 
 extern std::vector<std::string> g_ppu_function_names;
 
-void PPUDisAsm::UNK(ppu_opcode_t op)
+void PPUDisAsm::UNK(ppu_opcode_t)
 {
 	if (ppu_function_manager::addr)
 	{

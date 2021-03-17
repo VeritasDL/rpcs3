@@ -9,7 +9,14 @@
 #include "Emu/Cell/lv2/sys_fs.h"
 #include "cellJpgDec.h"
 
+#include "util/asm.hpp"
+
 LOG_CHANNEL(cellJpgDec);
+
+// Temporarily
+#ifndef _MSC_VER
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#endif
 
 template <>
 void fmt_class_string<CellJpgDecError>::format(std::string& out, u64 arg)
@@ -141,8 +148,8 @@ error_code cellJpgDecReadHeader(u32 mainHandle, u32 subHandle, vm::ptr<CellJpgDe
 	}
 	}
 
-	if (*reinterpret_cast<le_t<u32>*>(buffer.get()) != 0xE0FFD8FF || // Error: Not a valid SOI header
-		*reinterpret_cast<u32*>(buffer.get() + 6) != "JFIF"_u32)   // Error: Not a valid JFIF string
+	if (*utils::bless<le_t<u32>>(buffer.get() + 0) != 0xE0FFD8FF || // Error: Not a valid SOI header
+		*utils::bless<u32>(buffer.get() + 6) != "JFIF"_u32)   // Error: Not a valid JFIF string
 	{
 		return CELL_JPGDEC_ERROR_HEADER;
 	}

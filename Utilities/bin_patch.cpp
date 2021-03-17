@@ -44,9 +44,12 @@ void fmt_class_string<patch_type>::format(std::string& out, u64 arg)
 		case patch_type::bef64: return "bef64";
 		case patch_type::be16: return "be16";
 		case patch_type::be32: return "be32";
+		case patch_type::bd32: return "bd32";
 		case patch_type::be64: return "be64";
+		case patch_type::bd64: return "bd64";
 		case patch_type::lef32: return "lef32";
 		case patch_type::lef64: return "lef64";
+		case patch_type::utf8: return "utf8";
 		}
 
 		return unknown;
@@ -427,6 +430,10 @@ bool patch_engine::add_patch_data(YAML::Node node, patch_info& info, u32 modifie
 
 	switch (p_data.type)
 	{
+	case patch_type::utf8:
+	{
+		break;
+	}
 	case patch_type::bef32:
 	case patch_type::lef32:
 	case patch_type::bef64:
@@ -505,37 +512,25 @@ void patch_engine::append_title_patches(const std::string& title_id)
 	load(m_map, get_patches_path() + title_id + "_patch.yml");
 }
 
-usz patch_engine::apply(const std::string& name, u8* dst)
+static std::basic_string<u32> apply_modification(const patch_engine::patch_info& patch, u8* dst, u32 filesz, u32 min_addr)
 {
-	return apply_patch<false>(name, dst, 0, 0);
-}
-
-usz patch_engine::apply_with_ls_check(const std::string& name, u8* dst, u32 filesz, u32 ls_addr)
-{
-	return apply_patch<true>(name, dst, filesz, ls_addr);
-}
-
-template <bool check_local_storage>
-static usz apply_modification(const patch_engine::patch_info& patch, u8* dst, u32 filesz, u32 ls_addr)
-{
-	usz applied = 0;
+	std::basic_string<u32> applied;
 
 	for (const auto& p : patch.data_list)
 	{
 		u32 offset = p.offset;
 
-		if constexpr (check_local_storage)
+		if (offset < min_addr || offset - min_addr >= filesz)
 		{
-			if (offset < ls_addr || offset >= (ls_addr + filesz))
-			{
-				// This patch is out of range for this segment
-				continue;
-			}
-
-			offset -= ls_addr;
+			// This patch is out of range for this segment
+			continue;
 		}
 
+		offset -= min_addr;
+
 		auto ptr = dst + offset;
+
+		u32 resval = -1;
 
 		switch (p.type)
 		{
@@ -552,71 +547,108 @@ static usz apply_modification(const patch_engine::patch_info& patch, u8* dst, u3
 		}
 		case patch_type::le16:
 		{
-			*reinterpret_cast<le_t<u16, 1>*>(ptr) = static_cast<u16>(p.value.long_value);
+			le_t<u16> val = static_cast<u16>(p.value.long_value);
+			std::memcpy(ptr, &val, sizeof(val));
 			break;
 		}
 		case patch_type::le32:
 		{
-			*reinterpret_cast<le_t<u32, 1>*>(ptr) = static_cast<u32>(p.value.long_value);
+			le_t<u32> val = static_cast<u32>(p.value.long_value);
+			std::memcpy(ptr, &val, sizeof(val));
 			break;
 		}
 		case patch_type::lef32:
 		{
-			*reinterpret_cast<le_t<u32, 1>*>(ptr) = std::bit_cast<u32, f32>(static_cast<f32>(p.value.double_value));
+			le_t<f32> val = static_cast<f32>(p.value.double_value);
+			std::memcpy(ptr, &val, sizeof(val));
 			break;
 		}
 		case patch_type::le64:
 		{
-			*reinterpret_cast<le_t<u64, 1>*>(ptr) = static_cast<u64>(p.value.long_value);
+			le_t<u64> val = static_cast<u64>(p.value.long_value);
+			std::memcpy(ptr, &val, sizeof(val));
 			break;
 		}
 		case patch_type::lef64:
 		{
-			*reinterpret_cast<le_t<u64, 1>*>(ptr) = std::bit_cast<u64, f64>(p.value.double_value);
+			le_t<f64> val = p.value.double_value;
+			std::memcpy(ptr, &val, sizeof(val));
 			break;
 		}
 		case patch_type::be16:
 		{
-			*reinterpret_cast<be_t<u16, 1>*>(ptr) = static_cast<u16>(p.value.long_value);
+			be_t<u16> val = static_cast<u16>(p.value.long_value);
+			std::memcpy(ptr, &val, sizeof(val));
+			break;
+		}
+		case patch_type::bd32:
+		{
+			be_t<u32> val = static_cast<u32>(p.value.long_value);
+			std::memcpy(ptr, &val, sizeof(val));
 			break;
 		}
 		case patch_type::be32:
 		{
-			*reinterpret_cast<be_t<u32, 1>*>(ptr) = static_cast<u32>(p.value.long_value);
+			be_t<u32> val = static_cast<u32>(p.value.long_value);
+			std::memcpy(ptr, &val, sizeof(val));
+			if (offset % 4 == 0)
+				resval = offset;
 			break;
 		}
 		case patch_type::bef32:
 		{
-			*reinterpret_cast<be_t<u32, 1>*>(ptr) = std::bit_cast<u32, f32>(static_cast<f32>(p.value.double_value));
+			be_t<f32> val = static_cast<f32>(p.value.double_value);
+			std::memcpy(ptr, &val, sizeof(val));
+			break;
+		}
+		case patch_type::bd64:
+		{
+			be_t<u64> val = static_cast<u64>(p.value.long_value);
+			std::memcpy(ptr, &val, sizeof(val));
 			break;
 		}
 		case patch_type::be64:
 		{
-			*reinterpret_cast<be_t<u64, 1>*>(ptr) = static_cast<u64>(p.value.long_value);
+			be_t<u64> val = static_cast<u64>(p.value.long_value);
+			std::memcpy(ptr, &val, sizeof(val));
+
+			if (offset % 4)
+			{
+				break;
+			}
+
+			resval = offset;
+			applied.push_back((offset + 7) & -4); // Two 32-bit locations
 			break;
 		}
 		case patch_type::bef64:
 		{
-			*reinterpret_cast<be_t<u64, 1>*>(ptr) = std::bit_cast<u64, f64>(p.value.double_value);
+			be_t<f64> val = p.value.double_value;
+			std::memcpy(ptr, &val, sizeof(val));
+			break;
+		}
+		case patch_type::utf8:
+		{
+			std::memcpy(ptr, p.original_value.data(), p.original_value.size());
 			break;
 		}
 		}
 
-		++applied;
+		// Possibly an executable instruction
+		applied.push_back(resval);
 	}
 
 	return applied;
 }
 
-template <bool check_local_storage>
-usz patch_engine::apply_patch(const std::string& name, u8* dst, u32 filesz, u32 ls_addr)
+std::basic_string<u32> patch_engine::apply(const std::string& name, u8* dst, u32 filesz, u32 min_addr)
 {
 	if (m_map.find(name) == m_map.cend())
 	{
-		return 0;
+		return {};
 	}
 
-	usz applied_total = 0;
+	std::basic_string<u32> applied_total;
 	const auto& container = m_map.at(name);
 	const auto serial = Emu.GetTitleID();
 	const auto app_version = Emu.GetAppVersion();
@@ -714,10 +746,11 @@ usz patch_engine::apply_patch(const std::string& name, u8* dst, u32 filesz, u32 
 			m_applied_groups.insert(patch.patch_group);
 		}
 
-		const usz applied = apply_modification<check_local_storage>(patch, dst, filesz, ls_addr);
+		auto applied = apply_modification(patch, dst, filesz, min_addr);
+
 		applied_total += applied;
 
-		patch_log.success("Applied patch (hash='%s', description='%s', author='%s', patch_version='%s', file_version='%s') (<- %d)", patch.hash, patch.description, patch.author, patch.patch_version, patch.version, applied);
+		patch_log.success("Applied patch (hash='%s', description='%s', author='%s', patch_version='%s', file_version='%s') (<- %u)", patch.hash, patch.description, patch.author, patch.patch_version, patch.version, applied.size());
 	}
 
 	return applied_total;

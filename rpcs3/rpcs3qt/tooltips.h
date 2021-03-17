@@ -19,8 +19,8 @@ public:
 	{
 		// advanced
 
-		const QString lle_list                     = tr("These libraries are LLE'd by default (lower list), selection will switch to HLE.\nLLE - \"Low Level Emulated\", function code inside the selected SPRX file will be used for exported firmware functions.\nHLE - \"High Level Emulated\", alternative emulator code will be used instead for exported firmware functions.\nIf choosen wrongly, games will not work! If unsure, leave both lists' selection empty.");
-		const QString hle_list                     = tr("These libraries are HLE'd by default (upper list), selection will switch to LLE.\nLLE - \"Low Level Emulated\", function code inside the selected SPRX file will be used for exported firmware functions.\nHLE - \"High Level Emulated\", alternative emulator code will be used instead for exported firmware functions.\nIf choosen wrongly, games will not work! If unsure, leave both lists' selection empty.");
+		const QString lle_list                     = tr("These libraries are LLE'd by default (lower list), selection will switch to HLE.\nLLE - \"Low Level Emulated\", function code inside the selected SPRX file will be used for exported firmware functions.\nHLE - \"High Level Emulated\", alternative emulator code will be used instead for exported firmware functions.\nIf choosen wrongly, games will not work! If unsure, leave both lists empty. HLEing all SPRX allows to boot without firmware installed. (experimental)");
+		const QString hle_list                     = tr("These libraries are HLE'd by default (upper list), selection will switch to LLE.\nLLE - \"Low Level Emulated\", function code inside the selected SPRX file will be used for exported firmware functions.\nHLE - \"High Level Emulated\", alternative emulator code will be used instead for exported firmware functions.\nIf choosen wrongly, games will not work! If unsure, leave both lists empty. HLEing all SPRX allows to boot without firmware installed. (experimental)");
 		const QString lib_default_hle              = tr("Select to LLE. (HLE by default)");
 		const QString lib_default_lle              = tr("Select to HLE. (LLE by default)");
 
@@ -37,6 +37,7 @@ public:
 		const QString clocks_scale                 = tr("Changes the scale of emulated system time.\nAffects software which uses system time to calculate things such as dynamic timesteps.");
 		const QString wake_up_delay                = tr("Try fiddling with this setting when encountering unstable games. The higher value, the better stability it may provide.\nIncrements/Decrements for each test should be around 100μs to 200μs until finding the best value for optimal stability.\nValues above 1000μs may cause noticeable performance penalties, use with caution.");
 		const QString disabled_from_global         = tr("Do not change this setting globally.\nRight-click the game in game list and choose \"Configure\" instead.");
+		const QString vulkan_async_scheduler       = tr("Determines how to schedule GPU async compute jobs when using asynchronous streaming.\nUse 'Host' mode for more spec compliant behavior at the cost of CPU overhead.\nUse 'Device' to let your driver handle this. Beware that 'device' mode technically violates official spec but is the superior option.");
 
 		// audio
 
@@ -74,6 +75,7 @@ public:
 
 		const QString ppu_debug                    = tr("Creates PPU logs.\nOnly useful to developers.\nNever use this.");
 		const QString spu_debug                    = tr("Creates SPU logs.\nOnly useful to developers.\nNever use this.");
+		const QString mfc_debug                    = tr("Creates MFC logs.\nOnly useful to developers.\nNever use this.");
 		const QString set_daz_and_ftz              = tr("Sets special MXCSR flags to debug errors in SSE operations.\nOnly used in PPU thread when it's not precise.\nOnly useful to developers.\nNever use this.");
 		const QString accurate_getllar             = tr("Accurately processes SPU MFC_GETLLAR operation.");
 		const QString accurate_spu_dma             = tr("Accurately processes SPU DMA operations.");
@@ -118,6 +120,8 @@ public:
 		const QString perf_overlay_enabled                 = tr("Enables or disables the performance overlay.");
 		const QString perf_overlay_framerate_graph_enabled = tr("Enables or disables the framerate graph.");
 		const QString perf_overlay_frametime_graph_enabled = tr("Enables or disables the frametime graph.");
+		const QString perf_overlay_framerate_datapoints    = tr("Sets the amount of datapoints used in the framerate graph.");
+		const QString perf_overlay_frametime_datapoints    = tr("Sets the amount of datapoints used in the frametime graph.");
 		const QString perf_overlay_position                = tr("Sets the on-screen position (quadrant) of the performance overlay.");
 		const QString perf_overlay_detail_level            = tr("Controls the amount of information displayed on the performance overlay.");
 		const QString perf_overlay_update_interval         = tr("Sets the time interval in which the performance overlay is being updated (measured in milliseconds).");
@@ -156,6 +160,8 @@ public:
 		const QString shader_interpreter_only         = tr("All rendering is handled by the interpreter with no attempt to compile native shaders.\nThis mode is very slow and experimental.");
 		const QString shader_compiler_threads         = tr("Number of threads to use for the shader compiler backend.\nOnly has an impact when shader mode is set to one of the asynchronous modes.");
 
+		const QString async_texture_streaming         = tr("Stream textures to GPU in parallel with 3D rendering.\nCan improve performance on more powerful GPUs that have spare headroom.\nOnly works with Vulkan renderer.");
+
 		// gui
 
 		const QString log_limit          = tr("Sets the maximum amount of blocks that the log can display.\nThis usually equals the number of lines.\nSet 0 in order to remove the limit.");
@@ -181,6 +187,7 @@ public:
 		const QString camera            = tr("Camera support is not implemented, leave this on null.");
 		const QString camera_type       = tr("Camera support is not implemented, leave this on unknown.");
 		const QString move              = tr("PlayStation Move support.\nFake: Experimental! This maps Move controls to DS3 controller mappings.\nMouse: Emulate PSMove with Mouse handler.");
+		const QString buzz              = tr("Buzz! support.\nSelect 1 or 2 controllers if the game requires Buzz! controllers and you don't have real controllers.\nSelect Null if the game has support for DualShock or if you have real Buzz! controllers.");
 
 		// network
 
@@ -196,7 +203,7 @@ public:
 		const QString keyboard_type           = tr("Sets the used keyboard layout.\nCurrently only US, Japanese and German layouts are fully supported at this moment.");
 		const QString enter_button_assignment = tr("The button used for enter/accept/confirm in system dialogs.\nChange this to use the Circle button instead, which is the default configuration on Japanese systems and in many Japanese games.\nIn these cases having the cross button assigned can often lead to confusion.");
 		const QString enable_host_root        = tr("Required for some Homebrew.\nIf unsure, don't use this option.");
-		const QString limit_cache_size        = tr("Automatically removes older files from disk cache on boot if it grows larger than the specified value.\nGames can use the cache folder to temporarily store data outside of system memory. It is not used for long-term storage.");
+		const QString limit_cache_size        = tr("Automatically removes older files from disk cache on boot if it grows larger than the specified value.\nGames can use the cache folder to temporarily store data outside of system memory. It is not used for long-term storage.\n\nThis setting is only available in the global configuration.");
 		const QString console_time_offset     = tr("Sets the time to be used within the console. This will be applied as an offset that tracks wall clock time.\nCan be reset to current wallclock time by clicking \"Set to Now\".");
 	} settings;
 
@@ -206,14 +213,14 @@ public:
 		const QString ldd_pad     = tr("This port is currently assigned to a custom controller by the application and can't be changed.");
 		const QString keyboard    = tr("While it is possible to use a keyboard as a pad in RPCS3, the use of an actual controller is strongly recommended.<br>To bind mouse movement to a button or joystick, click on the desired button to activate it, then click and hold while dragging the mouse to a direction.");
 		const QString ds3_windows = tr("In order to use the DualShock 3 handler, you need to install the official DualShock 3 driver first.<br>See the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a> for instructions.");
-		const QString ds3_linux   = tr("In order to use the DualShock 3 handler, you might need to add udev rules to let RPCS3 access the controller.\nSee the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a> for instructions.");
+		const QString ds3_linux   = tr("In order to use the DualShock 3 handler, you might need to add udev rules to let RPCS3 access the controller.<br>See the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a> for instructions.");
 		const QString ds3_other   = tr("The DualShock 3 handler is recommended for official DualShock 3 controllers.");
 		const QString ds4_windows = tr("If you have any issues with the DualShock 4 handler, it might be caused by third-party tools such as DS4Windows. It's recommended that you disable them while using this handler.");
-		const QString ds4_linux   = tr("In order to use the DualShock 4 handler, you might need to add udev rules to let RPCS3 access the controller.\nSee the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a> for instructions.");
+		const QString ds4_linux   = tr("In order to use the DualShock 4 handler, you might need to add udev rules to let RPCS3 access the controller.<br>See the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a> for instructions.");
 		const QString ds4_other   = tr("The DualShock 4 handler is recommended for official DualShock 4 controllers.");
-		const QString dualsense_windows = tr("The DualSense handler is recommended for official DualSense controllers.");
-		const QString dualsense_linux   = tr("The DualSense handler is recommended for official DualSense controllers.");
-		const QString dualsense_other   = tr("The DualSense handler is recommended for official DualSense controllers.");
+		const QString dualsense_windows = tr("The DualSense handler is recommended for official DualSense controllers.<br><br>Battery settings are not supported yet.");
+		const QString dualsense_linux   = tr("The DualSense handler is recommended for official DualSense controllers.<br><br>Battery settings are not supported yet.");
+		const QString dualsense_other   = tr("The DualSense handler is recommended for official DualSense controllers.<br><br>Battery settings are not supported yet.");
 		const QString xinput      = tr("The XInput handler will work with Xbox controllers and many third-party PC-compatible controllers. Pressure sensitive buttons from SCP are supported when SCP's XInput1_3.dll is placed in the main RPCS3 directory. For more details, see the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a>.");
 		const QString evdev       = tr("The evdev handler should work with any controller that has linux support.<br>If your joystick is not being centered properly, read the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a> for instructions.");
 		const QString mmjoy       = tr("The MMJoystick handler should work with almost any controller recognized by Windows. However, it is recommended that you use the more specific handlers if you have a controller that supports them.");

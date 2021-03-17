@@ -776,6 +776,9 @@
     <ClCompile Include="Loader\TAR.cpp">
       <Filter>Loader</Filter>
     </ClCompile>
+    <ClCompile Include="Loader\mself.cpp">
+      <Filter>Loader</Filter>
+    </ClCompile>
     <ClCompile Include="Emu\GDB.cpp">
       <Filter>Emu</Filter>
     </ClCompile>
@@ -881,7 +884,7 @@
     <ClCompile Include="util\cereal.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
-    <ClCompile Include="util\fixed_typemap.cpp">
+    <ClCompile Include="util\cpu_stats.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
     <ClCompile Include="Crypto\aesni.cpp">
@@ -972,6 +975,18 @@
       <Filter>Emu</Filter>
     </ClCompile>
     <ClCompile Include="Emu\Io\interception.cpp">
+      <Filter>Emu\Io</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\RSX\RSXDisAsm.cpp">
+      <Filter>Emu\GPU\RSX</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\RSX\Common\texture_cache.cpp">
+      <Filter>Emu\GPU\RSX\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\Cell\Modules\sys_crashdump.cpp">
+      <Filter>Emu\Cell\Modules</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\Io\Turntable.cpp">
       <Filter>Emu\Io</Filter>
     </ClCompile>
   </ItemGroup>
@@ -1510,6 +1525,9 @@
     <ClInclude Include="Emu\Cell\Modules\sceNpUtil.h">
       <Filter>Emu\Cell\Modules</Filter>
     </ClInclude>
+    <ClInclude Include="Emu\Cell\Modules\sys_crashdump.h">
+      <Filter>Emu\Cell\Modules</Filter>
+    </ClInclude>
     <ClInclude Include="Emu\Cell\Modules\sys_lv2dbg.h">
       <Filter>Emu\Cell\Modules</Filter>
     </ClInclude>
@@ -1563,9 +1581,6 @@
     </ClInclude>
     <ClInclude Include="Emu\RSX\rsx_cache.h">
       <Filter>Emu\GPU\RSX</Filter>
-    </ClInclude>
-    <ClInclude Include="util\dyn_lib.hpp">
-      <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="..\Utilities\version.h">
       <Filter>Header Files</Filter>
@@ -1633,7 +1648,7 @@
     <ClInclude Include="Emu\RSX\Common\GLSLCommon.h">
       <Filter>Emu\GPU\RSX\Common</Filter>
     </ClInclude>
-    <ClInclude Include="..\Utilities\hash.h">
+    <ClInclude Include="util\fnv_hash.hpp">
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="Emu\Cell\lv2\sys_gamepad.h">
@@ -1852,6 +1867,9 @@
     <ClInclude Include="util\typeindices.hpp">
       <Filter>Utilities</Filter>
     </ClInclude>
+    <ClInclude Include="util\cpu_stats.hpp">
+      <Filter>Utilities</Filter>
+    </ClInclude>
     <ClInclude Include="Emu\RSX\Common\ShaderInterpreter.h">
       <Filter>Emu\GPU\RSX\Common</Filter>
     </ClInclude>
@@ -1896,6 +1914,21 @@
     </ClInclude>
     <ClInclude Include="Emu\RSX\display.h">
       <Filter>Emu\GPU\RSX</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Utilities\dyn_lib.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\RSXDisAsm.h">
+      <Filter>Emu\GPU\RSX</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\Common\texture_cache_types.h">
+      <Filter>Emu\GPU\RSX\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\Io\Turntable.h">
+      <Filter>Emu\Io</Filter>
+    </ClInclude>
+    <ClInclude Include="Loader\mself.hpp">
+      <Filter>Loader</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

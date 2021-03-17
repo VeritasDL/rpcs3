@@ -97,7 +97,7 @@ DECLARE(spu_runtime::tr_interpreter) = []
 DECLARE(spu_runtime::g_dispatcher) = []
 {
 	// Allocate 2^20 positions in data area
-	const auto ptr = reinterpret_cast<decltype(g_dispatcher)>(jit_runtime::alloc(sizeof(*g_dispatcher), 64, false));
+	const auto ptr = reinterpret_cast<std::remove_const_t<decltype(spu_runtime::g_dispatcher)>>(jit_runtime::alloc(sizeof(*g_dispatcher), 64, false));
 
 	for (auto& x : *ptr)
 	{
@@ -434,7 +434,7 @@ void spu_cache::initialize()
 	named_thread_group workers("SPU Worker ", worker_count, [&]() -> uint
 	{
 		// Set low priority
-		thread_ctrl::set_native_priority(-1);
+		thread_ctrl::scoped_priority low_prio(-1);
 
 		// Initialize compiler instances for parallel compilation
 		std::unique_ptr<spu_recompiler_base> compiler;
@@ -457,13 +457,12 @@ void spu_cache::initialize()
 		std::vector<be_t<u32>> ls(0x10000);
 
 		// Build functions
-		for (usz func_i = fnext++; func_i < func_list.size(); func_i = fnext++)
+		for (usz func_i = fnext++; func_i < func_list.size(); func_i = fnext++, g_progr_pdone++)
 		{
 			const spu_program& func = std::as_const(func_list)[func_i];
 
 			if (Emu.IsStopped() || fail_flag)
 			{
-				g_progr_pdone++;
 				continue;
 			}
 
@@ -489,7 +488,6 @@ void spu_cache::initialize()
 				(inverse_bounds && (hash_start < g_cfg.core.spu_llvm_lower_bound && hash_start > g_cfg.core.spu_llvm_upper_bound)))
 			{
 				spu_log.error("[Debug] Skipped function %s", fmt::base57(hash_start));
-				g_progr_pdone++;
 				result++;
 				continue;
 			}
@@ -515,8 +513,6 @@ void spu_cache::initialize()
 
 			// Clear fake LS
 			std::memset(ls.data() + start / 4, 0, 4 * (size0 - 1));
-
-			g_progr_pdone++;
 
 			result++;
 		}
@@ -550,7 +546,7 @@ void spu_cache::initialize()
 	// Initialize global cache instance
 	if (g_cfg.core.spu_cache)
 	{
-		*g_fxo->get<spu_cache>() = std::move(cache);
+		g_fxo->get<spu_cache>() = std::move(cache);
 	}
 }
 
@@ -1186,13 +1182,17 @@ void spu_recompiler_base::branch(spu_thread& spu, void*, u8* rip)
 	spu_runtime::g_tail_escape(&spu, func, rip);
 }
 
-void spu_recompiler_base::old_interpreter(spu_thread& spu, void* ls, u8* rip)
+void spu_recompiler_base::old_interpreter(spu_thread& spu, void* ls, u8* /*rip*/)
 {
+	if (g_cfg.core.spu_decoder > spu_decoder_type::fast)
+	{
+		fmt::throw_exception("Invalid SPU decoder");
+	}
+
 	// Select opcode table
-	const auto& table = *(
-		g_cfg.core.spu_decoder == spu_decoder_type::precise ? &g_spu_interpreter_precise.get_table() :
-		g_cfg.core.spu_decoder == spu_decoder_type::fast ? &g_spu_interpreter_fast.get_table() :
-		(fmt::throw_exception("Invalid SPU decoder"), nullptr));
+	const auto& table = *(g_cfg.core.spu_decoder == spu_decoder_type::precise
+		? &g_spu_interpreter_precise.get_table()
+		: &g_spu_interpreter_fast.get_table());
 
 	// LS pointer
 	const auto base = static_cast<const u8*>(ls);
@@ -3147,7 +3147,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point)
 
 void spu_recompiler_base::dump(const spu_program& result, std::string& out)
 {
-	SPUDisAsm dis_asm(CPUDisAsm_DumpMode, reinterpret_cast<const u8*>(result.data.data()) - result.lower_bound);
+	SPUDisAsm dis_asm(cpu_disasm_mode::dump, reinterpret_cast<const u8*>(result.data.data()) - result.lower_bound);
 
 	std::string hash;
 	{
@@ -3220,6 +3220,8 @@ void spu_recompiler_base::dump(const spu_program& result, std::string& out)
 #pragma GCC diagnostic ignored "-Wall"
 #pragma GCC diagnostic ignored "-Wextra"
 #pragma GCC diagnostic ignored "-Wold-style-cast"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif
 #include "llvm/ADT/Triple.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -3765,7 +3767,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 
 	// Get pointer to the vector register (interpreter only)
 	template <typename T, uint I>
-	llvm::Value* init_vr(const bf_t<u32, I, 7>& index)
+	llvm::Value* init_vr(const bf_t<u32, I, 7>&)
 	{
 		if (!m_interp_magn)
 		{
@@ -4001,6 +4003,35 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 		}
 	}
 
+	// Splat scalar value from the preferred slot
+	template <typename T>
+	auto splat_scalar(T&& arg)
+	{
+		using VT = std::remove_extent_t<typename std::decay_t<T>::type>;
+
+		if constexpr (sizeof(VT) == 1)
+		{
+			return zshuffle(std::forward<T>(arg), 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12);
+		}
+		else if constexpr (sizeof(VT) == 2)
+		{
+			return zshuffle(std::forward<T>(arg), 6, 6, 6, 6, 6, 6, 6, 6);
+		}
+		else if constexpr (sizeof(VT) == 4)
+		{
+			return zshuffle(std::forward<T>(arg), 3, 3, 3, 3);
+		}
+		else if constexpr (sizeof(VT) == 8)
+		{
+			return zshuffle(std::forward<T>(arg), 1, 1);
+		}
+		else
+		{
+			static_assert(sizeof(VT) == 16);
+			return std::forward<T>(arg);
+		}
+	}
+
 	void set_reg_fixed(u32 index, llvm::Value* value, bool fixup = true)
 	{
 		llvm::StoreInst* dummy{};
@@ -4179,7 +4210,7 @@ public:
 		// Initialize if necessary
 		if (!m_spurt)
 		{
-			m_spurt = g_fxo->get<spu_runtime>();
+			m_spurt = &g_fxo->get<spu_runtime>();
 			cpu_translator::initialize(m_jit.get_context(), m_jit.get_engine());
 
 			const auto md_name = llvm::MDString::get(m_context, "branch_weights");
@@ -4223,9 +4254,9 @@ public:
 
 		std::string log;
 
-		if (auto cache = g_fxo->get<spu_cache>(); *cache && g_cfg.core.spu_cache && !add_loc->cached.exchange(1))
+		if (auto& cache = g_fxo->get<spu_cache>(); cache && g_cfg.core.spu_cache && !add_loc->cached.exchange(1))
 		{
-			cache->add(func);
+			cache.add(func);
 		}
 
 		{
@@ -4820,7 +4851,7 @@ public:
 			fs::file(m_spurt->get_cache_path() + "spu-ir.log", fs::write + fs::append).write(log);
 		}
 
-		if (*g_fxo->get<spu_cache>())
+		if (g_fxo->get<spu_cache>().operator bool())
 		{
 			spu_log.success("New block compiled successfully");
 		}
@@ -5282,7 +5313,7 @@ public:
 		call(name, &exec_fall<F>, m_thread, m_ir->getInt32(op.opcode));
 	}
 
-	static void exec_unk(spu_thread* _spu, u32 op)
+	static void exec_unk(spu_thread*, u32 op)
 	{
 		fmt::throw_exception("Unknown/Illegal instruction (0x%08x)", op);
 	}
@@ -5335,7 +5366,7 @@ public:
 		}
 	}
 
-	void STOPD(spu_opcode_t op) //
+	void STOPD(spu_opcode_t) //
 	{
 		if (m_interp_magn)
 		{
@@ -5919,7 +5950,9 @@ public:
 
 					const auto mmio = llvm::BasicBlock::Create(m_context, "", m_function);
 					const auto copy = llvm::BasicBlock::Create(m_context, "", m_function);
-					m_ir->CreateCondBr(m_ir->CreateICmpUGE(eal.value, m_ir->getInt32(0xe0000000)), mmio, copy, m_md_unlikely);
+
+					// Always use interpreter function for MFC debug option
+					m_ir->CreateCondBr(m_ir->CreateICmpUGE(eal.value, m_ir->getInt32(g_cfg.core.mfc_debug ? 0 : 0xe0000000)), mmio, copy, m_md_unlikely);
 					m_ir->SetInsertPoint(mmio);
 					m_ir->CreateStore(ci, spu_ptr<u8>(&spu_thread::ch_mfc_cmd, &spu_mfc_cmd::cmd));
 					call("spu_exec_mfc_cmd", &exec_mfc_cmd, m_thread);
@@ -6134,15 +6167,15 @@ public:
 		call("spu_write_channel", &exec_wrch, m_thread, m_ir->getInt32(op.ra), val.value);
 	}
 
-	void LNOP(spu_opcode_t op) //
+	void LNOP(spu_opcode_t) //
 	{
 	}
 
-	void NOP(spu_opcode_t op) //
+	void NOP(spu_opcode_t) //
 	{
 	}
 
-	void SYNC(spu_opcode_t op) //
+	void SYNC(spu_opcode_t) //
 	{
 		// This instruction must be used following a store instruction that modifies the instruction stream.
 		m_ir->CreateFence(llvm::AtomicOrdering::SequentiallyConsistent);
@@ -6155,7 +6188,7 @@ public:
 		}
 	}
 
-	void DSYNC(spu_opcode_t op) //
+	void DSYNC(spu_opcode_t) //
 	{
 		// This instruction forces all earlier load, store, and channel instructions to complete before proceeding.
 		m_ir->CreateFence(llvm::AtomicOrdering::SequentiallyConsistent);
@@ -6167,7 +6200,7 @@ public:
 		set_vr(op.rt, splat<u32[4]>(0));
 	}
 
-	void MTSPR(spu_opcode_t op) //
+	void MTSPR(spu_opcode_t) //
 	{
 		// Check SPUInterpreter for notes.
 	}
@@ -6369,7 +6402,7 @@ public:
 
 	void AND(spu_opcode_t op)
 	{
-		if (match_vr<u8[16], u16[8], u64[2]>(op.ra, [&](auto a, auto MP1)
+		if (match_vr<u8[16], u16[8], u64[2]>(op.ra, [&](auto a, auto /*MP1*/)
 		{
 			if (auto b = match_vr_as(a, op.rb))
 			{
@@ -6377,7 +6410,7 @@ public:
 				return true;
 			}
 
-			return match_vr<u8[16], u16[8], u64[2]>(op.rb, [&](auto b, auto MP2)
+			return match_vr<u8[16], u16[8], u64[2]>(op.rb, [&](auto /*b*/, auto /*MP2*/)
 			{
 				set_vr(op.rt, a & get_vr_as(a, op.rb));
 				return true;
@@ -6434,6 +6467,23 @@ public:
 
 	void FSM(spu_opcode_t op)
 	{
+		// FSM following a comparison instruction
+		if (match_vr<s8[16], s16[8], s32[4], s64[2]>(op.ra, [&](auto c, auto MP)
+		{
+			using VT = typename decltype(MP)::type;
+
+			if (auto [ok, x] = match_expr(c, sext<VT>(match<bool[std::extent_v<VT>]>())); ok)
+			{
+					set_vr(op.rt, (splat_scalar(c)));
+					return true;
+			}
+
+			return false;
+		}))
+		{
+			return;
+		}
+
 		const auto v = extract(get_vr(op.ra), 3);
 		const auto m = bitcast<bool[4]>(trunc<i4>(v));
 		set_vr(op.rt, sext<s32[4]>(m));
@@ -6468,27 +6518,40 @@ public:
 		{
 			const auto as = byteswap(a);
 			const auto sc = build<u8[16]>(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
-			const auto sh = (sc + (zshuffle(get_vr<u8[16]>(op.rb), 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12) >> 3)) & 0xf;
-			set_vr(op.rt, pshufb(as, sh));
+			const auto sh = sc + (splat_scalar(get_vr<u8[16]>(op.rb)) >> 3);
+
+			if (m_use_avx512_icl)
+			{
+				set_vr(op.rt, vpermb(as, sh));
+				return;
+			}
+
+			set_vr(op.rt, pshufb(as, (sh & 0xf)));
+			return;
+		}
+		const auto sc = build<u8[16]>(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+		const auto sh = sc - (splat_scalar(get_vr<u8[16]>(op.rb)) >> 3);
+
+		if (m_use_avx512_icl)
+		{
+			set_vr(op.rt, vpermb(a, sh));
 			return;
 		}
 
-		const auto sc = build<u8[16]>(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-		const auto sh = (sc - (zshuffle(get_vr<u8[16]>(op.rb), 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12) >> 3)) & 0xf;
-		set_vr(op.rt, pshufb(a, sh));
+		set_vr(op.rt, pshufb(a, (sh & 0xf)));
 	}
 
 	void ROTQMBYBI(spu_opcode_t op)
 	{
 		const auto sc = build<u8[16]>(112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127);
-		const auto sh = sc + (-(zshuffle(get_vr<u8[16]>(op.rb), 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12) >> 3) & 0x1f);
+		const auto sh = sc + (-(splat_scalar(get_vr<u8[16]>(op.rb)) >> 3) & 0x1f);
 		set_vr(op.rt, pshufb(get_vr<u8[16]>(op.ra), sh));
 	}
 
 	void SHLQBYBI(spu_opcode_t op)
 	{
 		const auto sc = build<u8[16]>(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-		const auto sh = sc - (zshuffle(get_vr<u8[16]>(op.rb), 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12) >> 3);
+		const auto sh = sc - (splat_scalar(get_vr<u8[16]>(op.rb)) >> 3);
 		set_vr(op.rt, pshufb(get_vr<u8[16]>(op.ra), sh));
 	}
 
@@ -6556,21 +6619,21 @@ public:
 	void ROTQBI(spu_opcode_t op)
 	{
 		const auto a = get_vr(op.ra);
-		const auto b = zshuffle(get_vr(op.rb) & 0x7, 3, 3, 3, 3);
+		const auto b = splat_scalar(get_vr(op.rb) & 0x7);
 		set_vr(op.rt, fshl(a, zshuffle(a, 3, 0, 1, 2), b));
 	}
 
 	void ROTQMBI(spu_opcode_t op)
 	{
 		const auto a = get_vr(op.ra);
-		const auto b = zshuffle(-get_vr(op.rb) & 0x7, 3, 3, 3, 3);
+		const auto b = splat_scalar(-get_vr(op.rb) & 0x7);
 		set_vr(op.rt, fshr(zshuffle(a, 1, 2, 3, 4), a, b));
 	}
 
 	void SHLQBI(spu_opcode_t op)
 	{
 		const auto a = get_vr(op.ra);
-		const auto b = zshuffle(get_vr(op.rb) & 0x7, 3, 3, 3, 3);
+		const auto b = splat_scalar(get_vr(op.rb) & 0x7);
 		set_vr(op.rt, fshl(a, zshuffle(a, 4, 0, 1, 2), b));
 	}
 
@@ -6598,14 +6661,28 @@ public:
 		{
 			const auto as = byteswap(a);
 			const auto sc = build<u8[16]>(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
-			const auto sh = eval((sc + zshuffle(b, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12)) & 0xf);
-			set_vr(op.rt, pshufb(as, sh));
+			const auto sh = eval(sc + splat_scalar(b));
+
+			if (m_use_avx512_icl)
+			{
+				set_vr(op.rt, vpermb(as, sh));
+				return;
+			}
+
+			set_vr(op.rt, pshufb(as, (sh & 0xf)));
 			return;
 		}
 
 		const auto sc = build<u8[16]>(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-		const auto sh = eval((sc - zshuffle(b, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12)) & 0xf);
-		set_vr(op.rt, pshufb(a, sh));
+		const auto sh = eval(sc - splat_scalar(b));
+
+		if (m_use_avx512_icl)
+		{
+			set_vr(op.rt, vpermb(a, sh));
+			return;
+		}
+
+		set_vr(op.rt, pshufb(a, (sh & 0xf)));
 	}
 
 	void ROTQMBY(spu_opcode_t op)
@@ -6613,7 +6690,7 @@ public:
 		const auto a = get_vr<u8[16]>(op.ra);
 		const auto b = get_vr<u8[16]>(op.rb);
 		const auto sc = build<u8[16]>(112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127);
-		const auto sh = sc + (-zshuffle(b, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12) & 0x1f);
+		const auto sh = sc + (-splat_scalar(b) & 0x1f);
 		set_vr(op.rt, pshufb(a, sh));
 	}
 
@@ -6622,7 +6699,7 @@ public:
 		const auto a = get_vr<u8[16]>(op.ra);
 		const auto b = get_vr<u8[16]>(op.rb);
 		const auto sc = build<u8[16]>(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-		const auto sh = sc - (zshuffle(b, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12) & 0x1f);
+		const auto sh = sc - (splat_scalar(b) & 0x1f);
 		set_vr(op.rt, pshufb(a, sh));
 	}
 
@@ -7366,7 +7443,7 @@ public:
 		set_vr(op.rt, splat<u32[4]>(0));
 	}
 
-	void FSCRWR(spu_opcode_t op) //
+	void FSCRWR(spu_opcode_t /*op*/) //
 	{
 		// Hack
 	}
@@ -7674,9 +7751,9 @@ public:
 
 			const auto ma = eval(sext<s32[4]>(fcmp_uno(a != fsplat<f32[4]>(0.))));
 			const auto mb = eval(sext<s32[4]>(fcmp_uno(b != fsplat<f32[4]>(0.))));
-			const auto ca = eval(bitcast<f32[4]>(bitcast<s32[4]>(a) & mb));
-			const auto cb = eval(bitcast<f32[4]>(bitcast<s32[4]>(b) & ma));
-			set_vr(op.rt, fm(ca, cb));
+			const auto cx = eval(ma & mb);
+			const auto x = fm(a, b);
+			set_vr(op.rt, eval(bitcast<f32[4]>(bitcast<s32[4]>(x) & cx)));
 		}
 		else
 			set_vr(op.rt, get_vr<f32[4]>(op.ra) * get_vr<f32[4]>(op.rb));
@@ -8266,17 +8343,17 @@ public:
 		make_halt(cond);
 	}
 
-	void HBR(spu_opcode_t op) //
+	void HBR([[maybe_unused]] spu_opcode_t op) //
 	{
 		// TODO: use the hint.
 	}
 
-	void HBRA(spu_opcode_t op) //
+	void HBRA([[maybe_unused]] spu_opcode_t op) //
 	{
 		// TODO: use the hint.
 	}
 
-	void HBRR(spu_opcode_t op) //
+	void HBRR([[maybe_unused]] spu_opcode_t op) //
 	{
 		// TODO: use the hint.
 	}
@@ -8828,8 +8905,24 @@ struct spu_llvm_worker
 		// Fake LS
 		std::vector<be_t<u32>> ls(0x10000);
 
-		for (auto* prog : registered)
+		for (auto slice = registered.pop_all();; [&]
 		{
+			if (slice)
+			{
+				slice.pop_front();
+			}
+
+			if (slice || thread_ctrl::state() == thread_state::aborting)
+			{
+				return;
+			}
+
+			thread_ctrl::wait_on(registered, nullptr);
+			slice = registered.pop_all();
+		}())
+		{
+			auto* prog = slice.get();
+
 			if (thread_ctrl::state() == thread_state::aborting)
 			{
 				break;
@@ -8935,11 +9028,11 @@ struct spu_llvm
 					}
 
 					// Collect profiling samples
-					idm::select<named_thread<spu_thread>>([&](u32 id, spu_thread& spu)
+					idm::select<named_thread<spu_thread>>([&](u32 /*id*/, spu_thread& spu)
 					{
 						const u64 name = atomic_storage<u64>::load(spu.block_hash);
 
-						if (!(spu.state.load() & (cpu_flag::wait + cpu_flag::stop + cpu_flag::dbg_global_pause)))
+						if (auto state = +spu.state; !::is_paused(state) && !::is_stopped(state) && !(state & cpu_flag::wait))
 						{
 							const auto found = std::as_const(samples).find(name);
 
@@ -8958,7 +9051,7 @@ struct spu_llvm
 
 		u32 worker_count = 1;
 
-		if (uint hc = std::thread::hardware_concurrency(); hc >= 12)
+		if (uint hc = utils::get_thread_count(); hc >= 12)
 		{
 			worker_count = hc - 10;
 		}
@@ -8984,7 +9077,7 @@ struct spu_llvm
 			{
 				// Interrupt profiler thread and put it to sleep
 				static_cast<void>(prof_mutex.reset());
-				atomic_wait::list(registered).wait(); // TODO
+				thread_ctrl::wait_on(registered, nullptr);
 				continue;
 			}
 
@@ -9016,6 +9109,8 @@ struct spu_llvm
 			(workers.begin() + (worker_index++ % worker_count))->registered.push(reinterpret_cast<u64>(_old), &func);
 		}
 
+		static_cast<void>(prof_mutex.init_always([&]{ samples.clear(); }));
+
 		for (u32 i = 0; i < worker_count; i++)
 		{
 			(workers.begin() + i)->registered.push(0, nullptr);
@@ -9033,7 +9128,7 @@ struct spu_fast : public spu_recompiler_base
 	{
 		if (!m_spurt)
 		{
-			m_spurt = g_fxo->get<spu_runtime>();
+			m_spurt = &g_fxo->get<spu_runtime>();
 		}
 	}
 
@@ -9369,7 +9464,7 @@ struct spu_fast : public spu_recompiler_base
 		else if (added)
 		{
 			// Send work to LLVM compiler thread
-			g_fxo->get<spu_llvm_thread>()->registered.push(m_hash_start, add_loc);
+			g_fxo->get<spu_llvm_thread>().registered.push(m_hash_start, add_loc);
 		}
 
 		// Rebuild trampoline if necessary

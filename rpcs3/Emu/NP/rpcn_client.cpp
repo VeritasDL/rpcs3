@@ -11,6 +11,8 @@
 #include "Emu/IdManager.h"
 #include "Emu/System.h"
 
+#include "util/asm.hpp"
+
 #include "generated/np2_structs_generated.h"
 
 #ifdef _WIN32
@@ -295,7 +297,12 @@ bool rpcn_client::connect(const std::string& host)
 	connected = true;
 
 	while (!server_info_received && connected && !is_abort())
-		std::this_thread::sleep_for(5ms);
+	{
+		if (in_config)
+			std::this_thread::sleep_for(5ms);
+		else
+			thread_ctrl::wait_for(5000);
+	}
 
 	if (received_version != RPCN_PROTOCOL_VERSION)
 	{
@@ -416,10 +423,10 @@ bool rpcn_client::manage_connection()
 		{
 			if (msg.size() == 6)
 			{
-				addr_sig = reinterpret_cast<const le_t<u32>&>(msg[0]);
-				port_sig = reinterpret_cast<const be_t<u16>&>(msg[4]);
+				addr_sig = *utils::bless<le_t<u32>>(&msg[0]);
+				port_sig = *utils::bless<be_t<u16>>(&msg[4]);
 
-				in_addr orig{};
+				[[maybe_unused]] in_addr orig{};
 				orig.s_addr = addr_sig;
 
 				last_pong_time = now;
@@ -435,7 +442,7 @@ bool rpcn_client::manage_connection()
 		{
 			std::vector<u8> ping(9);
 			ping[0]                                 = 1;
-			*reinterpret_cast<le_t<s64>*>(&ping[1]) = user_id;
+			*utils::bless<le_t<s64, 1>>(&ping[1])   = user_id;
 			if (send_packet_from_p2p_port(ping, addr_rpcn_udp) == -1)
 			{
 				rpcn_log.error("Failed to send ping to rpcn!");
@@ -457,9 +464,9 @@ bool rpcn_client::manage_connection()
 	}
 
 	const u8 packet_type  = header[0];
-	const u16 command     = reinterpret_cast<le_t<u16>&>(header[1]);
-	const u16 packet_size = reinterpret_cast<le_t<u16>&>(header[3]);
-	const u32 packet_id   = reinterpret_cast<le_t<u32>&>(header[5]);
+	const u16 command     = *utils::bless<le_t<u16>>(&header[1]);
+	const u16 packet_size = *utils::bless<le_t<u16>>(&header[3]);
+	const u32 packet_id   = *utils::bless<le_t<u32>>(&header[5]);
 
 	if (packet_size < RPCN_HEADER_SIZE)
 		return error_and_disconnect("Invalid packet size");
@@ -561,7 +568,11 @@ bool rpcn_client::get_reply(const u32 expected_id, std::vector<u8>& data)
 	{
 		if (check_for_reply())
 			return true;
-		std::this_thread::sleep_for(5ms);
+
+		if (in_config)
+			std::this_thread::sleep_for(5ms);
+		else
+			thread_ctrl::wait_for(5000);
 	}
 
 	if (check_for_reply())
@@ -835,7 +846,7 @@ bool rpcn_client::search_room(u32 req_id, const SceNpCommunicationId& communicat
 	}
 	flatbuffers::Offset<flatbuffers::Vector<u16>> attrid_vec;
 	if (req->attrIdNum)
-		attrid_vec = builder.CreateVector(reinterpret_cast<const u16*>(req->attrId.get_ptr()), req->attrIdNum);
+		attrid_vec = builder.CreateVector(utils::bless<const u16>(req->attrId.get_ptr()), req->attrIdNum);
 
 	SearchRoomRequestBuilder s_req(builder);
 	s_req.add_option(req->option);
@@ -931,7 +942,7 @@ bool rpcn_client::get_roomdata_internal(u32 req_id, const SceNpCommunicationId& 
 
 	flatbuffers::Offset<flatbuffers::Vector<u16>> final_attr_ids_vec;
 	if (req->attrIdNum)
-		final_attr_ids_vec = builder.CreateVector(reinterpret_cast<const u16*>(req->attrId.get_ptr()), req->attrIdNum);
+		final_attr_ids_vec = builder.CreateVector(utils::bless<const u16>(req->attrId.get_ptr()), req->attrIdNum);
 
 	auto req_finished = CreateGetRoomDataInternalRequest(builder, req->roomId, final_attr_ids_vec);
 
@@ -985,7 +996,7 @@ bool rpcn_client::set_roomdata_internal(u32 req_id, const SceNpCommunicationId& 
 
 	flatbuffers::Offset<flatbuffers::Vector<u16>> final_ownerprivilege_vec;
 	if (req->ownerPrivilegeRankNum)
-		final_ownerprivilege_vec = builder.CreateVector(reinterpret_cast<const u16*>(req->ownerPrivilegeRank.get_ptr()), req->ownerPrivilegeRankNum);
+		final_ownerprivilege_vec = builder.CreateVector(utils::bless<const u16>(req->ownerPrivilegeRank.get_ptr()), req->ownerPrivilegeRankNum);
 
 	auto req_finished =
 	    CreateSetRoomDataInternalRequest(builder, req->roomId, req->flagFilter, req->flagAttr, final_binattrinternal_vec, final_grouppasswordconfig_vec, final_passwordSlotMask, final_ownerprivilege_vec);
@@ -1012,7 +1023,7 @@ bool rpcn_client::ping_room_owner(u32 req_id, const SceNpCommunicationId& commun
 	data.resize(COMMUNICATION_ID_SIZE + sizeof(u64));
 
 	memcpy(data.data(), communication_id.data, COMMUNICATION_ID_SIZE);
-	reinterpret_cast<le_t<u64>&>(data[COMMUNICATION_ID_SIZE]) = room_id;
+	*utils::bless<le_t<u64>>(&data[COMMUNICATION_ID_SIZE]) = room_id;
 
 	if (!forge_send(CommandType::PingRoomOwner, req_id, data))
 		return false;

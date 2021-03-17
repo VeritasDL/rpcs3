@@ -36,6 +36,11 @@ void fmt_class_string<CellCameraError>::format(std::string& out, u64 arg)
 	});
 }
 
+// Temporarily
+#ifndef _MSC_VER
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#endif
+
 // **************
 // * Prototypes *
 // **************
@@ -271,18 +276,18 @@ error_code cellCameraInit()
 	cellCamera.todo("cellCameraInit()");
 
 	// Start camera thread
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	std::lock_guard lock(g_camera->mutex);
+	std::lock_guard lock(g_camera.mutex);
 
-	if (g_camera->init)
+	if (g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_ALREADY_INIT;
 	}
 
 	if (g_cfg.io.camera == camera_handler::null)
 	{
-		g_camera->init = 1;
+		g_camera.init = 1;
 		return CELL_OK;
 	}
 
@@ -290,40 +295,40 @@ error_code cellCameraInit()
 	{
 	case fake_camera_type::eyetoy:
 	{
-		g_camera->attr[CELL_CAMERA_SATURATION] = { 164 };
-		g_camera->attr[CELL_CAMERA_BRIGHTNESS] = { 96 };
-		g_camera->attr[CELL_CAMERA_AEC] = { 1 };
-		g_camera->attr[CELL_CAMERA_AGC] = { 1 };
-		g_camera->attr[CELL_CAMERA_AWB] = { 1 };
-		g_camera->attr[CELL_CAMERA_ABC] = { 0 };
-		g_camera->attr[CELL_CAMERA_LED] = { 1 };
-		g_camera->attr[CELL_CAMERA_QS] = { 0 };
-		g_camera->attr[CELL_CAMERA_NONZEROCOEFFS] = { 32, 32 };
-		g_camera->attr[CELL_CAMERA_YUVFLAG] = { 0 };
-		g_camera->attr[CELL_CAMERA_BACKLIGHTCOMP] = { 0 };
-		g_camera->attr[CELL_CAMERA_MIRRORFLAG] = { 1 };
-		g_camera->attr[CELL_CAMERA_422FLAG] = { 1 };
-		g_camera->attr[CELL_CAMERA_USBLOAD] = { 4 };
+		g_camera.attr[CELL_CAMERA_SATURATION] = { 164 };
+		g_camera.attr[CELL_CAMERA_BRIGHTNESS] = { 96 };
+		g_camera.attr[CELL_CAMERA_AEC] = { 1 };
+		g_camera.attr[CELL_CAMERA_AGC] = { 1 };
+		g_camera.attr[CELL_CAMERA_AWB] = { 1 };
+		g_camera.attr[CELL_CAMERA_ABC] = { 0 };
+		g_camera.attr[CELL_CAMERA_LED] = { 1 };
+		g_camera.attr[CELL_CAMERA_QS] = { 0 };
+		g_camera.attr[CELL_CAMERA_NONZEROCOEFFS] = { 32, 32 };
+		g_camera.attr[CELL_CAMERA_YUVFLAG] = { 0 };
+		g_camera.attr[CELL_CAMERA_BACKLIGHTCOMP] = { 0 };
+		g_camera.attr[CELL_CAMERA_MIRRORFLAG] = { 1 };
+		g_camera.attr[CELL_CAMERA_422FLAG] = { 1 };
+		g_camera.attr[CELL_CAMERA_USBLOAD] = { 4 };
 		break;
 	}
 
 	case fake_camera_type::eyetoy2:
 	{
-		g_camera->attr[CELL_CAMERA_SATURATION] = { 64 };
-		g_camera->attr[CELL_CAMERA_BRIGHTNESS] = { 8 };
-		g_camera->attr[CELL_CAMERA_AEC] = { 1 };
-		g_camera->attr[CELL_CAMERA_AGC] = { 1 };
-		g_camera->attr[CELL_CAMERA_AWB] = { 1 };
-		g_camera->attr[CELL_CAMERA_LED] = { 1 };
-		g_camera->attr[CELL_CAMERA_BACKLIGHTCOMP] = { 0 };
-		g_camera->attr[CELL_CAMERA_MIRRORFLAG] = { 1 };
-		g_camera->attr[CELL_CAMERA_GAMMA] = { 1 };
-		g_camera->attr[CELL_CAMERA_AGCLIMIT] = { 4 };
-		g_camera->attr[CELL_CAMERA_DENOISE] = { 0 };
-		g_camera->attr[CELL_CAMERA_FRAMERATEADJUST] = { 0 };
-		g_camera->attr[CELL_CAMERA_PIXELOUTLIERFILTER] = { 1 };
-		g_camera->attr[CELL_CAMERA_AGCLOW] = { 48 };
-		g_camera->attr[CELL_CAMERA_AGCHIGH] = { 64 };
+		g_camera.attr[CELL_CAMERA_SATURATION] = { 64 };
+		g_camera.attr[CELL_CAMERA_BRIGHTNESS] = { 8 };
+		g_camera.attr[CELL_CAMERA_AEC] = { 1 };
+		g_camera.attr[CELL_CAMERA_AGC] = { 1 };
+		g_camera.attr[CELL_CAMERA_AWB] = { 1 };
+		g_camera.attr[CELL_CAMERA_LED] = { 1 };
+		g_camera.attr[CELL_CAMERA_BACKLIGHTCOMP] = { 0 };
+		g_camera.attr[CELL_CAMERA_MIRRORFLAG] = { 1 };
+		g_camera.attr[CELL_CAMERA_GAMMA] = { 1 };
+		g_camera.attr[CELL_CAMERA_AGCLIMIT] = { 4 };
+		g_camera.attr[CELL_CAMERA_DENOISE] = { 0 };
+		g_camera.attr[CELL_CAMERA_FRAMERATEADJUST] = { 0 };
+		g_camera.attr[CELL_CAMERA_PIXELOUTLIERFILTER] = { 1 };
+		g_camera.attr[CELL_CAMERA_AGCLOW] = { 48 };
+		g_camera.attr[CELL_CAMERA_AGCHIGH] = { 64 };
 		break;
 	}
 	default:
@@ -334,10 +339,10 @@ error_code cellCameraInit()
 
 	if (g_cfg.io.camera == camera_handler::fake)
 	{
-		g_camera->is_attached = true;
+		g_camera.is_attached = true;
 	}
 
-	g_camera->init = 1;
+	g_camera.init = 1;
 	return CELL_OK;
 }
 
@@ -345,11 +350,11 @@ error_code cellCameraEnd()
 {
 	cellCamera.todo("cellCameraEnd()");
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	std::lock_guard lock(g_camera->mutex);
+	std::lock_guard lock(g_camera.mutex);
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -361,8 +366,8 @@ error_code cellCameraEnd()
 	//}
 
 	// TODO
-	g_camera->init = 0;
-	g_camera->reset_state();
+	g_camera.init = 0;
+	g_camera.reset_state();
 	return CELL_OK;
 }
 
@@ -413,10 +418,10 @@ error_code cellCameraOpenEx(s32 dev_num, vm::ptr<CellCameraInfoEx> info)
 		return CELL_CAMERA_ERROR_PARAM;
 	}
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 	// we know g_camera is valid here (cellCameraSetAttribute above checks for it)
 
-	if (g_camera->is_open)
+	if (g_camera.is_open)
 	{
 		return CELL_CAMERA_ERROR_ALREADY_OPEN;
 	}
@@ -430,7 +435,7 @@ error_code cellCameraOpenEx(s32 dev_num, vm::ptr<CellCameraInfoEx> info)
 
 	const auto vbuf_size = get_video_buffer_size(*info);
 
-	std::lock_guard lock(g_camera->mutex);
+	std::lock_guard lock(g_camera.mutex);
 
 	if (info->read_mode != CELL_CAMERA_READ_DIRECT && !info->buffer)
 	{
@@ -440,8 +445,8 @@ error_code cellCameraOpenEx(s32 dev_num, vm::ptr<CellCameraInfoEx> info)
 
 	std::tie(info->width, info->height) = get_video_resolution(*info);
 
-	g_camera->is_open = true;
-	g_camera->info = *info;
+	g_camera.is_open = true;
+	g_camera.info = *info;
 
 	return CELL_OK;
 }
@@ -461,9 +466,9 @@ error_code cellCameraClose(s32 dev_num)
 		return CELL_CAMERA_ERROR_PARAM;
 	}
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -473,15 +478,15 @@ error_code cellCameraClose(s32 dev_num)
 		return not_an_error(CELL_CAMERA_ERROR_NOT_OPEN);
 	}
 
-	std::lock_guard lock(g_camera->mutex);
+	std::lock_guard lock(g_camera.mutex);
 
-	if (!g_camera->is_open)
+	if (!g_camera.is_open)
 	{
 		return CELL_CAMERA_ERROR_NOT_OPEN;
 	}
 
-	vm::dealloc(g_camera->info.buffer.addr(), vm::main);
-	g_camera->is_open = false;
+	vm::dealloc(g_camera.info.buffer.addr(), vm::main);
+	g_camera.is_open = false;
 
 	return CELL_OK;
 }
@@ -502,9 +507,9 @@ error_code cellCameraGetDeviceGUID(s32 dev_num, vm::ptr<u32> guid)
 {
 	cellCamera.todo("cellCameraGetDeviceGUID(dev_num=%d, guid=*0x%x)", dev_num, guid);
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -520,9 +525,9 @@ error_code cellCameraGetType(s32 dev_num, vm::ptr<s32> type)
 {
 	cellCamera.todo("cellCameraGetType(dev_num=%d, type=*0x%x)", dev_num, type);
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -537,7 +542,7 @@ error_code cellCameraGetType(s32 dev_num, vm::ptr<s32> type)
 		return CELL_CAMERA_ERROR_PARAM;
 	}
 
-	if (!g_camera->is_attached)
+	if (!g_camera.is_attached)
 	{
 		return CELL_CAMERA_ERROR_DEVICE_NOT_FOUND;
 	}
@@ -562,9 +567,9 @@ s32 cellCameraIsAvailable(s32 dev_num)
 		return false;
 	}
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return false;
 	}
@@ -586,9 +591,9 @@ s32 cellCameraIsAttached(s32 dev_num)
 		return false;
 	}
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return false;
 	}
@@ -598,9 +603,9 @@ s32 cellCameraIsAttached(s32 dev_num)
 		return false;
 	}
 
-	std::lock_guard lock(g_camera->mutex);
+	std::lock_guard lock(g_camera.mutex);
 
-	bool is_attached = g_camera->is_attached;
+	bool is_attached = g_camera.is_attached;
 
 	if (g_cfg.io.camera == camera_handler::fake)
 	{
@@ -608,8 +613,8 @@ s32 cellCameraIsAttached(s32 dev_num)
 		// normally should be attached immediately after event queue is registered, but just to be sure
 		if (!is_attached)
 		{
-			g_camera->send_attach_state(true);
-			is_attached = g_camera->is_attached;
+			g_camera.send_attach_state(true);
+			is_attached = g_camera.is_attached;
 		}
 	}
 
@@ -625,9 +630,9 @@ s32 cellCameraIsOpen(s32 dev_num)
 		return false;
 	}
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return false;
 	}
@@ -637,9 +642,9 @@ s32 cellCameraIsOpen(s32 dev_num)
 		return false;
 	}
 
-	std::lock_guard lock(g_camera->mutex);
+	std::lock_guard lock(g_camera.mutex);
 
-	return g_camera->is_open.load();
+	return g_camera.is_open.load();
 }
 
 s32 cellCameraIsStarted(s32 dev_num)
@@ -651,9 +656,9 @@ s32 cellCameraIsStarted(s32 dev_num)
 		return false;
 	}
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return false;
 	}
@@ -663,9 +668,9 @@ s32 cellCameraIsStarted(s32 dev_num)
 		return false;
 	}
 
-	std::lock_guard lock(g_camera->mutex);
+	std::lock_guard lock(g_camera.mutex);
 
-	return g_camera->is_streaming.load();
+	return g_camera.is_streaming.load();
 }
 
 error_code cellCameraGetAttribute(s32 dev_num, s32 attrib, vm::ptr<u32> arg1, vm::ptr<u32> arg2)
@@ -673,9 +678,9 @@ error_code cellCameraGetAttribute(s32 dev_num, s32 attrib, vm::ptr<u32> arg1, vm
 	const auto attr_name = get_camera_attr_name(attrib);
 	cellCamera.todo("cellCameraGetAttribute(dev_num=%d, attrib=%d=%s, arg1=*0x%x, arg2=*0x%x)", dev_num, attrib, attr_name, arg1, arg2);
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -691,25 +696,25 @@ error_code cellCameraGetAttribute(s32 dev_num, s32 attrib, vm::ptr<u32> arg1, vm
 	}
 
 	// actually compares <= 0x63 which is equivalent
-	if (attrib < CELL_CAMERA_FORMATCAP && !g_camera->is_open)
+	if (attrib < CELL_CAMERA_FORMATCAP && !g_camera.is_open)
 	{
 		return CELL_CAMERA_ERROR_NOT_OPEN;
 	}
 
-	std::lock_guard lock(g_camera->mutex);
+	std::lock_guard lock(g_camera.mutex);
 
-	if (!g_camera->is_attached)
+	if (!g_camera.is_attached)
 	{
 		return CELL_CAMERA_ERROR_DEVICE_NOT_FOUND;
 	}
 
 	if (arg1)
 	{
-		*arg1 = g_camera->attr[attrib].v1;
+		*arg1 = g_camera.attr[attrib].v1;
 	}
 	if (arg2)
 	{
-		*arg2 = g_camera->attr[attrib].v2;
+		*arg2 = g_camera.attr[attrib].v2;
 	}
 
 	return CELL_OK;
@@ -720,9 +725,9 @@ error_code cellCameraSetAttribute(s32 dev_num, s32 attrib, u32 arg1, u32 arg2)
 	const auto attr_name = get_camera_attr_name(attrib);
 	cellCamera.todo("cellCameraSetAttribute(dev_num=%d, attrib=%d=%s, arg1=%d, arg2=%d)", dev_num, attrib, attr_name, arg1, arg2);
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -738,12 +743,12 @@ error_code cellCameraSetAttribute(s32 dev_num, s32 attrib, u32 arg1, u32 arg2)
 	}
 
 	// actually compares <= 0x63 which is equivalent
-	if (attrib < CELL_CAMERA_FORMATCAP && !g_camera->is_open)
+	if (attrib < CELL_CAMERA_FORMATCAP && !g_camera.is_open)
 	{
 		return CELL_CAMERA_ERROR_NOT_OPEN;
 	}
 
-	g_camera->set_attr(attrib, arg1, arg2);
+	g_camera.set_attr(attrib, arg1, arg2);
 
 	return CELL_OK;
 }
@@ -758,9 +763,9 @@ error_code cellCameraGetBufferSize(s32 dev_num, vm::ptr<CellCameraInfoEx> info)
 {
 	cellCamera.todo("cellCameraGetBufferSize(dev_num=%d, info=*0x%x)", dev_num, info);
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -777,7 +782,7 @@ error_code cellCameraGetBufferSize(s32 dev_num, vm::ptr<CellCameraInfoEx> info)
 		return CELL_CAMERA_ERROR_PARAM;
 	}
 
-	if (g_camera->is_open)
+	if (g_camera.is_open)
 	{
 		return CELL_CAMERA_ERROR_ALREADY_OPEN;
 	}
@@ -802,10 +807,10 @@ error_code cellCameraGetBufferSize(s32 dev_num, vm::ptr<CellCameraInfoEx> info)
 		return status;
 	}
 
-	std::lock_guard lock(g_camera->mutex);
+	std::lock_guard lock(g_camera.mutex);
 
-	info->bytesize = get_video_buffer_size(g_camera->info);
-	g_camera->info = *info;
+	info->bytesize = get_video_buffer_size(g_camera.info);
+	g_camera.info = *info;
 
 	return info->bytesize;
 }
@@ -825,9 +830,9 @@ error_code cellCameraGetBufferInfoEx(s32 dev_num, vm::ptr<CellCameraInfoEx> info
 
 	// the following should be moved to cellCameraGetBufferInfo
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -842,7 +847,7 @@ error_code cellCameraGetBufferInfoEx(s32 dev_num, vm::ptr<CellCameraInfoEx> info
 		return CELL_CAMERA_ERROR_PARAM;
 	}
 
-	if (!g_camera->is_open)
+	if (!g_camera.is_open)
 	{
 		return CELL_CAMERA_ERROR_NOT_OPEN;
 	}
@@ -852,8 +857,8 @@ error_code cellCameraGetBufferInfoEx(s32 dev_num, vm::ptr<CellCameraInfoEx> info
 		return CELL_CAMERA_ERROR_PARAM;
 	}
 
-	std::lock_guard lock(g_camera->mutex);
-	*info = g_camera->info;
+	std::lock_guard lock(g_camera.mutex);
+	*info = g_camera.info;
 
 	return CELL_OK;
 }
@@ -899,9 +904,9 @@ error_code cellCameraReset(s32 dev_num)
 		return CELL_CAMERA_ERROR_PARAM;
 	}
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -911,12 +916,12 @@ error_code cellCameraReset(s32 dev_num)
 		return not_an_error(CELL_CAMERA_ERROR_NOT_OPEN);
 	}
 
-	if (!g_camera->is_open)
+	if (!g_camera.is_open)
 	{
 		return CELL_CAMERA_ERROR_NOT_OPEN;
 	}
 
-	if (!g_camera->is_attached)
+	if (!g_camera.is_attached)
 	{
 		return CELL_CAMERA_ERROR_DEVICE_NOT_FOUND;
 	}
@@ -947,9 +952,9 @@ error_code cellCameraStart(s32 dev_num)
 		return CELL_CAMERA_ERROR_PARAM;
 	}
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -959,20 +964,20 @@ error_code cellCameraStart(s32 dev_num)
 		return not_an_error(CELL_CAMERA_ERROR_NOT_OPEN);
 	}
 
-	std::lock_guard lock(g_camera->mutex);
+	std::lock_guard lock(g_camera.mutex);
 
-	if (!g_camera->is_open)
+	if (!g_camera.is_open)
 	{
 		return CELL_CAMERA_ERROR_NOT_OPEN;
 	}
 
-	if (!g_camera->is_attached)
+	if (!g_camera.is_attached)
 	{
 		return CELL_CAMERA_ERROR_DEVICE_NOT_FOUND;
 	}
 
-	g_camera->timer.Start();
-	g_camera->is_streaming = true;
+	g_camera.timer.Start();
+	g_camera.is_streaming = true;
 
 	return CELL_OK;
 }
@@ -1023,9 +1028,9 @@ error_code cellCameraReadEx(s32 dev_num, vm::ptr<CellCameraReadEx> read)
 {
 	cellCamera.todo("cellCameraReadEx(dev_num=%d, read=0x%x)", dev_num, read);
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -1040,19 +1045,19 @@ error_code cellCameraReadEx(s32 dev_num, vm::ptr<CellCameraReadEx> read)
 		return CELL_CAMERA_ERROR_PARAM;
 	}
 
-	std::lock_guard lock(g_camera->mutex);
+	std::lock_guard lock(g_camera.mutex);
 
-	if (!g_camera->is_open)
+	if (!g_camera.is_open)
 	{
 		return CELL_CAMERA_ERROR_NOT_OPEN;
 	}
 
-	if (!g_camera->is_attached)
+	if (!g_camera.is_attached)
 	{
 		return CELL_CAMERA_ERROR_DEVICE_NOT_FOUND;
 	}
 
-	if (!g_camera->is_streaming)
+	if (!g_camera.is_streaming)
 	{
 		return CELL_CAMERA_ERROR_NOT_STARTED;
 	}
@@ -1061,13 +1066,13 @@ error_code cellCameraReadEx(s32 dev_num, vm::ptr<CellCameraReadEx> read)
 
 	if (read) // NULL returns CELL_OK
 	{
-		read->timestamp = g_camera->timer.GetElapsedTimeInMicroSec();
-		read->frame = g_camera->frame_num;
-		read->bytesread = g_camera->is_streaming ? get_video_buffer_size(g_camera->info) : 0;
+		read->timestamp = g_camera.timer.GetElapsedTimeInMicroSec();
+		read->frame = g_camera.frame_num;
+		read->bytesread = g_camera.is_streaming ? get_video_buffer_size(g_camera.info) : 0;
 
-		auto shared_data = g_fxo->get<gem_camera_shared>();
+		auto& shared_data = g_fxo->get<gem_camera_shared>();
 
-		shared_data->frame_timestamp.exchange(read->timestamp);
+		shared_data.frame_timestamp.exchange(read->timestamp);
 	}
 
 	return CELL_OK;
@@ -1089,9 +1094,9 @@ error_code cellCameraStop(s32 dev_num)
 		return CELL_CAMERA_ERROR_PARAM;
 	}
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -1101,25 +1106,25 @@ error_code cellCameraStop(s32 dev_num)
 		return not_an_error(CELL_CAMERA_ERROR_NOT_OPEN);
 	}
 
-	if (!g_camera->is_open)
+	if (!g_camera.is_open)
 	{
 		return CELL_CAMERA_ERROR_NOT_OPEN;
 	}
 
-	if (!g_camera->is_attached)
+	if (!g_camera.is_attached)
 	{
 		return CELL_CAMERA_ERROR_DEVICE_NOT_FOUND;
 	}
 
-	if (!g_camera->is_streaming)
+	if (!g_camera.is_streaming)
 	{
 		return CELL_CAMERA_ERROR_NOT_STARTED;
 	}
 
-	g_camera->is_streaming = false;
+	g_camera.is_streaming = false;
 
-	std::lock_guard lock(g_camera->mutex);
-	g_camera->timer.Stop();
+	std::lock_guard lock(g_camera.mutex);
+	g_camera.timer.Stop();
 
 	return CELL_OK;
 }
@@ -1140,9 +1145,9 @@ error_code cellCameraSetNotifyEventQueue(u64 key)
 {
 	cellCamera.todo("cellCameraSetNotifyEventQueue(key=0x%x)", key);
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -1152,7 +1157,7 @@ error_code cellCameraSetNotifyEventQueue(u64 key)
 		return CELL_OK;
 	}
 
-	g_camera->add_queue(key, 0, 0);
+	g_camera.add_queue(key, 0, 0);
 
 	return CELL_OK;
 }
@@ -1161,9 +1166,9 @@ error_code cellCameraRemoveNotifyEventQueue(u64 key)
 {
 	cellCamera.todo("cellCameraRemoveNotifyEventQueue(key=0x%x)", key);
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
@@ -1173,7 +1178,7 @@ error_code cellCameraRemoveNotifyEventQueue(u64 key)
 		return CELL_OK;
 	}
 
-	g_camera->remove_queue(key);
+	g_camera.remove_queue(key);
 
 	return CELL_OK;
 }
@@ -1187,14 +1192,14 @@ error_code cellCameraSetNotifyEventQueue2(u64 key, u64 source, u64 flag)
 		return CELL_OK;
 	}
 
-	const auto g_camera = g_fxo->get<camera_thread>();
+	auto& g_camera = g_fxo->get<camera_thread>();
 
-	if (!g_camera->init)
+	if (!g_camera.init)
 	{
 		return CELL_CAMERA_ERROR_NOT_INIT;
 	}
 
-	g_camera->add_queue(key, source, flag);
+	g_camera.add_queue(key, source, flag);
 
 	return CELL_OK;
 }

@@ -19,12 +19,23 @@ enum class cpu_flag : u32
 	memory, // Thread must unlock memory mutex
 
 	dbg_global_pause, // Emulation paused
-	dbg_global_stop, // Emulation stopped
 	dbg_pause, // Thread paused
 	dbg_step, // Thread forced to pause after one step (one instruction, etc)
 
 	__bitset_enum_max
 };
+
+// Test stopped state
+constexpr bool is_stopped(bs_t<cpu_flag> state)
+{
+	return !!(state & (cpu_flag::stop + cpu_flag::exit));
+}
+
+// Test paused state
+constexpr bool is_paused(bs_t<cpu_flag> state)
+{
+	return !!(state & (cpu_flag::suspend + cpu_flag::dbg_global_pause + cpu_flag::dbg_pause));
+}
 
 class cpu_thread
 {
@@ -61,16 +72,25 @@ public:
 		return false;
 	}
 
-	// Test stopped state
-	bool is_stopped() const
+	// Wrappers
+	static constexpr bool is_stopped(bs_t<cpu_flag> s)
 	{
-		return !!(state & (cpu_flag::stop + cpu_flag::exit + cpu_flag::dbg_global_stop));
+		return ::is_stopped(s);
 	}
 
-	// Test paused state
+	static constexpr bool is_paused(bs_t<cpu_flag> s)
+	{
+		return ::is_paused(s);
+	}
+
+	bool is_stopped() const
+	{
+		return ::is_stopped(state);
+	}
+
 	bool is_paused() const
 	{
-		return !!(state & (cpu_flag::suspend + cpu_flag::dbg_global_pause + cpu_flag::dbg_pause));
+		return ::is_paused(state);
 	}
 
 	bool has_pause_flag() const
@@ -85,6 +105,7 @@ public:
 	}
 
 	u32 get_pc() const;
+	u32* get_pc2(); // Last PC before stepping for the debugger (may be null)
 
 	void notify();
 
@@ -121,6 +142,12 @@ public:
 
 	// Callback for cpu_flag::ret
 	virtual void cpu_return() {}
+
+	// Callback for thread_ctrl::wait or RSX wait
+	virtual void cpu_wait(bs_t<cpu_flag> flags);
+
+	// Callback for function abortion stats on Emu.Stop()
+	virtual void cpu_on_stop() {}
 
 	// For internal use
 	struct suspend_work
@@ -181,7 +208,7 @@ public:
 	}
 
 	template <u8 Prio = 0, typename F>
-	static suspend_work suspend_post(cpu_thread* _this, std::initializer_list<void*> hints, F& op)
+	static suspend_work suspend_post(cpu_thread* /*_this*/, std::initializer_list<void*> hints, F& op)
 	{
 		constexpr u8 prio = Prio > 3 ? 3 : Prio;
 
@@ -211,18 +238,21 @@ public:
 		}
 	}
 
-	// Stop all threads with cpu_flag::dbg_global_stop
+	// Stop all threads with cpu_flag::exit
 	static void stop_all() noexcept;
 
 	// Send signal to the profiler(s) to flush results
 	static void flush_profilers() noexcept;
+
+private:
+	static thread_local cpu_thread* g_tls_this_thread;
+
+	friend cpu_thread* get_current_cpu_thread() noexcept;
 };
 
 inline cpu_thread* get_current_cpu_thread() noexcept
 {
-	extern thread_local cpu_thread* g_tls_current_cpu_thread;
-
-	return g_tls_current_cpu_thread;
+	return cpu_thread::g_tls_this_thread;
 }
 
 class ppu_thread;

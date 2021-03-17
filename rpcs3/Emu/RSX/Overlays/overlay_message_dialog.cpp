@@ -71,6 +71,22 @@ namespace rsx
 						background_poster.set_size(1280, 720);
 						background_poster.set_raw_image(background_image.get());
 						background_poster.set_blur_strength(static_cast<u8>(g_cfg.video.shader_preloading_dialog.blur_strength));
+
+						ensure(background_image->w > 0);
+						ensure(background_image->h > 0);
+						ensure(background_poster.h > 0);
+
+						// Set padding in order to keep the aspect ratio
+						if ((background_image->w / static_cast<double>(background_image->h)) > (background_poster.w / static_cast<double>(background_poster.h)))
+						{
+							const int padding = (background_poster.h - static_cast<int>(background_image->h * (background_poster.w / static_cast<double>(background_image->w)))) / 2;
+							background_poster.set_padding(0, 0, padding, padding);
+						}
+						else
+						{
+							const int padding = (background_poster.w - static_cast<int>(background_image->w * (background_poster.h / static_cast<double>(background_image->h)))) / 2;
+							background_poster.set_padding(padding, padding, 0, 0);
+						}
 					}
 				}
 			}
@@ -166,6 +182,11 @@ namespace rsx
 			close(true, true);
 		}
 
+		struct msg_dialog_thread
+		{
+			static constexpr auto thread_name = "MsgDialog Thread"sv;
+		};
+
 		error_code message_dialog::show(bool is_blocking, const std::string& text, const MsgDialogType& type, std::function<void(s32 status)> on_close)
 		{
 			visible = false;
@@ -246,13 +267,13 @@ namespace rsx
 			{
 				if (!exit)
 				{
-					g_fxo->init<named_thread>("MsgDialog Thread", [&, tbit = alloc_thread_bit()]()
+					g_fxo->get<named_thread<msg_dialog_thread>>()([&, tbit = alloc_thread_bit()]()
 					{
 						g_thread_bit = tbit;
 
 						if (interactive)
 						{
-							auto ref = g_fxo->get<display_manager>()->get(uid);
+							auto ref = g_fxo->get<display_manager>().get(uid);
 
 							if (auto error = run_input_loop())
 							{
@@ -268,7 +289,7 @@ namespace rsx
 								// Only update the screen at about 60fps since updating it everytime slows down the process
 								std::this_thread::sleep_for(16ms);
 
-								if (!g_fxo->get<display_manager>())
+								if (!g_fxo->is_init<display_manager>())
 								{
 									rsx_log.fatal("display_manager was improperly destroyed");
 									break;
@@ -320,6 +341,22 @@ namespace rsx
 
 			if (index == static_cast<u32>(taskbar_index) || taskbar_index == -1)
 				Emu.GetCallbacks().handle_taskbar_progress(1, static_cast<s32>(value));
+
+			return CELL_OK;
+		}
+
+		error_code message_dialog::progress_bar_set_value(u32 index, f32 value)
+		{
+			if (index >= num_progress_bars)
+				return CELL_MSGDIALOG_ERROR_PARAM;
+
+			if (index == 0)
+				progress_1.set_value(value);
+			else
+				progress_2.set_value(value);
+
+			if (index == static_cast<u32>(taskbar_index) || taskbar_index == -1)
+				Emu.GetCallbacks().handle_taskbar_progress(3, static_cast<s32>(value));
 
 			return CELL_OK;
 		}

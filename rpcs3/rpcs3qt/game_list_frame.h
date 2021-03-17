@@ -86,6 +86,7 @@ public Q_SLOTS:
 	void SetListMode(const bool& is_list);
 	void SetSearchText(const QString& text);
 	void SetShowCompatibilityInGrid(bool show);
+	void SetShowCustomIcons(bool show);
 
 private Q_SLOTS:
 	void OnColClicked(int col);
@@ -104,7 +105,7 @@ protected:
 	void resizeEvent(QResizeEvent *event) override;
 	bool eventFilter(QObject *object, QEvent *event) override;
 private:
-	QPixmap PaintedPixmap(const QPixmap& icon, bool paint_config_icon = false, bool paint_pad_config_icon = false, const QColor& color = QColor());
+	QPixmap PaintedPixmap(QPixmap icon, bool paint_config_icon = false, bool paint_pad_config_icon = false, const QColor& color = QColor());
 	QColor getGridCompatibilityColor(const QString& string);
 	void ShowCustomConfigIcon(game_info game);
 	void PopulateGameList();
@@ -172,4 +173,5 @@ private:
 	qreal m_margin_factor;
 	qreal m_text_factor;
 	bool m_draw_compat_status_to_grid = false;
+	bool m_show_custom_icons = true;
 };

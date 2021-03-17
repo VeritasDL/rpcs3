@@ -1073,7 +1073,7 @@ extern void ppu_execute_syscall(ppu_thread& ppu, u64 code)
 
 	if (code < g_ppu_syscall_table.size())
 	{
-		g_fxo->get<named_thread<ppu_syscall_usage>>()->stat[code]++;
+		g_fxo->get<named_thread<ppu_syscall_usage>>().stat[code]++;
 
 		if (auto func = g_ppu_syscall_table[code].first)
 		{
@@ -1333,6 +1333,11 @@ bool lv2_obj::awake_unlocked(cpu_thread* cpu, s32 prio)
 		{
 			ppu_log.trace("suspend(): %s", target->id);
 			g_pending.emplace_back(target);
+
+			if (is_paused(target->state - cpu_flag::suspend))
+			{
+				target->state.notify_one(cpu_flag::suspend);
+			}
 		}
 	}
 
@@ -1361,11 +1366,7 @@ void lv2_obj::schedule_all()
 				ppu_log.trace("schedule(): %s", target->id);
 				target->state ^= (cpu_flag::signal + cpu_flag::suspend);
 				target->start_time = 0;
-
-				if (target != get_current_cpu_thread())
-				{
-					target->notify();
-				}
+				target->state.notify_one(cpu_flag::signal + cpu_flag::suspend);
 			}
 		}
 	}

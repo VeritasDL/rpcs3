@@ -19,6 +19,12 @@
 
 LOG_CHANNEL(cellSpurs);
 
+// Temporarily
+#ifndef _MSC_VER
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#endif
+
 //----------------------------------------------------------------------------
 // Function prototypes
 //----------------------------------------------------------------------------
@@ -771,7 +777,7 @@ void spursSysServiceIdleHandler(spu_thread& spu, SpursKernelContext* ctxt)
 	while (true)
 	{
 		const auto spurs = spu._ptr<CellSpurs>(0x100);
-		//vm::reservation_acquire(spurs, vm::cast(ctxt->spurs.addr()), 128);
+		//vm::reservation_acquire(ctxt->spurs.addr());
 
 		// Find the number of SPUs that are idling in this SPURS instance
 		u32 nIdlingSpus = 0;
@@ -887,9 +893,9 @@ void spursSysServiceMain(spu_thread& spu, u32 pollStatus)
 	{
 		ctxt->sysSrvInitialised = 1;
 
-		//vm::reservation_acquire(ctxt, vm::cast(ctxt->spurs.addr()), 128);
+		//vm::reservation_acquire(ctxt->spurs.addr());
 
-		//vm::reservation_op(ctxt->spurs.ptr(&CellSpurs::wklState1).addr(), 128, [&]()
+		//vm::reservation_op(ctxt->spurs.ptr(&CellSpurs::wklState1).addr(), [&]()
 		{
 			auto spurs = ctxt->spurs.get_ptr();
 
@@ -1129,13 +1135,13 @@ void spursSysServiceUpdateShutdownCompletionEvents(spu_thread& spu, SpursKernelC
 	// Mark the workloads in wklShutdownBitSet as completed and also generate a bit set of the completed
 	// workloads that have a shutdown completion hook registered
 	u32 wklNotifyBitSet;
-	u8  spuPort;
+	[[maybe_unused]] u8 spuPort;
 	//vm::reservation_op(ctxt->spurs.ptr(&CellSpurs::wklState1).addr(), 128, [&]()
 	{
 		auto spurs = ctxt->spurs.get_ptr();
 
 		wklNotifyBitSet = 0;
-		spuPort = spurs->spuPort;;
+		spuPort = spurs->spuPort;
 		for (u32 i = 0; i < CELL_SPURS_MAX_WORKLOAD; i++)
 		{
 			if (wklShutdownBitSet & (0x80000000u >> i))
@@ -1211,7 +1217,7 @@ void spursSysServiceTraceUpdate(spu_thread& spu, SpursKernelContext* ctxt, u32 a
 	// Get trace parameters from CellSpurs and store them in the LS
 	if (((sysSrvMsgUpdateTrace & (1 << ctxt->spuNum)) != 0) || (arg3 != 0))
 	{
-		//vm::reservation_acquire(spu._ptr<void>(0x80), ctxt->spurs.ptr(&CellSpurs::traceBuffer).addr(), 128);
+		//vm::reservation_acquire(ctxt->spurs.ptr(&CellSpurs::traceBuffer).addr());
 		auto spurs = spu._ptr<CellSpurs>(0x80 - offset32(&CellSpurs::traceBuffer));
 
 		if (ctxt->traceMsgCount != 0xffu || spurs->traceBuffer.addr() == 0u)

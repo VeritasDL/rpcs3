@@ -1,16 +1,16 @@
 #pragma once
 
-enum class ppu_decoder_type
+enum class ppu_decoder_type : unsigned
 {
-	precise,
-	fast,
+	precise = 0, // Don't change (0)
+	fast, // Don't change (1)
 	llvm,
 };
 
-enum class spu_decoder_type
+enum class spu_decoder_type : unsigned
 {
-	precise,
-	fast,
+	precise = 0, // Don't change (0)
+	fast, // Don't change (1)
 	asmjit,
 	llvm,
 };
@@ -95,6 +95,13 @@ enum class move_handler
 	mouse,
 };
 
+enum class buzz_handler
+{
+	null,
+	one_controller,
+	two_controllers,
+};
+
 enum class microphone_handler
 {
 	null,
@@ -140,6 +147,7 @@ enum class msaa_level
 
 enum class detail_level
 {
+	none,
 	minimal,
 	low,
 	medium,
@@ -186,4 +194,10 @@ enum class shader_mode
 	async_recompiler,
 	async_with_interpreter,
 	interpreter_only
+};
+
+enum class vk_gpu_scheduler_mode
+{
+	host,
+	device
 };

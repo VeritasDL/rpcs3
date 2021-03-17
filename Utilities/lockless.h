@@ -308,7 +308,7 @@ public:
 	}
 
 	template <atomic_wait::op Flags = atomic_wait::op::eq>
-	void wait(std::nullptr_t null = nullptr) noexcept
+	void wait(std::nullptr_t /*null*/ = nullptr) noexcept
 	{
 		if (m_head == nullptr)
 		{
@@ -364,64 +364,6 @@ public:
 		}
 
 		return count;
-	}
-
-	// Iterator that enables direct endless range-for loop: for (auto* ptr : queue) ...
-	class iterator
-	{
-		lf_queue* _this = nullptr;
-
-		lf_queue_slice<T> m_data;
-
-	public:
-		constexpr iterator() = default;
-
-		explicit iterator(lf_queue* _this)
-			: _this(_this)
-		{
-			m_data = _this->pop_all();
-		}
-
-		bool operator !=(const iterator& rhs) const
-		{
-			return _this != rhs._this;
-		}
-
-		T* operator *() const
-		{
-			return m_data ? m_data.get() : nullptr;
-		}
-
-		iterator& operator ++()
-		{
-			if (m_data)
-			{
-				m_data.pop_front();
-			}
-
-			if (!m_data)
-			{
-				m_data = _this->pop_all();
-
-				if (!m_data)
-				{
-					_this->wait();
-					m_data = _this->pop_all();
-				}
-			}
-
-			return *this;
-		}
-	};
-
-	iterator begin()
-	{
-		return iterator{this};
-	}
-
-	iterator end()
-	{
-		return iterator{};
 	}
 };
 

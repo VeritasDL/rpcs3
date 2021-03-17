@@ -20,6 +20,16 @@ class breakpoint_list;
 class breakpoint_handler;
 class call_stack_list;
 
+namespace rsx
+{
+	class thread;
+}
+
+enum class system_state : u32;
+
+class instruction_editor_dialog;
+class register_editor_dialog;
+
 class debugger_frame : public custom_dock_widget
 {
 	Q_OBJECT
@@ -44,19 +54,25 @@ class debugger_frame : public custom_dock_widget
 
 	u64 m_threads_created = -1;
 	u64 m_threads_deleted = -1;
+	system_state m_emu_state{};
 	u32 m_last_pc = -1;
 	std::vector<char> m_last_query_state;
 	u32 m_last_step_over_breakpoint = -1;
 
-	std::shared_ptr<CPUDisAsm> m_disasm;
-	std::weak_ptr<cpu_thread> cpu;
+	std::shared_ptr<CPUDisAsm> m_disasm; // Only shared to allow base/derived functionality
+	std::shared_ptr<cpu_thread> m_cpu;
+	rsx::thread* m_rsx = nullptr;
 
 	breakpoint_list* m_breakpoint_list;
 	breakpoint_handler* m_breakpoint_handler;
-
 	call_stack_list* m_call_stack_list;
+	instruction_editor_dialog* m_inst_editor = nullptr;
+	register_editor_dialog* m_reg_editor = nullptr;
 
 	std::shared_ptr<gui_settings> xgui_settings;
+
+	cpu_thread* get_cpu();
+	std::function<cpu_thread*()> make_check_cpu(cpu_thread* cpu);
 
 public:
 	explicit debugger_frame(std::shared_ptr<gui_settings> settings, QWidget *parent = 0);

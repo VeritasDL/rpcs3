@@ -45,7 +45,7 @@ namespace vk
 			const auto task_length = transfer_pitch * src_area.height();
 
 			auto working_buffer = vk::get_scratch_buffer(task_length);
-			auto final_mapping = vk::map_dma(cmd, valid_range.start, section_length);
+			auto final_mapping = vk::map_dma(valid_range.start, section_length);
 
 			VkBufferImageCopy region = {};
 			region.imageSubresource = { src->aspect(), 0, 0, 1 };
@@ -129,7 +129,7 @@ namespace vk
 			region.imageOffset = { src_area.x1, src_area.y1, 0 };
 			region.imageExtent = { transfer_width, transfer_height, 1 };
 
-			auto mapping = vk::map_dma(cmd, valid_range.start, valid_range.length());
+			auto mapping = vk::map_dma(valid_range.start, valid_range.length());
 			region.bufferOffset = mapping.first;
 			vkCmdCopyImageToBuffer(cmd, src->value, src->current_layout, mapping.second->value, 1, &region);
 		}
@@ -137,8 +137,8 @@ namespace vk
 		src->pop_layout(cmd);
 
 		// Create event object for this transfer and queue signal op
-		dma_fence = std::make_unique<vk::event>(*m_device);
-		dma_fence->signal(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT);
+		dma_fence = std::make_unique<vk::event>(*m_device, sync_domain::any);
+		dma_fence->signal(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
 
 		// Set cb flag for queued dma operations
 		cmd.set_flag(vk::command_buffer::cb_has_dma_transfer);

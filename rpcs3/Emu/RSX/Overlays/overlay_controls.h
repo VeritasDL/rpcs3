@@ -19,6 +19,7 @@
 #include <sys/types.h>
 #include <pwd.h>
 #include <libgen.h>
+#include <limits.h>
 #endif
 
 #ifdef __APPLE__
@@ -28,6 +29,8 @@
 #if defined(__DragonFly__) || defined(__FreeBSD__) || defined(__NetBSD__)
 #include <sys/sysctl.h>
 #endif
+
+extern u64 get_system_time();
 
 // Definitions for common UI controls and their routines
 namespace rsx
@@ -227,6 +230,8 @@ namespace rsx
 
 				color4f color = { 1.f, 1.f, 1.f, 1.f };
 				bool pulse_glow = false;
+				f32 pulse_sinus_offset = 0.0f; // The current pulse offset
+				f32 pulse_speed_modifier = 0.005f;
 
 				areaf clip_rect = {};
 				bool clip_region = false;
@@ -249,6 +254,12 @@ namespace rsx
 				{
 					texture_ref = image_resource_id::font_file;
 					font_ref = ref;
+				}
+
+				// Analog to overlay_element::set_sinus_offset
+				f32 get_sinus_value() const
+				{
+					return (static_cast<f32>(get_system_time() / 1000) * pulse_speed_modifier) - pulse_sinus_offset;
 				}
 			};
 
@@ -343,6 +354,24 @@ namespace rsx
 			color4f back_color = { 0.f, 0.f, 0.f, 1.f };
 			color4f fore_color = { 1.f, 1.f, 1.f, 1.f };
 			bool pulse_effect_enabled = false;
+			f32 pulse_sinus_offset = 0.0f; // The current pulse offset
+			f32 pulse_speed_modifier = 0.005f;
+
+			// Analog to command_config::get_sinus_value
+			// Apply modifier for sinus pulse. Resets the pulse. For example:
+			//     0 -> reset to 0.5 rising
+			//   0.5 -> reset to 0
+			//     1 -> reset to 0.5 falling
+			//   1.5 -> reset to 1
+			void set_sinus_offset(f32 sinus_modifier)
+			{
+				if (sinus_modifier >= 0)
+				{
+					static const f32 PI = 3.14159265f;
+					const f32 pulse_sinus_x = static_cast<f32>(get_system_time() / 1000) * pulse_speed_modifier;
+					pulse_sinus_offset = fmod(pulse_sinus_x + sinus_modifier * PI, 2.0f * PI);
+				}
+			}
 
 			compiled_resource compiled_resources;
 			bool is_compiled = false;
@@ -440,13 +469,13 @@ namespace rsx
 				is_compiled = false;
 			}
 
-			virtual void set_text(const std::u32string& text)
+			void set_text(const std::u32string& text)
 			{
 				this->text = text;
 				is_compiled = false;
 			}
 
-			virtual void set_text(localized_string_id id)
+			void set_text(localized_string_id id)
 			{
 				set_text(get_localized_u32string(id));
 			}
@@ -560,6 +589,8 @@ namespace rsx
 
 					config.color = back_color;
 					config.pulse_glow = pulse_effect_enabled;
+					config.pulse_sinus_offset = pulse_sinus_offset;
+					config.pulse_speed_modifier = pulse_speed_modifier;
 
 					auto& verts = compiled_resources_temp.draw_commands.front().verts;
 					verts.resize(4);
@@ -1065,6 +1096,8 @@ namespace rsx
 			u16 caret_position = 0;
 			u16 vertical_scroll_offset = 0;
 
+			bool m_reset_caret_pulse = 0;
+
 			using label::label;
 
 			void move_caret(direction dir);
@@ -1097,6 +1130,7 @@ namespace rsx
 			void set_color(color4f color);
 			void set_guide_interval(f32 guide_interval);
 			u16 get_height() const;
+			u32 get_datapoint_count() const;
 			void record_datapoint(f32 datapoint);
 			void update();
 			compiled_resource& get_compiled() override;

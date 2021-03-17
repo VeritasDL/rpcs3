@@ -175,9 +175,7 @@ namespace stx
 		using under = decltype(int_or_enum());
 
 	public:
-		constexpr se_t() = default;
-
-		constexpr se_t(const se_t& right) = default;
+		se_t() noexcept = default;
 
 		constexpr se_t(type value) noexcept
 			: m_data(to_data(value))
@@ -200,8 +198,6 @@ namespace stx
 		{
 			return value();
 		}
-
-		constexpr se_t& operator=(const se_t&) = default;
 
 		constexpr se_t& operator=(type value) noexcept
 		{

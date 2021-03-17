@@ -16,6 +16,7 @@
 #include "Emu/Io/Skylander.h"
 #include "Emu/Io/GHLtar.h"
 #include "Emu/Io/Buzz.h"
+#include "Emu/Io/Turntable.h"
 
 #include <libusb.h>
 
@@ -125,13 +126,13 @@ private:
 
 void LIBUSB_CALL callback_transfer(struct libusb_transfer* transfer)
 {
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
-	if (!usbh->is_init)
+	std::lock_guard lock(usbh.mutex);
+	if (!usbh.is_init)
 		return;
 
-	usbh->transfer_complete(transfer);
+	usbh.transfer_complete(transfer);
 }
 
 usb_handler_thread::usb_handler_thread()
@@ -145,7 +146,7 @@ usb_handler_thread::usb_handler_thread()
 
 	bool found_skylander = false;
 	bool found_ghltar    = false;
-	bool found_buzz      = false;
+	bool found_turntable = false;
 
 	for (ssize_t index = 0; index < ndev; index++)
 	{
@@ -183,7 +184,10 @@ usb_handler_thread::usb_handler_thread()
 			found_ghltar = true;
 		}
 
-		check_device(0x12BA, 0x0140, 0x0140, "DJ Hero Turntable");
+		if (check_device(0x12BA, 0x0140, 0x0140, "DJ Hero Turntable"))
+		{
+			found_turntable = true;
+		}
 		check_device(0x12BA, 0x0200, 0x020F, "Harmonix Guitar");
 		check_device(0x12BA, 0x0210, 0x021F, "Harmonix Drums");
 		check_device(0x12BA, 0x2330, 0x233F, "Harmonix Keyboard");
@@ -198,15 +202,15 @@ usb_handler_thread::usb_handler_thread()
 		check_device(0x044F, 0xB65E, 0xB65E, "Thrustmaster TRS");
 		check_device(0x044F, 0xB660, 0xB660, "Thrustmaster T500 RS Gear Shift");
 
+		// GT6
+		check_device(0x2833, 0x0001, 0x0001, "Oculus");
+		check_device(0x046D, 0xCA03, 0xCA03, "lgFF_ca03_ca03");
+
 		// Buzz controllers
-		if (check_device(0x054C, 0x1000, 0x1040, "buzzer0"))
-			found_buzz = true;
-		if (check_device(0x054C, 0x0001, 0x0041, "buzzer1"))
-			found_buzz = true;
-		if (check_device(0x054C, 0x0042, 0x0042, "buzzer2"))
-			found_buzz = true;
-		if (check_device(0x046D, 0xC220, 0xC220, "buzzer9"))
-			found_buzz = true;
+		check_device(0x054C, 0x1000, 0x1040, "buzzer0");
+		check_device(0x054C, 0x0001, 0x0041, "buzzer1");
+		check_device(0x054C, 0x0042, 0x0042, "buzzer2");
+		check_device(0x046D, 0xC220, 0xC220, "buzzer9");
 
 		// GCon3 Gun
 		check_device(0x0B9A, 0x0800, 0x0800, "guncon3");
@@ -229,12 +233,22 @@ usb_handler_thread::usb_handler_thread()
 		usb_devices.push_back(std::make_shared<usb_device_ghltar>());
 	}
 
-	if (!found_buzz)
+	if (!found_turntable)
 	{
-		sys_usbd.notice("Adding emulated Buzz! buzzer");
+		sys_usbd.notice("Adding emulated turntable");
+		usb_devices.push_back(std::make_shared<usb_device_turntable>());
+	}
+
+	if (g_cfg.io.buzz == buzz_handler::one_controller || g_cfg.io.buzz == buzz_handler::two_controllers)
+	{
+		sys_usbd.notice("Adding emulated Buzz! buzzer (1-4 players)");
 		usb_devices.push_back(std::make_shared<usb_device_buzz>(0, 3));
+	}
+	if (g_cfg.io.buzz == buzz_handler::two_controllers)
+	{
 		// The current buzz emulation piggybacks on the pad input.
 		// Since there can only be 7 pads connected on a PS3 the 8th player is currently not supported
+		sys_usbd.notice("Adding emulated Buzz! buzzer (5-7 players)");
 		usb_devices.push_back(std::make_shared<usb_device_buzz>(4, 6));
 	}
 
@@ -304,10 +318,7 @@ void usb_handler_thread::operator()()
 		}
 
 		// If there is no handled devices usb thread is not actively needed
-		if (handled_devices.empty())
-			std::this_thread::sleep_for(500ms);
-		else
-			std::this_thread::sleep_for(200us);
+		thread_ctrl::wait_for(handled_devices.empty() ? 500'000 : 200);
 	}
 }
 
@@ -485,12 +496,12 @@ error_code sys_usbd_initialize(ppu_thread& ppu, vm::ptr<u32> handle)
 
 	sys_usbd.warning("sys_usbd_initialize(handle=*0x%x)", handle);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
+	std::lock_guard lock(usbh.mutex);
 
 	// Must not occur (lv2 allows multiple handles, cellUsbd does not)
-	ensure(!usbh->is_init.exchange(true));
+	ensure(!usbh.is_init.exchange(true));
 
 	*handle = 0x115B;
 
@@ -504,13 +515,13 @@ error_code sys_usbd_finalize(ppu_thread& ppu, u32 handle)
 
 	sys_usbd.warning("sys_usbd_finalize(handle=0x%x)", handle);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
-	usbh->is_init = false;
+	std::lock_guard lock(usbh.mutex);
+	usbh.is_init = false;
 
 	// Forcefully awake all waiters
-	for (auto& cpu : ::as_rvalue(std::move(usbh->sq)))
+	for (auto& cpu : ::as_rvalue(std::move(usbh.sq)))
 	{
 		// Special ternimation signal value
 		cpu->gpr[4] = 4;
@@ -529,18 +540,18 @@ error_code sys_usbd_get_device_list(ppu_thread& ppu, u32 handle, vm::ptr<UsbInte
 
 	sys_usbd.warning("sys_usbd_get_device_list(handle=0x%x, device_list=*0x%x, max_devices=0x%x)", handle, device_list, max_devices);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
-	if (!usbh->is_init)
+	std::lock_guard lock(usbh.mutex);
+	if (!usbh.is_init)
 		return CELL_EINVAL;
 
 	// TODO: was std::min<s32>
-	u32 i_tocopy = std::min<u32>(max_devices, ::size32(usbh->handled_devices));
+	u32 i_tocopy = std::min<u32>(max_devices, ::size32(usbh.handled_devices));
 
 	for (u32 index = 0; index < i_tocopy; index++)
 	{
-		device_list[index] = usbh->handled_devices[index].first;
+		device_list[index] = usbh.handled_devices[index].first;
 	}
 
 	return not_an_error(i_tocopy);
@@ -553,14 +564,14 @@ error_code sys_usbd_register_extra_ldd(ppu_thread& ppu, u32 handle, vm::ptr<char
 	sys_usbd.warning("sys_usbd_register_extra_ldd(handle=0x%x, s_product=%s, slen_product=0x%x, id_vendor=0x%x, id_product_min=0x%x, id_product_max=0x%x)", handle, s_product, slen_product, id_vendor,
 	    id_product_min, id_product_max);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
-	if (!usbh->is_init)
+	std::lock_guard lock(usbh.mutex);
+	if (!usbh.is_init)
 		return CELL_EINVAL;
 
-	s32 res = usbh->add_ldd(s_product, slen_product, id_vendor, id_product_min, id_product_max);
-	usbh->check_devices_vs_ldds();
+	s32 res = usbh.add_ldd(s_product, slen_product, id_vendor, id_product_min, id_product_max);
+	usbh.check_devices_vs_ldds();
 
 	return not_an_error(res); // To check
 }
@@ -571,16 +582,16 @@ error_code sys_usbd_get_descriptor_size(ppu_thread& ppu, u32 handle, u32 device_
 
 	sys_usbd.trace("sys_usbd_get_descriptor_size(handle=0x%x, deviceNumber=0x%x)", handle, device_handle);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
+	std::lock_guard lock(usbh.mutex);
 
-	if (!usbh->is_init || !usbh->handled_devices.count(device_handle))
+	if (!usbh.is_init || !usbh.handled_devices.count(device_handle))
 	{
 		return CELL_EINVAL;
 	}
 
-	return not_an_error(usbh->handled_devices[device_handle].second->device.get_size());
+	return not_an_error(usbh.handled_devices[device_handle].second->device.get_size());
 }
 
 error_code sys_usbd_get_descriptor(ppu_thread& ppu, u32 handle, u32 device_handle, vm::ptr<void> descriptor, u32 desc_size)
@@ -589,17 +600,17 @@ error_code sys_usbd_get_descriptor(ppu_thread& ppu, u32 handle, u32 device_handl
 
 	sys_usbd.trace("sys_usbd_get_descriptor(handle=0x%x, deviceNumber=0x%x, descriptor=0x%x, desc_size=0x%x)", handle, device_handle, descriptor, desc_size);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
+	std::lock_guard lock(usbh.mutex);
 
-	if (!usbh->is_init || !usbh->handled_devices.count(device_handle))
+	if (!usbh.is_init || !usbh.handled_devices.count(device_handle))
 	{
 		return CELL_EINVAL;
 	}
 
 	u8* ptr = static_cast<u8*>(descriptor.get_ptr());
-	usbh->handled_devices[device_handle].second->device.write_data(ptr);
+	usbh.handled_devices[device_handle].second->device.write_data(ptr);
 
 	return CELL_OK;
 }
@@ -625,7 +636,7 @@ error_code sys_usbd_register_ldd(ppu_thread& ppu, u32 handle, vm::ptr<char> s_pr
 	return CELL_OK;
 }
 
-error_code sys_usbd_unregister_ldd(ppu_thread& ppu)
+error_code sys_usbd_unregister_ldd(ppu_thread&)
 {
 	sys_usbd.todo("sys_usbd_unregister_ldd()");
 	return CELL_OK;
@@ -638,16 +649,16 @@ error_code sys_usbd_open_pipe(ppu_thread& ppu, u32 handle, u32 device_handle, u3
 
 	sys_usbd.warning("sys_usbd_open_pipe(handle=0x%x, device_handle=0x%x, unk1=0x%x, unk2=0x%x, unk3=0x%x, endpoint=0x%x, unk4=0x%x)", handle, device_handle, unk1, unk2, unk3, endpoint, unk4);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
+	std::lock_guard lock(usbh.mutex);
 
-	if (!usbh->is_init || !usbh->handled_devices.count(device_handle))
+	if (!usbh.is_init || !usbh.handled_devices.count(device_handle))
 	{
 		return CELL_EINVAL;
 	}
 
-	return not_an_error(usbh->open_pipe(device_handle, static_cast<u8>(endpoint)));
+	return not_an_error(usbh.open_pipe(device_handle, static_cast<u8>(endpoint)));
 }
 
 error_code sys_usbd_open_default_pipe(ppu_thread& ppu, u32 handle, u32 device_handle)
@@ -656,16 +667,16 @@ error_code sys_usbd_open_default_pipe(ppu_thread& ppu, u32 handle, u32 device_ha
 
 	sys_usbd.trace("sys_usbd_open_default_pipe(handle=0x%x, device_handle=0x%x)", handle, device_handle);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
+	std::lock_guard lock(usbh.mutex);
 
-	if (!usbh->is_init || !usbh->handled_devices.count(device_handle))
+	if (!usbh.is_init || !usbh.handled_devices.count(device_handle))
 	{
 		return CELL_EINVAL;
 	}
 
-	return not_an_error(usbh->open_pipe(device_handle, 0));
+	return not_an_error(usbh.open_pipe(device_handle, 0));
 }
 
 error_code sys_usbd_close_pipe(ppu_thread& ppu, u32 handle, u32 pipe_handle)
@@ -674,16 +685,16 @@ error_code sys_usbd_close_pipe(ppu_thread& ppu, u32 handle, u32 pipe_handle)
 
 	sys_usbd.todo("sys_usbd_close_pipe(handle=0x%x, pipe_handle=0x%x)", handle, pipe_handle);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
+	std::lock_guard lock(usbh.mutex);
 
-	if (!usbh->is_init || !usbh->is_pipe(pipe_handle))
+	if (!usbh.is_init || !usbh.is_pipe(pipe_handle))
 	{
 		return CELL_EINVAL;
 	}
 
-	usbh->close_pipe(pipe_handle);
+	usbh.close_pipe(pipe_handle);
 
 	return CELL_OK;
 }
@@ -700,15 +711,15 @@ error_code sys_usbd_receive_event(ppu_thread& ppu, u32 handle, vm::ptr<u64> arg1
 
 	sys_usbd.trace("sys_usbd_receive_event(handle=%u, arg1=*0x%x, arg2=*0x%x, arg3=*0x%x)", handle, arg1, arg2, arg3);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
 	{
-		std::lock_guard lock(usbh->mutex);
+		std::lock_guard lock(usbh.mutex);
 
-		if (!usbh->is_init)
+		if (!usbh.is_init)
 			return CELL_EINVAL;
 
-		if (usbh->get_event(arg1, arg2, arg3))
+		if (usbh.get_event(arg1, arg2, arg3))
 		{
 			// hack for Guitar Hero Live
 			// Attaching the device too fast seems to result in a nullptr along the way
@@ -719,17 +730,22 @@ error_code sys_usbd_receive_event(ppu_thread& ppu, u32 handle, vm::ptr<u64> arg1
 		}
 
 		lv2_obj::sleep(ppu);
-		usbh->sq.emplace_back(&ppu);
+		usbh.sq.emplace_back(&ppu);
 	}
 
-	while (!ppu.state.test_and_reset(cpu_flag::signal))
+	while (auto state = ppu.state.fetch_sub(cpu_flag::signal))
 	{
-		if (ppu.is_stopped())
+		if (is_stopped(state))
 		{
-			return 0;
+			return {};
 		}
 
-		thread_ctrl::wait();
+		if (state & cpu_flag::signal)
+		{
+			break;
+		}
+
+		thread_ctrl::wait_on(ppu.state, state);
 	}
 
 	*arg1 = ppu.gpr[4];
@@ -783,18 +799,18 @@ error_code sys_usbd_transfer_data(ppu_thread& ppu, u32 handle, u32 id_pipe, vm::
 		}
 	}
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
+	std::lock_guard lock(usbh.mutex);
 
-	if (!usbh->is_init || !usbh->is_pipe(id_pipe))
+	if (!usbh.is_init || !usbh.is_pipe(id_pipe))
 	{
 		return CELL_EINVAL;
 	}
 
-	u32 id_transfer  = usbh->get_free_transfer_id();
-	const auto& pipe = usbh->get_pipe(id_pipe);
-	auto& transfer   = usbh->get_transfer(id_transfer);
+	u32 id_transfer  = usbh.get_free_transfer_id();
+	const auto& pipe = usbh.get_pipe(id_pipe);
+	auto& transfer   = usbh.get_transfer(id_transfer);
 
 	// Default endpoint is control endpoint
 	if (pipe.endpoint == 0)
@@ -822,7 +838,7 @@ error_code sys_usbd_transfer_data(ppu_thread& ppu, u32 handle, u32 id_pipe, vm::
 	}
 
 	if (transfer.fake)
-		usbh->fake_transfers.push_back(&transfer);
+		usbh.fake_transfers.push_back(&transfer);
 
 	// returns an identifier specific to the transfer
 	return not_an_error(id_transfer);
@@ -834,18 +850,18 @@ error_code sys_usbd_isochronous_transfer_data(ppu_thread& ppu, u32 handle, u32 i
 
 	sys_usbd.todo("sys_usbd_isochronous_transfer_data(handle=0x%x, id_pipe=0x%x, iso_request=*0x%x)", handle, id_pipe, iso_request);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
+	std::lock_guard lock(usbh.mutex);
 
-	if (!usbh->is_init || !usbh->is_pipe(id_pipe))
+	if (!usbh.is_init || !usbh.is_pipe(id_pipe))
 	{
 		return CELL_EINVAL;
 	}
 
-	u32 id_transfer  = usbh->get_free_transfer_id();
-	const auto& pipe = usbh->get_pipe(id_pipe);
-	auto& transfer   = usbh->get_transfer(id_transfer);
+	u32 id_transfer  = usbh.get_free_transfer_id();
+	const auto& pipe = usbh.get_pipe(id_pipe);
+	auto& transfer   = usbh.get_transfer(id_transfer);
 
 	memcpy(&transfer.iso_request, iso_request.get_ptr(), sizeof(UsbDeviceIsoRequest));
 	pipe.device->isochronous_transfer(&transfer);
@@ -860,14 +876,14 @@ error_code sys_usbd_get_transfer_status(ppu_thread& ppu, u32 handle, u32 id_tran
 
 	sys_usbd.trace("sys_usbd_get_transfer_status(handle=0x%x, id_transfer=0x%x, unk1=0x%x, result=*0x%x, count=*0x%x)", handle, id_transfer, unk1, result, count);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
+	std::lock_guard lock(usbh.mutex);
 
-	if (!usbh->is_init)
+	if (!usbh.is_init)
 		return CELL_EINVAL;
 
-	auto& transfer = usbh->get_transfer(id_transfer);
+	auto& transfer = usbh.get_transfer(id_transfer);
 
 	*result = transfer.result;
 	*count  = transfer.count;
@@ -881,14 +897,14 @@ error_code sys_usbd_get_isochronous_transfer_status(ppu_thread& ppu, u32 handle,
 
 	sys_usbd.todo("sys_usbd_get_isochronous_transfer_status(handle=0x%x, id_transfer=0x%x, unk1=0x%x, request=*0x%x, result=*0x%x)", handle, id_transfer, unk1, request, result);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
+	std::lock_guard lock(usbh.mutex);
 
-	if (!usbh->is_init)
+	if (!usbh.is_init)
 		return CELL_EINVAL;
 
-	auto& transfer = usbh->get_transfer(id_transfer);
+	auto& transfer = usbh.get_transfer(id_transfer);
 
 	*result = transfer.result;
 	memcpy(request.get_ptr(), &transfer.iso_request, sizeof(UsbDeviceIsoRequest));
@@ -918,14 +934,14 @@ error_code sys_usbd_event_port_send(ppu_thread& ppu, u32 handle, u64 arg1, u64 a
 
 	sys_usbd.warning("sys_usbd_event_port_send(handle=0x%x, arg1=0x%x, arg2=0x%x, arg3=0x%x)", handle, arg1, arg2, arg3);
 
-	const auto usbh = g_fxo->get<named_thread<usb_handler_thread>>();
+	auto& usbh = g_fxo->get<named_thread<usb_handler_thread>>();
 
-	std::lock_guard lock(usbh->mutex);
+	std::lock_guard lock(usbh.mutex);
 
-	if (!usbh->is_init)
+	if (!usbh.is_init)
 		return CELL_EINVAL;
 
-	usbh->add_event(arg1, arg2, arg3);
+	usbh.add_event(arg1, arg2, arg3);
 
 	return CELL_OK;
 }

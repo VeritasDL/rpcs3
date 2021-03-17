@@ -13,6 +13,7 @@ using ppu_function_t = bool(*)(ppu_thread&);
 	ppu.current_function = #func;\
 	std::memcpy(ppu.syscall_args, ppu.gpr + 3, sizeof(ppu.syscall_args)); \
 	ppu_func_detail::do_call(ppu, func);\
+	static_cast<void>(ppu.test_stopped());\
 	ppu.current_function = old_f;\
 	ppu.cia += 4;\
 	__VA_ARGS__;\
@@ -101,9 +102,9 @@ namespace ppu_func_detail
 	{
 		static_assert(std::is_same<std::decay_t<T>, ppu_va_args_t>::value, "Invalid function argument type for ARG_VARIADIC");
 
-		static FORCE_INLINE ppu_va_args_t get_arg(ppu_thread& ppu)
+		static FORCE_INLINE ppu_va_args_t get_arg(ppu_thread&)
 		{
-			return{ g_count };
+			return {g_count};
 		}
 	};
 
@@ -256,7 +257,7 @@ class ppu_function_manager
 	};
 
 	// Access global function list
-	static std::vector<ppu_function_t>& access();
+	static std::vector<ppu_function_t>& access(bool ghc = false);
 
 	static u32 add_function(ppu_function_t function);
 
@@ -276,9 +277,9 @@ public:
 	}
 
 	// Read all registered functions
-	static inline const auto& get()
+	static inline const auto& get(bool llvm = false)
 	{
-		return access();
+		return access(llvm);
 	}
 
 	static inline u32 func_addr(u32 index)

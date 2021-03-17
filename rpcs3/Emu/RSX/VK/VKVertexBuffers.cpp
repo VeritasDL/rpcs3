@@ -69,7 +69,7 @@ namespace
 		VkDeviceSize offset_in_index_buffer = m_index_buffer_ring_info.alloc<256>(upload_size);
 		void* buf = m_index_buffer_ring_info.map(offset_in_index_buffer, upload_size);
 
-		g_fxo->get<rsx::dma_manager>()->emulate_as_indexed(buf, clause.primitive, vertex_count);
+		g_fxo->get<rsx::dma_manager>().emulate_as_indexed(buf, clause.primitive, vertex_count);
 
 		m_index_buffer_ring_info.unmap();
 		return std::make_tuple(
@@ -95,7 +95,7 @@ namespace
 		{
 		}
 
-		vertex_input_state operator()(const rsx::draw_array_command& command)
+		vertex_input_state operator()(const rsx::draw_array_command& /*command*/)
 		{
 			bool primitives_emulated = false;
 			VkPrimitiveTopology prims = vk::get_appropriate_topology(
@@ -195,7 +195,7 @@ namespace
 			return {prims, true, min_index, max_index, index_count, index_offset, index_info};
 		}
 
-		vertex_input_state operator()(const rsx::draw_inlined_array& command)
+		vertex_input_state operator()(const rsx::draw_inlined_array& /*command*/)
 		{
 			bool primitives_emulated = false;
 			auto &draw_clause = rsx::method_registers.current_draw_clause;

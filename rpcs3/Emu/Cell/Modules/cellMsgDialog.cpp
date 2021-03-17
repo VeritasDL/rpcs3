@@ -95,7 +95,7 @@ struct msg_dlg_thread_info
 
 			if (new_value == 0)
 			{
-				wait_until.wait(0);
+				thread_ctrl::wait_on(wait_until, 0);
 				continue;
 			}
 
@@ -104,10 +104,10 @@ struct msg_dlg_thread_info
 				if (wait_until.load() != new_value)
 					break;
 
-				std::this_thread::sleep_for(10ms);
+				thread_ctrl::wait_for(10'000);
 			}
 
-			if (auto manager = g_fxo->get<rsx::overlays::display_manager>())
+			if (auto manager = g_fxo->try_get<rsx::overlays::display_manager>())
 			{
 				if (auto dlg = manager->get<rsx::overlays::message_dialog>())
 				{
@@ -119,7 +119,7 @@ struct msg_dlg_thread_info
 					dlg->close(true, true);
 				}
 			}
-			else if (const auto dlg = g_fxo->get<msg_info>()->get())
+			else if (const auto dlg = g_fxo->get<msg_info>().get())
 			{
 				if (!wait_until.compare_and_swap_test(new_value, 0))
 				{
@@ -149,7 +149,7 @@ error_code open_msg_dialog(bool is_blocking, u32 type, vm::cptr<char> msgString,
 
 	const MsgDialogType _type{ type };
 
-	if (auto manager = g_fxo->get<rsx::overlays::display_manager>())
+	if (auto manager = g_fxo->try_get<rsx::overlays::display_manager>())
 	{
 		if (manager->get<rsx::overlays::message_dialog>())
 		{
@@ -173,7 +173,7 @@ error_code open_msg_dialog(bool is_blocking, u32 type, vm::cptr<char> msgString,
 		return res;
 	}
 
-	const auto dlg = g_fxo->get<msg_info>()->make();
+	const auto dlg = g_fxo->get<msg_info>().make();
 
 	if (!dlg)
 	{
@@ -197,8 +197,8 @@ error_code open_msg_dialog(bool is_blocking, u32 type, vm::cptr<char> msgString,
 				});
 			}
 
-			g_fxo->get<msg_dlg_thread>()->wait_until = 0;
-			g_fxo->get<msg_info>()->remove();
+			g_fxo->get<msg_dlg_thread>().wait_until = 0;
+			g_fxo->get<msg_info>().remove();
 		}
 
 		input::SetIntercepted(false);
@@ -217,19 +217,24 @@ error_code open_msg_dialog(bool is_blocking, u32 type, vm::cptr<char> msgString,
 		lv2_obj::awake(&ppu);
 	});
 
-	while (!ppu.state.test_and_reset(cpu_flag::signal))
+	while (auto state = ppu.state.fetch_sub(cpu_flag::signal))
 	{
-		if (ppu.is_stopped())
+		if (is_stopped(state))
 		{
-			return 0;
+			return {};
 		}
 
-		thread_ctrl::wait();
+		if (state & cpu_flag::signal)
+		{
+			break;
+		}
+
+		thread_ctrl::wait_on(ppu.state, state);
 	}
 
 	if (is_blocking)
 	{
-		while (auto dlg = g_fxo->get<msg_info>()->get())
+		while (auto dlg = g_fxo->get<msg_info>().get())
 		{
 			if (Emu.IsStopped() || dlg->state != MsgDialogState::Open)
 			{
@@ -428,29 +433,29 @@ error_code cellMsgDialogClose(f32 delay)
 
 	const u64 wait_until = get_guest_system_time() + static_cast<s64>(std::max<float>(delay, 0.0f) * 1000);
 
-	if (auto manager = g_fxo->get<rsx::overlays::display_manager>())
+	if (auto manager = g_fxo->try_get<rsx::overlays::display_manager>())
 	{
 		if (auto dlg = manager->get<rsx::overlays::message_dialog>())
 		{
-			const auto thr = g_fxo->get<msg_dlg_thread>();
-			thr->wait_until = wait_until;
-			thr->wait_until.notify_one();
+			auto& thr = g_fxo->get<msg_dlg_thread>();
+			thr.wait_until = wait_until;
+			thr.wait_until.notify_one();
 			return CELL_OK;
 		}
 
 		return CELL_MSGDIALOG_ERROR_DIALOG_NOT_OPENED;
 	}
 
-	const auto dlg = g_fxo->get<msg_info>()->get();
+	const auto dlg = g_fxo->get<msg_info>().get();
 
 	if (!dlg)
 	{
 		return CELL_MSGDIALOG_ERROR_DIALOG_NOT_OPENED;
 	}
 
-	const auto thr = g_fxo->get<msg_dlg_thread>();
-	thr->wait_until = wait_until;
-	thr->wait_until.notify_one();
+	auto& thr = g_fxo->get<msg_dlg_thread>();
+	thr.wait_until = wait_until;
+	thr.wait_until.notify_one();
 	return CELL_OK;
 }
 
@@ -458,17 +463,17 @@ error_code cellMsgDialogAbort()
 {
 	cellSysutil.warning("cellMsgDialogAbort()");
 
-	if (auto manager = g_fxo->get<rsx::overlays::display_manager>())
+	if (auto manager = g_fxo->try_get<rsx::overlays::display_manager>())
 	{
 		if (auto dlg = manager->get<rsx::overlays::message_dialog>())
 		{
-			g_fxo->get<msg_dlg_thread>()->wait_until = 0;
+			g_fxo->get<msg_dlg_thread>().wait_until = 0;
 			dlg->close(false, true);
 			return CELL_OK;
 		}
 	}
 
-	const auto dlg = g_fxo->get<msg_info>()->get();
+	const auto dlg = g_fxo->get<msg_info>().get();
 
 	if (!dlg)
 	{
@@ -480,8 +485,8 @@ error_code cellMsgDialogAbort()
 		return CELL_SYSUTIL_ERROR_BUSY;
 	}
 
-	g_fxo->get<msg_dlg_thread>()->wait_until = 0;
-	g_fxo->get<msg_info>()->remove(); // this shouldn't call on_close
+	g_fxo->get<msg_dlg_thread>().wait_until = 0;
+	g_fxo->get<msg_info>().remove(); // this shouldn't call on_close
 	input::SetIntercepted(false);     // so we need to reenable the pads here
 
 	return CELL_OK;
@@ -509,7 +514,7 @@ error_code cellMsgDialogProgressBarSetMsg(u32 progressBarIndex, vm::cptr<char> m
 		return CELL_MSGDIALOG_ERROR_PARAM;
 	}
 
-	if (auto manager = g_fxo->get<rsx::overlays::display_manager>())
+	if (auto manager = g_fxo->try_get<rsx::overlays::display_manager>())
 	{
 		if (auto dlg = manager->get<rsx::overlays::message_dialog>())
 		{
@@ -517,7 +522,7 @@ error_code cellMsgDialogProgressBarSetMsg(u32 progressBarIndex, vm::cptr<char> m
 		}
 	}
 
-	const auto dlg = g_fxo->get<msg_info>()->get();
+	const auto dlg = g_fxo->get<msg_info>().get();
 
 	if (!dlg)
 	{
@@ -541,7 +546,7 @@ error_code cellMsgDialogProgressBarReset(u32 progressBarIndex)
 {
 	cellSysutil.warning("cellMsgDialogProgressBarReset(progressBarIndex=%d)", progressBarIndex);
 
-	if (auto manager = g_fxo->get<rsx::overlays::display_manager>())
+	if (auto manager = g_fxo->try_get<rsx::overlays::display_manager>())
 	{
 		if (auto dlg = manager->get<rsx::overlays::message_dialog>())
 		{
@@ -549,7 +554,7 @@ error_code cellMsgDialogProgressBarReset(u32 progressBarIndex)
 		}
 	}
 
-	const auto dlg = g_fxo->get<msg_info>()->get();
+	const auto dlg = g_fxo->get<msg_info>().get();
 
 	if (!dlg)
 	{
@@ -573,7 +578,7 @@ error_code cellMsgDialogProgressBarInc(u32 progressBarIndex, u32 delta)
 {
 	cellSysutil.warning("cellMsgDialogProgressBarInc(progressBarIndex=%d, delta=%d)", progressBarIndex, delta);
 
-	if (auto manager = g_fxo->get<rsx::overlays::display_manager>())
+	if (auto manager = g_fxo->try_get<rsx::overlays::display_manager>())
 	{
 		if (auto dlg = manager->get<rsx::overlays::message_dialog>())
 		{
@@ -581,7 +586,7 @@ error_code cellMsgDialogProgressBarInc(u32 progressBarIndex, u32 delta)
 		}
 	}
 
-	const auto dlg = g_fxo->get<msg_info>()->get();
+	const auto dlg = g_fxo->get<msg_info>().get();
 
 	if (!dlg)
 	{

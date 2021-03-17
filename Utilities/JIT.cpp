@@ -7,6 +7,7 @@
 #include "mutex.h"
 #include "util/vm.hpp"
 #include "util/asm.hpp"
+#include <charconv>
 #include <immintrin.h>
 #include <zlib.h>
 
@@ -22,8 +23,10 @@ static u8* get_jit_memory()
 	static void* const s_memory2 = []() -> void*
 	{
 		void* ptr = utils::memory_reserve(0x80000000);
+#ifdef CAN_OVERCOMMIT
 		utils::memory_commit(ptr, 0x80000000);
 		utils::memory_protect(ptr, 0x40000000, utils::protection::wx);
+#endif
 		return ptr;
 	}();
 
@@ -140,7 +143,7 @@ asmjit::Error jit_runtime::_add(void** dst, asmjit::CodeHolder* code) noexcept
 	return asmjit::kErrorOk;
 }
 
-asmjit::Error jit_runtime::_release(void* ptr) noexcept
+asmjit::Error jit_runtime::_release(void*) noexcept
 {
 	return asmjit::kErrorOk;
 }
@@ -228,6 +231,7 @@ asmjit::Runtime& asmjit::get_global_runtime()
 			if (!p || m_pos > m_max) [[unlikely]]
 			{
 				*dst = nullptr;
+				jit_log.fatal("Out of memory (static asmjit)");
 				return asmjit::kErrorNoVirtualMemory;
 			}
 
@@ -245,7 +249,7 @@ asmjit::Runtime& asmjit::get_global_runtime()
 			return asmjit::kErrorOk;
 		}
 
-		asmjit::Error _release(void* ptr) noexcept override
+		asmjit::Error _release(void*) noexcept override
 		{
 			return asmjit::kErrorOk;
 		}
@@ -277,6 +281,8 @@ asmjit::Runtime& asmjit::get_global_runtime()
 #pragma GCC diagnostic ignored "-Wall"
 #pragma GCC diagnostic ignored "-Wextra"
 #pragma GCC diagnostic ignored "-Wold-style-cast"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/FormattedStream.h"
@@ -288,12 +294,6 @@ asmjit::Runtime& asmjit::get_global_runtime()
 #pragma warning(pop)
 #else
 #pragma GCC diagnostic pop
-#endif
-
-#ifdef _WIN32
-#include <Windows.h>
-#else
-#include <sys/mman.h>
 #endif
 
 const bool jit_initialize = []() -> bool
@@ -310,12 +310,29 @@ const bool jit_initialize = []() -> bool
 	fmt::throw_exception("Null function: %s", name);
 }
 
+namespace vm
+{
+	extern u8* const g_sudo_addr;
+}
+
 static shared_mutex null_mtx;
 
 static std::unordered_map<std::string, u64> null_funcs;
 
 static u64 make_null_function(const std::string& name)
 {
+	if (name.starts_with("__0x"))
+	{
+		u32 addr = -1;
+		auto res = std::from_chars(name.c_str() + 4, name.c_str() + name.size(), addr, 16);
+
+		if (res.ec == std::errc() && res.ptr == name.c_str() + name.size() && addr < 0x8000'0000)
+		{
+			// Point the garbage to reserved, non-executable memory
+			return reinterpret_cast<u64>(vm::g_sudo_addr + addr);
+		}
+	}
+
 	std::lock_guard lock(null_mtx);
 
 	if (u64& func_ptr = null_funcs[name]) [[likely]]
@@ -376,8 +393,12 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 
 		if (!addr)
 		{
-			jit_log.error("Function '%s' linked but not found.", name);
 			addr = make_null_function(name);
+
+			if (!addr)
+			{
+				fmt::throw_exception("Failed to link '%s'", name);
+			}
 		}
 
 		return {addr, llvm::JITSymbolFlags::Exported};
@@ -414,12 +435,12 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 		return this->ptr + olda;
 	}
 
-	u8* allocateCodeSection(uptr size, uint align, uint sec_id, llvm::StringRef sec_name) override
+	u8* allocateCodeSection(uptr size, uint align, uint /*sec_id*/, llvm::StringRef /*sec_name*/) override
 	{
 		return allocate(code_ptr, size, align, utils::protection::wx);
 	}
 
-	u8* allocateDataSection(uptr size, uint align, uint sec_id, llvm::StringRef sec_name, bool is_ro) override
+	u8* allocateDataSection(uptr size, uint align, uint /*sec_id*/, llvm::StringRef /*sec_name*/, bool /*is_ro*/) override
 	{
 		return allocate(data_ptr, size, align, utils::protection::rw);
 	}
@@ -429,7 +450,7 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 		return false;
 	}
 
-	void registerEHFrames(u8* addr, u64 load_addr, usz size) override
+	void registerEHFrames(u8*, u64, usz) override
 	{
 	}
 
@@ -453,19 +474,23 @@ struct MemoryManager2 : llvm::RTDyldMemoryManager
 
 		if (!addr)
 		{
-			jit_log.error("Function '%s' linked but not found.", name);
 			addr = make_null_function(name);
+
+			if (!addr)
+			{
+				fmt::throw_exception("Failed to link '%s' (MM2)", name);
+			}
 		}
 
 		return {addr, llvm::JITSymbolFlags::Exported};
 	}
 
-	u8* allocateCodeSection(uptr size, uint align, uint sec_id, llvm::StringRef sec_name) override
+	u8* allocateCodeSection(uptr size, uint align, uint /*sec_id*/, llvm::StringRef /*sec_name*/) override
 	{
 		return jit_runtime::alloc(size, align, true);
 	}
 
-	u8* allocateDataSection(uptr size, uint align, uint sec_id, llvm::StringRef sec_name, bool is_ro) override
+	u8* allocateDataSection(uptr size, uint align, uint /*sec_id*/, llvm::StringRef /*sec_name*/, bool /*is_ro*/) override
 	{
 		return jit_runtime::alloc(size, align, false);
 	}
@@ -475,7 +500,7 @@ struct MemoryManager2 : llvm::RTDyldMemoryManager
 		return false;
 	}
 
-	void registerEHFrames(u8* addr, u64 load_addr, usz size) override
+	void registerEHFrames(u8*, u64, usz) override
 	{
 	}
 
@@ -536,7 +561,12 @@ public:
 		}
 		}
 
-		fs::file(name, fs::rewrite).write(zbuf.get(), zsz - zs.avail_out);
+		if (!fs::write_file(name, fs::rewrite, zbuf.get(), zsz - zs.avail_out))
+		{
+				jit_log.error("LLVM: Failed to create module file: %s (%s)", name, fs::g_tls_error);
+				return;
+		}
+
 		jit_log.notice("LLVM: Created module: %s", _module->getName().data());
 	}
 
@@ -730,7 +760,7 @@ jit_compiler::jit_compiler(const std::unordered_map<std::string, u64>& _link, co
 
 		for (auto&& [name, addr] : _link)
 		{
-			m_engine->addGlobalMapping(name, addr);
+			m_engine->updateGlobalMapping(name, addr);
 		}
 	}
 

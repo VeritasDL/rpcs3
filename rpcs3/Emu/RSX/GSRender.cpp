@@ -20,16 +20,7 @@ GSRender::~GSRender()
 
 	if (m_frame)
 	{
-		m_frame->hide();
 		m_frame->close();
-	}
-}
-
-void GSRender::on_init_rsx()
-{
-	if (m_frame)
-	{
-		m_frame->show();
 	}
 }
 
@@ -53,7 +44,7 @@ void GSRender::on_exit()
 	rsx::thread::on_exit();
 }
 
-void GSRender::flip(const rsx::display_flip_info_t& info)
+void GSRender::flip(const rsx::display_flip_info_t&)
 {
 	if (m_frame)
 	{

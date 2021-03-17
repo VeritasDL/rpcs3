@@ -8,6 +8,7 @@
 #include "Emu/GDB.h"
 #include "Emu/Cell/PPUThread.h"
 #include "Emu/Cell/SPUThread.h"
+#include "Emu/RSX/RSXThread.h"
 #include "Emu/perf_meter.hpp"
 
 #include "util/asm.hpp"
@@ -49,7 +50,6 @@ void fmt_class_string<cpu_flag>::format(std::string& out, u64 arg)
 		case cpu_flag::signal: return "sig";
 		case cpu_flag::memory: return "mem";
 		case cpu_flag::dbg_global_pause: return "G-PAUSE";
-		case cpu_flag::dbg_global_stop: return "G-EXIT";
 		case cpu_flag::dbg_pause: return "PAUSE";
 		case cpu_flag::dbg_step: return "STEP";
 		case cpu_flag::__bitset_enum_max: break;
@@ -185,7 +185,7 @@ struct cpu_prof
 			if (threads.empty())
 			{
 				// Wait for messages if no work (don't waste CPU)
-				atomic_wait::list(registered).wait();
+				thread_ctrl::wait_on(registered, nullptr);
 				continue;
 			}
 
@@ -252,7 +252,7 @@ struct cpu_prof
 
 using cpu_profiler = named_thread<cpu_prof>;
 
-thread_local cpu_thread* g_tls_current_cpu_thread = nullptr;
+thread_local DECLARE(cpu_thread::g_tls_this_thread) = nullptr;
 
 // Total number of CPU threads
 static atomic_t<u64, 64> s_cpu_counter{0};
@@ -276,6 +276,14 @@ namespace cpu_counter
 {
 	void add(cpu_thread* _this) noexcept
 	{
+		switch (_this->id_type())
+		{
+		case 1:
+		case 2:
+			break;
+		default: return;
+		}
+
 		std::lock_guard lock(s_cpu_lock);
 
 		u32 id = -1;
@@ -395,7 +403,7 @@ namespace cpu_counter
 
 void cpu_thread::operator()()
 {
-	g_tls_current_cpu_thread = this;
+	g_tls_this_thread = this;
 
 	if (g_cfg.core.thread_scheduler_enabled)
 	{
@@ -421,24 +429,29 @@ void cpu_thread::operator()()
 		}
 	}
 
-	while (!g_fxo->get<cpu_profiler>())
+	while (!g_fxo->is_init<cpu_profiler>())
 	{
+		if (Emu.IsStopped())
+		{
+			return;
+		}
+
 		// Can we have a little race, right? First thread is started concurrently with g_fxo->init()
-		std::this_thread::sleep_for(1ms);
+		thread_ctrl::wait_for(1000);
 	}
 
 	switch (id_type())
 	{
 	case 1:
 	{
-		//g_fxo->get<cpu_profiler>()->registered.push(id);
+		//g_fxo->get<cpu_profiler>().registered.push(id);
 		break;
 	}
 	case 2:
 	{
 		if (g_cfg.core.spu_prof)
 		{
-			g_fxo->get<cpu_profiler>()->registered.push(id);
+			g_fxo->get<cpu_profiler>().registered.push(id);
 		}
 
 		break;
@@ -472,7 +485,7 @@ void cpu_thread::operator()()
 		}
 	});
 
-	g_tls_log_control = [](const char* fmt, u64 progress)
+	g_tls_log_control = [](const char*, u64 progress)
 	{
 		static thread_local bool wait_set = false;
 
@@ -522,7 +535,9 @@ void cpu_thread::operator()()
 
 			s_cpu_counter--;
 
-			g_tls_current_cpu_thread = nullptr;
+			g_tls_this_thread = nullptr;
+
+			g_threads_deleted++;
 
 			_this = nullptr;
 		}
@@ -531,7 +546,7 @@ void cpu_thread::operator()()
 		{
 			if (_this)
 			{
-				sys_log.warning("CPU Thread '%s' terminated abnormally:\n%s", name, _this->dump_all());
+				sys_log.warning("CPU Thread '%s' terminated abnormally!", name);
 				cleanup();
 			}
 		}
@@ -541,10 +556,17 @@ void cpu_thread::operator()()
 	cleanup.name = thread_ctrl::get_name();
 
 	// Check thread status
-	while (!(state & (cpu_flag::exit + cpu_flag::dbg_global_stop)) && thread_ctrl::state() != thread_state::aborting)
+	while (!(state & cpu_flag::exit) && thread_ctrl::state() != thread_state::aborting)
 	{
 		// Check stop status
-		if (!(state & cpu_flag::stop))
+		const auto state0 = +state;
+
+		if (is_stopped(state0 - cpu_flag::stop))
+		{
+			break;
+		}
+
+		if (!(state0 & cpu_flag::stop))
 		{
 			cpu_task();
 
@@ -556,7 +578,7 @@ void cpu_thread::operator()()
 			continue;
 		}
 
-		thread_ctrl::wait();
+		thread_ctrl::wait_on(state, state0);
 
 		if (state & cpu_flag::ret && state.test_and_reset(cpu_flag::ret))
 		{
@@ -570,14 +592,17 @@ void cpu_thread::operator()()
 
 cpu_thread::~cpu_thread()
 {
-	vm::cleanup_unlock(*this);
-	g_threads_deleted++;
 }
 
 cpu_thread::cpu_thread(u32 id)
 	: id(id)
 {
 	g_threads_created++;
+}
+
+void cpu_thread::cpu_wait(bs_t<cpu_flag> old)
+{
+	thread_ctrl::wait_on(state, old);
 }
 
 bool cpu_thread::check_state() noexcept
@@ -589,6 +614,7 @@ bool cpu_thread::check_state() noexcept
 	while (true)
 	{
 		// Process all flags in a single atomic op
+		bs_t<cpu_flag> state1;
 		const auto state0 = state.fetch_op([&](bs_t<cpu_flag>& flags)
 		{
 			bool store = false;
@@ -641,8 +667,28 @@ bool cpu_thread::check_state() noexcept
 				store = true;
 			}
 
+			// Can't process dbg_step if we only paused temporarily
+			if (cpu_can_stop && flags & cpu_flag::dbg_step)
+			{
+				if (u32 pc = get_pc(), *pc2 = get_pc2(); pc != umax && pc2)
+				{
+					if (pc != *pc2)
+					{
+						flags -= cpu_flag::dbg_step;
+						flags += cpu_flag::dbg_pause;
+						store = true;
+					}
+				}
+				else
+				{
+					// Can't test, ignore flag
+					flags -= cpu_flag::dbg_step;
+					store = true;
+				}
+			}
+
 			// Atomically clean wait flag and escape
-			if (!(flags & (cpu_flag::exit + cpu_flag::dbg_global_stop + cpu_flag::ret + cpu_flag::stop)))
+			if (!(flags & (cpu_flag::exit + cpu_flag::ret + cpu_flag::stop)))
 			{
 				// Check pause flags which hold thread inside check_state (ignore suspend on cpu_flag::temp)
 				if (flags & (cpu_flag::pause + cpu_flag::dbg_global_pause + cpu_flag::dbg_pause + cpu_flag::memory + (cpu_can_stop ? cpu_flag::suspend : cpu_flag::pause)))
@@ -654,6 +700,7 @@ bool cpu_thread::check_state() noexcept
 					}
 
 					escape = false;
+					state1 = flags;
 					return store;
 				}
 
@@ -676,15 +723,8 @@ bool cpu_thread::check_state() noexcept
 				retval = cpu_can_stop;
 			}
 
-			if (cpu_can_stop && flags & cpu_flag::dbg_step)
-			{
-				// Can't process dbg_step if we only paused temporarily
-				flags += cpu_flag::dbg_pause;
-				flags -= cpu_flag::dbg_step;
-				store = true;
-			}
-
 			escape = true;
+			state1 = flags;
 			return store;
 		}).first;
 
@@ -694,6 +734,11 @@ bool cpu_thread::check_state() noexcept
 			{
 				// Restore thread in the suspend list
 				cpu_counter::add(this);
+			}
+
+			if (retval)
+			{
+				cpu_on_stop();
 			}
 
 			ensure(cpu_can_stop || !retval);
@@ -718,10 +763,10 @@ bool cpu_thread::check_state() noexcept
 		{
 			if (state0 & cpu_flag::dbg_pause)
 			{
-				g_fxo->get<gdb_server>()->pause_from(this);
+				g_fxo->get<gdb_server>().pause_from(this);
 			}
 
-			thread_ctrl::wait();
+			cpu_wait(state1);
 		}
 		else
 		{
@@ -739,7 +784,7 @@ bool cpu_thread::check_state() noexcept
 				{
 					u64 ctr = g_suspend_counter;
 
-					if (ctr >> 2 == s_tls_sctr >> 2)
+					if (ctr >> 2 == s_tls_sctr >> 2 && state & cpu_flag::pause)
 					{
 						if (i < 20 || ctr & 1)
 						{
@@ -747,7 +792,8 @@ bool cpu_thread::check_state() noexcept
 						}
 						else
 						{
-							g_suspend_counter.wait(ctr, -4);
+							// TODO: fix the workaround
+							g_suspend_counter.wait(ctr, -4, atomic_wait_timeout{100});
 						}
 					}
 					else
@@ -772,7 +818,7 @@ void cpu_thread::notify()
 	{
 		thread_ctrl::notify(*static_cast<named_thread<spu_thread>*>(this));
 	}
-	else
+	else if (id_type() != 0x55)
 	{
 		fmt::throw_exception("Invalid cpu_thread type");
 	}
@@ -780,6 +826,9 @@ void cpu_thread::notify()
 
 void cpu_thread::abort()
 {
+	state += cpu_flag::exit;
+	state.notify_one(cpu_flag::exit);
+
 	// Downcast to correct type
 	if (id_type() == 1)
 	{
@@ -828,15 +877,51 @@ u32 cpu_thread::get_pc() const
 		pc = &static_cast<const spu_thread*>(this)->pc;
 		break;
 	}
+	case 0x55:
+	{
+		const auto ctrl = static_cast<const rsx::thread*>(this)->ctrl;
+		return ctrl ? ctrl->get : UINT32_MAX;
+	}
 	default: break;
 	}
 
 	return pc ? atomic_storage<u32>::load(*pc) : UINT32_MAX;
 }
 
+u32* cpu_thread::get_pc2()
+{
+	switch (id_type())
+	{
+	case 1:
+	{
+		return &static_cast<ppu_thread*>(this)->dbg_step_pc;
+	}
+	case 2:
+	{
+		return &static_cast<spu_thread*>(this)->dbg_step_pc;
+	}
+	case 0x55:
+	{
+		const auto ctrl = static_cast<rsx::thread*>(this)->ctrl;
+		return ctrl ? &static_cast<rsx::thread*>(this)->dbg_step_pc : nullptr;
+	}
+	default: break;
+	}
+
+	return nullptr;
+}
+
 std::string cpu_thread::dump_all() const
 {
-	return {};
+	std::string ret = cpu_thread::dump_misc();
+	ret += '\n';
+	ret += dump_misc();
+	ret += '\n';
+	ret += dump_regs();
+	ret += '\n';
+	ret += dump_callstack();
+
+	return ret;
 }
 
 std::string cpu_thread::dump_regs() const
@@ -846,7 +931,16 @@ std::string cpu_thread::dump_regs() const
 
 std::string cpu_thread::dump_callstack() const
 {
-	return {};
+	std::string ret;
+
+	fmt::append(ret, "Call stack:\n=========\n0x%08x (0x0) called\n", get_pc());
+
+	for (const auto& sp : dump_callstack_list())
+	{
+		fmt::append(ret, "> from 0x%08x (sp=0x%08x)\n", sp.first, sp.second);
+	}
+
+	return ret;
 }
 
 std::vector<std::pair<u32, u32>> cpu_thread::dump_callstack_list() const
@@ -856,7 +950,7 @@ std::vector<std::pair<u32, u32>> cpu_thread::dump_callstack_list() const
 
 std::string cpu_thread::dump_misc() const
 {
-	return fmt::format("Type: %s\n" "State: %s\n", typeid(*this).name(), state.load());
+	return fmt::format("Type: %s\n" "State: %s\n", id_type() == 1 ? "PPU" : id_type() == 2 ? "SPU" : "CPU", state.load());
 }
 
 bool cpu_thread::suspend_work::push(cpu_thread* _this) noexcept
@@ -912,7 +1006,7 @@ bool cpu_thread::suspend_work::push(cpu_thread* _this) noexcept
 		// Copy snapshot for finalization
 		u128 copy2 = copy;
 
-		copy = cpu_counter::for_all_cpu(copy, [&](cpu_thread* cpu, u32 index)
+		copy = cpu_counter::for_all_cpu(copy, [&](cpu_thread* cpu, u32 /*index*/)
 		{
 			if (cpu->state.fetch_add(cpu_flag::pause) & cpu_flag::wait)
 			{
@@ -926,7 +1020,7 @@ bool cpu_thread::suspend_work::push(cpu_thread* _this) noexcept
 		while (copy)
 		{
 			// Check only CPUs which haven't acknowledged their waiting state yet
-			copy = cpu_counter::for_all_cpu(copy, [&](cpu_thread* cpu, u32 index)
+			copy = cpu_counter::for_all_cpu(copy, [&](cpu_thread* cpu, u32 /*index*/)
 			{
 				if (cpu->state & cpu_flag::wait)
 				{
@@ -1025,7 +1119,7 @@ bool cpu_thread::suspend_work::push(cpu_thread* _this) noexcept
 
 void cpu_thread::stop_all() noexcept
 {
-	if (g_tls_current_cpu_thread)
+	if (g_tls_this_thread)
 	{
 		// Report unsupported but unnecessary case
 		sys_log.fatal("cpu_thread::stop_all() has been called from a CPU thread.");
@@ -1035,7 +1129,6 @@ void cpu_thread::stop_all() noexcept
 	{
 		auto on_stop = [](u32, cpu_thread& cpu)
 		{
-			cpu.state += cpu_flag::dbg_global_stop;
 			cpu.abort();
 		};
 
@@ -1058,7 +1151,7 @@ void cpu_thread::stop_all() noexcept
 
 void cpu_thread::flush_profilers() noexcept
 {
-	if (!g_fxo->get<cpu_profiler>())
+	if (!g_fxo->is_init<cpu_profiler>())
 	{
 		profiler.fatal("cpu_thread::flush_profilers() has been called incorrectly.");
 		return;
@@ -1066,6 +1159,6 @@ void cpu_thread::flush_profilers() noexcept
 
 	if (g_cfg.core.spu_prof || false)
 	{
-		g_fxo->get<cpu_profiler>()->registered.push(0);
+		g_fxo->get<cpu_profiler>().registered.push(0);
 	}
 }

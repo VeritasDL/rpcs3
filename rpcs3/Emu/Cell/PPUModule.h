@@ -3,7 +3,6 @@
 #include "PPUFunction.h"
 #include "PPUCallback.h"
 #include "ErrorCodes.h"
-#include <typeinfo>
 #include "Emu/Memory/vm_var.h"
 
 // Helper function
@@ -41,7 +40,6 @@ struct ppu_static_function
 	const char* name;
 	u32 index; // Index for ppu_function_manager
 	u32 flags;
-	const char* type;
 	std::vector<const char*> args; // Arg names
 	const u32* export_addr;
 
@@ -56,11 +54,10 @@ struct ppu_static_function
 struct ppu_static_variable
 {
 	const char* name;
-	vm::gvar<char>* var; // Pointer to variable address storage
+	u32* var; // Pointer to variable address storage
 	void(*init)(); // Variable initialization function
 	u32 size;
 	u32 align;
-	const char* type;
 	u32 flags;
 	u32 addr;
 	const u32* export_addr;
@@ -125,7 +122,6 @@ public:
 		info.name  = name;
 		info.index = ppu_function_manager::register_function<decltype(Func), Func>(func);
 		info.flags = 0;
-		info.type  = typeid(*Func).name();
 
 		registered<Func>::info = &info;
 
@@ -148,11 +144,10 @@ public:
 		auto& info = access_static_variable(_module, vnid);
 
 		info.name  = name;
-		info.var   = reinterpret_cast<vm::gvar<char>*>(Var);
+		info.var   = &Var->raw();
 		info.init  = [] {};
 		info.size  = gvar::alloc_size;
 		info.align = gvar::alloc_align;
-		info.type  = typeid(*Var).name();
 		info.flags = 0;
 		info.addr  = 0;
 
@@ -266,6 +261,7 @@ public:
 	static const ppu_static_module sceNpTrophy;
 	static const ppu_static_module sceNpTus;
 	static const ppu_static_module sceNpUtil;
+	static const ppu_static_module sys_crashdump;
 	static const ppu_static_module sys_io;
 	static const ppu_static_module sys_net;
 	static const ppu_static_module sysPrxForUser;

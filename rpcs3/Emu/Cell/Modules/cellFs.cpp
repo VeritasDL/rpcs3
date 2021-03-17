@@ -907,19 +907,16 @@ struct fs_aio_thread : ppu_thread
 			const auto func = cmd2.arg2<fs_aio_cb_t>();
 			cmd_pop(1);
 
-			s32 error = CELL_OK;
+			s32 error = CELL_EBADF;
 			u64 result = 0;
 
 			const auto file = idm::get<lv2_fs_object, lv2_file>(aio->fd);
 
 			if (!file || (type == 1 && file->flags & CELL_FS_O_WRONLY) || (type == 2 && !(file->flags & CELL_FS_O_ACCMODE)))
 			{
-				error = CELL_EBADF;
 			}
-			else
+			else if (std::lock_guard lock(file->mp->mutex); file->file)
 			{
-				std::lock_guard lock(file->mp->mutex);
-
 				const auto old_pos = file->file.pos(); file->file.seek(aio->offset);
 
 				result = type == 2
@@ -927,6 +924,7 @@ struct fs_aio_thread : ppu_thread
 					: file->op_read(aio->buf, aio->size);
 
 				file->file.seek(old_pos);
+				error = CELL_OK;
 			}
 
 			func(*this, aio, error, xid, result);
@@ -938,6 +936,8 @@ struct fs_aio_thread : ppu_thread
 struct fs_aio_manager
 {
 	std::shared_ptr<fs_aio_thread> thread;
+
+	shared_mutex mutex;
 };
 
 s32 cellFsAioInit(vm::cptr<char> mount_point)
@@ -967,16 +967,16 @@ s32 cellFsAioRead(vm::ptr<CellFsAio> aio, vm::ptr<s32> id, fs_aio_cb_t func)
 
 	// TODO: detect mount point and send AIO request to the AIO thread of this mount point
 
-	const auto m = g_fxo->get<fs_aio_manager>();
+	auto& m = g_fxo->get<fs_aio_manager>();
 
-	if (!m)
+	if (!m.thread)
 	{
 		return CELL_ENXIO;
 	}
 
 	const s32 xid = (*id = ++g_fs_aio_id);
 
-	m->thread->cmd_list
+	m.thread->cmd_list
 	({
 		{ 1, xid },
 		{ aio, func },
@@ -991,16 +991,16 @@ s32 cellFsAioWrite(vm::ptr<CellFsAio> aio, vm::ptr<s32> id, fs_aio_cb_t func)
 
 	// TODO: detect mount point and send AIO request to the AIO thread of this mount point
 
-	const auto m = g_fxo->get<fs_aio_manager>();
+	auto& m = g_fxo->get<fs_aio_manager>();
 
-	if (!m)
+	if (!m.thread)
 	{
 		return CELL_ENXIO;
 	}
 
 	const s32 xid = (*id = ++g_fs_aio_id);
 
-	m->thread->cmd_list
+	m.thread->cmd_list
 	({
 		{ 2, xid },
 		{ aio, func },

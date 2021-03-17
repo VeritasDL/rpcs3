@@ -1,6 +1,16 @@
 #include "device.h"
 #include "memory.h"
 
+namespace
+{
+	// Copied from rsx_utils.h. Move to a more convenient location
+	template<typename T, typename U>
+	static inline T align2(T value, U alignment)
+	{
+		return ((value + alignment - 1) / alignment) * alignment;
+	}
+}
+
 namespace vk
 {
 	mem_allocator_vma::mem_allocator_vma(VkDevice dev, VkPhysicalDevice pdev) : mem_allocator_base(dev, pdev)
@@ -27,9 +37,10 @@ namespace vk
 		VmaAllocationCreateInfo create_info = {};
 
 		mem_req.memoryTypeBits = 1u << memory_type_index;
-		mem_req.size = block_sz;
+		mem_req.size = ::align2(block_sz, alignment);
 		mem_req.alignment = alignment;
 		create_info.memoryTypeBits = 1u << memory_type_index;
+		create_info.flags = VMA_ALLOCATION_CREATE_STRATEGY_MIN_TIME_BIT;
 
 		if (VkResult result = vmaAllocateMemory(m_allocator, &mem_req, &create_info, &vma_alloc, nullptr);
 			result != VK_SUCCESS)
@@ -189,7 +200,53 @@ namespace vk
 
 	memory_block::~memory_block()
 	{
-		m_mem_allocator->free(m_mem_handle);
+		if (m_mem_allocator)
+		{
+			m_mem_allocator->free(m_mem_handle);
+		}
+	}
+
+	memory_block_host::memory_block_host(VkDevice dev, void* host_pointer, u64 size, u32 memory_type_index) :
+		m_device(dev), m_mem_handle(VK_NULL_HANDLE), m_host_pointer(host_pointer)
+	{
+		VkMemoryAllocateInfo alloc_info{};
+		VkImportMemoryHostPointerInfoEXT import_info{};
+
+		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		alloc_info.memoryTypeIndex = memory_type_index;
+		alloc_info.allocationSize = size;
+		alloc_info.pNext = &import_info;
+
+		import_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT;
+		import_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
+		import_info.pHostPointer = host_pointer;
+
+		CHECK_RESULT(vkAllocateMemory(m_device, &alloc_info, nullptr, &m_mem_handle));
+	}
+
+	memory_block_host::~memory_block_host()
+	{
+		vkFreeMemory(m_device, m_mem_handle, nullptr);
+	}
+
+	VkDeviceMemory memory_block_host::get_vk_device_memory()
+	{
+		return m_mem_handle;
+	}
+
+	u64 memory_block_host::get_vk_device_memory_offset()
+	{
+		return 0ull;
+	}
+
+	void* memory_block_host::map(u64 offset, u64 /*size*/)
+	{
+		return reinterpret_cast<char*>(m_host_pointer) + offset;
+	}
+
+	void memory_block_host::unmap()
+	{
+		// NOP
 	}
 
 	VkDeviceMemory memory_block::get_vk_device_memory()
