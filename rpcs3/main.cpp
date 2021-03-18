@@ -1,8 +1,8 @@
 // Qt5.10+ frontend implementation for rpcs3. Known to work on Windows, Linux, Mac
 // by Sacha Refshauge, Megamouse and flash-fire
 
-#include <fstream>//RTC_Hijack: include these for the gameinfo writing
-#include <string> //RTC_Hijack: include these for the gameinfo writing
+#include <fstream> //RTC_Hijack: include these for the gameinfo writing
+#include <string>  //RTC_Hijack: include these for the gameinfo writing
 #include <iostream>
 
 #include <QApplication>
@@ -61,18 +61,21 @@ DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResoluti
 
 #include "util/sysinfo.hpp"
 
-inline std::string sstr(const QString& _in) { return _in.toStdString(); }
+inline std::string sstr(const QString& _in)
+{
+	return _in.toStdString();
+}
 
 static semaphore<> s_qt_init;
 
 static atomic_t<bool> s_headless = false;
-static atomic_t<bool> s_no_gui = false;
+static atomic_t<bool> s_no_gui   = false;
 static atomic_t<char*> s_argv0;
 
-extern thread_local std::string(*g_tls_log_prefix)();
+extern thread_local std::string (*g_tls_log_prefix)();
 
 #ifndef _WIN32
-extern char **environ;
+extern char** environ;
 #endif
 
 LOG_CHANNEL(sys_log, "SYS");
@@ -85,7 +88,7 @@ LOG_CHANNEL(q_debug, "QDEBUG");
 	// Check if thread id is in string
 	if (_text.find("\nThread id = "sv) == umax)
 	{
-		// Copy only when needed 
+		// Copy only when needed
 		buf = std::string(_text);
 
 		// Always print thread id
@@ -98,7 +101,8 @@ LOG_CHANNEL(q_debug, "QDEBUG");
 	{
 #ifdef _WIN32
 		if (AttachConsole(ATTACH_PARENT_PROCESS) || AllocConsole())
-			[[maybe_unused]] const auto con_out = freopen("conout$", "w", stderr);
+		    [[maybe_unused]]
+			const auto con_out = freopen("conout$", "w", stderr);
 #endif
 		std::fprintf(stderr, "RPCS3: %.*s\n", static_cast<int>(text.size()), text.data());
 		std::abort();
@@ -111,7 +115,7 @@ LOG_CHANNEL(q_debug, "QDEBUG");
 
 	if (local)
 	{
-		static int argc = 1;
+		static int argc     = 1;
 		static char* argv[] = {+s_argv0};
 		app.reset(new QApplication{argc, argv});
 	}
@@ -120,8 +124,7 @@ LOG_CHANNEL(q_debug, "QDEBUG");
 		std::fprintf(stderr, "RPCS3: %.*s\n", static_cast<int>(text.size()), text.data());
 	}
 
-	auto show_report = [](std::string_view text)
-	{
+	auto show_report = [](std::string_view text) {
 		fatal_error_dialog dlg(text);
 		dlg.exec();
 	};
@@ -130,7 +133,9 @@ LOG_CHANNEL(q_debug, "QDEBUG");
 	// Cocoa access is not allowed outside of the main thread
 	if (!pthread_main_np())
 	{
-		dispatch_sync(dispatch_get_main_queue(), ^ { show_report(text); });
+		dispatch_sync(dispatch_get_main_queue(), ^{
+		  show_report(text);
+		});
 	}
 	else
 #endif
@@ -169,7 +174,7 @@ LOG_CHANNEL(q_debug, "QDEBUG");
 			}
 
 			char* argv[] = {run_arg.data(), err_arg.data(), data.data(), nullptr};
-			int ret = posix_spawn(&pid, run_arg.c_str(), nullptr, nullptr, argv, environ);
+			int ret      = posix_spawn(&pid, run_arg.c_str(), nullptr, nullptr, argv, environ);
 
 			if (ret == 0)
 			{
@@ -215,7 +220,7 @@ constexpr auto arg_error      = "error";
 constexpr auto arg_updating   = "updating";
 constexpr auto arg_commit_db  = "get-commit-db";
 
-constexpr auto arg_decrypt    = "decrypt"; //RTC_Hijack: add decrypt command line arg
+constexpr auto arg_decrypt     = "decrypt";     //RTC_Hijack: add decrypt command line arg
 constexpr auto arg_getgameinfo = "getgameinfo"; //RTC_Hijack: add command line arg to get a game's info
 int find_arg(std::string arg, int& argc, char* argv[])
 {
@@ -250,8 +255,8 @@ QCoreApplication* createApplication(int& argc, char* argv[])
 	const int i_hdpi = find_arg(arg_high_dpi, argc, argv);
 	if (i_hdpi != -1)
 	{
-		const std::string cmp_str = "0";
-		const auto i_hdpi_2 = (argc > (i_hdpi + 1)) ? (i_hdpi + 1) : 0;
+		const std::string cmp_str   = "0";
+		const auto i_hdpi_2         = (argc > (i_hdpi + 1)) ? (i_hdpi + 1) : 0;
 		const auto high_dpi_setting = (i_hdpi_2 && !strcmp(cmp_str.c_str(), argv[i_hdpi_2])) ? "0" : "1";
 
 		// Set QT_ENABLE_HIGHDPI_SCALING from environment. Defaults to cli argument, which defaults to 1.
@@ -264,8 +269,8 @@ QCoreApplication* createApplication(int& argc, char* argv[])
 	if (use_high_dpi)
 	{
 		// Set QT_SCALE_FACTOR_ROUNDING_POLICY from environment. Defaults to cli argument, which defaults to RoundPreferFloor.
-		auto rounding_val = Qt::HighDpiScaleFactorRoundingPolicy::PassThrough;
-		auto rounding_str = std::to_string(static_cast<int>(rounding_val));
+		auto rounding_val    = Qt::HighDpiScaleFactorRoundingPolicy::PassThrough;
+		auto rounding_str    = std::to_string(static_cast<int>(rounding_val));
 		const int i_rounding = find_arg(arg_rounding, argc, argv);
 
 		if (i_rounding != -1)
@@ -325,15 +330,15 @@ void log_q_debug(QtMsgType type, const QMessageLogContext& context, const QStrin
 	}
 }
 
-
-
 int main(int argc, char** argv)
 {
 #ifdef _WIN32
 	ULONG64 intro_cycles{};
 	QueryThreadCycleTime(GetCurrentThread(), &intro_cycles);
 #elif defined(RUSAGE_THREAD)
-	struct ::rusage intro_stats{};
+	struct ::rusage intro_stats
+	{
+	};
 	::getrusage(RUSAGE_THREAD, &intro_stats);
 	const u64 intro_time = (intro_stats.ru_utime.tv_sec + intro_stats.ru_stime.tv_sec) * 1000000000ull + (intro_stats.ru_utime.tv_usec + intro_stats.ru_stime.tv_usec) * 1000ull;
 #endif
@@ -380,9 +385,9 @@ int main(int argc, char** argv)
 			{
 				report_fatal_error("Cannot create RPCS3.log (access denied)."
 #ifdef _WIN32
-				"\nNote that RPCS3 cannot be installed in Program Files or similar directories with limited permissions."
+				                   "\nNote that RPCS3 cannot be installed in Program Files or similar directories with limited permissions."
 #else
-				"\nPlease, check RPCS3 permissions in '~/.config/rpcs3'."
+				                   "\nPlease, check RPCS3 permissions in '~/.config/rpcs3'."
 #endif
 				);
 			}
@@ -466,7 +471,8 @@ int main(int argc, char** argv)
 	for (int i = 0; i < argc; i++)
 	{
 		argument_str += "'" + std::string(argv[i]) + "'";
-		if (i != argc - 1) argument_str += " ";
+		if (i != argc - 1)
+			argument_str += " ";
 	}
 	sys_log.notice("argc: %d, argv: %s", argc, argument_str);
 
@@ -486,7 +492,7 @@ int main(int argc, char** argv)
 		std::fprintf(stderr, "Failed to set RLIMIT_MEMLOCK size to 2 GiB. Try to update your system configuration.\n");
 #endif
 	// Work around crash on startup on KDE: https://bugs.kde.org/show_bug.cgi?id=401637
-	setenv( "KDE_DEBUG", "1", 0 );
+	setenv("KDE_DEBUG", "1", 0);
 #endif
 
 	std::lock_guard qt_init(s_qt_init);
@@ -520,7 +526,7 @@ int main(int argc, char** argv)
 	parser.addOption(QCommandLineOption(arg_q_debug, "Log qDebug to RPCS3.log."));
 	parser.addOption(QCommandLineOption(arg_error, "For internal usage."));
 	parser.addOption(QCommandLineOption(arg_updating, "For internal usage."));
-	parser.addOption(QCommandLineOption(arg_decrypt, "Automatically decrypt a chosen self file.")); //RTC_Hijack: Describe decryption arg
+	parser.addOption(QCommandLineOption(arg_decrypt, "Automatically decrypt a chosen self file."));        //RTC_Hijack: Describe decryption arg
 	parser.addOption(QCommandLineOption(arg_getgameinfo, "Automatically output a game's serial number.")); //RTC_Hijack: Describe --getgameinfo
 	parser.addOption(QCommandLineOption(arg_commit_db, "Update commits.lst cache."));
 	parser.process(app->arguments());
@@ -536,7 +542,7 @@ int main(int argc, char** argv)
 		if (file)
 		{
 			// Get existing list
-			std::string data = file.to_string();
+			std::string data              = file.to_string();
 			std::vector<std::string> list = fmt::split(data, {"\n"});
 
 			const bool was_empty = data.empty();
@@ -574,11 +580,11 @@ int main(int argc, char** argv)
 			hhdr = curl_slist_append(hhdr, "User-Agent: curl/7.37.0");
 
 			curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hhdr);
-			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, +[](const char* ptr, usz, usz size, void* json) -> usz
-			{
-				reinterpret_cast<QByteArray*>(json)->append(ptr, size);
-				return size;
-			});
+			curl_easy_setopt(
+			    curl, CURLOPT_WRITEFUNCTION, +[](const char* ptr, usz, usz size, void* json) -> usz {
+				    reinterpret_cast<QByteArray*>(json)->append(ptr, size);
+				    return size;
+			    });
 			curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
 
 			u32 page = 1;
@@ -614,28 +620,28 @@ int main(int argc, char** argv)
 						QJsonObject result, author, committer;
 						QJsonObject commit = ref.toObject();
 
-						auto commit_ = commit["commit"].toObject();
-						auto author_ = commit_["author"].toObject();
+						auto commit_    = commit["commit"].toObject();
+						auto author_    = commit_["author"].toObject();
 						auto committer_ = commit_["committer"].toObject();
-						auto _author = commit["author"].toObject();
+						auto _author    = commit["author"].toObject();
 						auto _committer = commit["committer"].toObject();
 
 						result["sha"] = commit["sha"];
 						result["msg"] = commit_["message"];
 
-						author["name"] = author_["name"];
-						author["date"] = author_["date"];
-						author["email"] = author_["email"];
-						author["login"] = _author["login"];
+						author["name"]   = author_["name"];
+						author["date"]   = author_["date"];
+						author["email"]  = author_["email"];
+						author["login"]  = _author["login"];
 						author["avatar"] = _author["avatar_url"];
 
-						committer["name"] = committer_["name"];
-						committer["date"] = committer_["date"];
-						committer["email"] = committer_["email"];
-						committer["login"] = _committer["login"];
+						committer["name"]   = committer_["name"];
+						committer["date"]   = committer_["date"];
+						committer["email"]  = committer_["email"];
+						committer["login"]  = _committer["login"];
 						committer["avatar"] = _committer["avatar_url"];
 
-						result["author"] = author;
+						result["author"]    = author;
 						result["committer"] = committer;
 
 						QJsonDocument out(result);
@@ -706,10 +712,12 @@ int main(int argc, char** argv)
 	{
 #ifdef _WIN32
 		if (AttachConsole(ATTACH_PARENT_PROCESS) || AllocConsole())
-			[[maybe_unused]] const auto con_out = freopen("CONOUT$", "w", stdout);
+		    [[maybe_unused]]
+			const auto con_out = freopen("CONOUT$", "w", stdout);
 #endif
 		for (const auto& style : QStyleFactory::keys())
-			std::cout << "\n" << style.toStdString();
+			std::cout << "\n"
+			          << style.toStdString();
 
 		return 0;
 	}
@@ -780,12 +788,12 @@ int main(int argc, char** argv)
 	}
 
 	if (const QStringList args = parser.positionalArguments(); !args.isEmpty() && !is_updating)
-	{	//RTC_Hijack: Implement arguments for file decryption and gameinfo getting
+	{ //RTC_Hijack: Implement arguments for file decryption and gameinfo getting
+		sys_log.notice("Booting application from command line: %s", args.at(0).toStdString());
 		if (find_arg(arg_decrypt, argc, argv))
 		{
 			std::string path;
 			path = sstr(QFileInfo(args.at(0)).absoluteFilePath());
-
 
 			fs::file selectedElf(path);
 
@@ -799,7 +807,7 @@ int main(int argc, char** argv)
 					new_file.write(selectedElf.to_string());
 				}
 
-			return 0;
+				return 0;
 			}
 		}
 		else if (find_arg(arg_getgameinfo, argc, argv))
@@ -811,12 +819,12 @@ int main(int argc, char** argv)
 			const fs::file sfo_file(sfo_dir + "/PARAM.SFO");
 			if (!sfo_file)
 			{
-				sys_log.notice("ERROR: Could note find SFO file! Attempted filename location: %s", (sfo_dir +"/PARAM.SFO"));
+				sys_log.notice("ERROR: Could note find SFO file! Attempted filename location: %s", (sfo_dir + "/PARAM.SFO"));
 				return 0;
 			}
 			sys_log.notice("SFO file location: %s", (sfo_dir + "/PARAM.SFO"));
 			GameInfo game;
-			const auto psf = psf::load_object(sfo_file);
+			const auto psf           = psf::load_object(sfo_file);
 			game.path                = dir;
 			game.icon_path           = sfo_dir + "/ICON0.PNG";
 			game.serial              = std::string(psf::get_string(psf, "TITLE_ID", ""));
@@ -875,23 +883,40 @@ int main(int argc, char** argv)
 			file << outputText;
 
 			return 0;
-		}else
+		}
+		else
 		//RTC_Hijack end
 		{
-			sys_log.notice("Booting application from command line: %s", args.at(0).toStdString());
+			// Ugly workaround
+			// Propagate command line arguments
+			std::vector<std::string> argv;
 			Emu.argv = std::move(argv);
 			Emu.SetForceBoot(true);
-
-			if (const game_boot_result error = Emu.BootGame(path, ""); error != game_boot_result::no_errors)
+			if (args.length() > 1)
 			{
-				sys_log.error("Booting '%s' with cli argument failed: reason: %s", path, error);
+				argv.emplace_back();
 
-				if (s_headless || s_no_gui)
+				for (int i = 1; i < args.length(); i++)
 				{
-					report_fatal_error(fmt::format("Booting '%s' failed!\n\nReason: %s", path, error));
+					const std::string arg = args[i].toStdString();
+					argv.emplace_back(arg);
+					sys_log.notice("Optional command line argument %d: %s", i, arg);
 				}
 			}
-		});
+			QTimer::singleShot(2, [config_override_path, path = sstr(QFileInfo(args.at(0)).absoluteFilePath()), argv = std::move(argv)]() mutable {
+				if (const game_boot_result error = Emu.BootGame(path, ""); error != game_boot_result::no_errors)
+				{
+					Emu.argv = std::move(argv);
+					Emu.SetForceBoot(true);
+					sys_log.error("Booting '%s' with cli argument failed: reason: %s", path, error);
+
+					if (s_headless || s_no_gui)
+					{
+						report_fatal_error(fmt::format("Booting '%s' failed!\n\nReason: %s", path, error));
+					}
+				}
+			});
+		}
 	}
 
 	// run event loop (maybe only needed for the gui application)
@@ -939,8 +964,8 @@ extern "C"
 	usz __stdcall __std_system_error_allocate_message(const unsigned long msg_id, char** ptr_str) noexcept
 	{
 		return __std_get_string_size_without_trailing_whitespace(*ptr_str, FormatMessageA(
-			FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-			nullptr, msg_id, 0, reinterpret_cast<char*>(ptr_str), 0, nullptr));
+		                                                                       FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+		                                                                       nullptr, msg_id, 0, reinterpret_cast<char*>(ptr_str), 0, nullptr));
 	}
 
 	void __stdcall __std_system_error_deallocate_message(char* s) noexcept
