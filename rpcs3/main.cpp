@@ -525,7 +525,7 @@ int main(int argc, char** argv)
 	parser.addOption(QCommandLineOption(arg_error, "For internal usage."));
 	parser.addOption(QCommandLineOption(arg_updating, "For internal usage."));
 	parser.addOption(QCommandLineOption(arg_decrypt, "Automatically decrypt a chosen self file."));        //RTC_Hijack: Describe decryption arg
-	parser.addOption(QCommandLineOption(arg_getgameinfo, "Automatically output a game's serial number.")); //RTC_Hijack: Describe --getgameinfo
+	parser.addOption(QCommandLineOption(arg_getgameinfo, "Automatically output a game's game info to a txt file.")); //RTC_Hijack: Describe --getgameinfo
 	parser.addOption(QCommandLineOption(arg_commit_db, "Update commits.lst cache."));
 	parser.process(app->arguments());
 
@@ -787,7 +787,7 @@ int main(int argc, char** argv)
 
 	if (const QStringList args = parser.positionalArguments(); !args.isEmpty() && !is_updating)
 	{ //RTC_Hijack: Implement arguments for file decryption and gameinfo getting
-		if (find_arg(arg_getgameinfo, argc, argv))
+		if (parser.isSet(arg_getgameinfo))
 		{
 			std::string dir = (sstr(QFileInfo(args.at(0)).absoluteFilePath())); //assume the user will pick the game FOLDER (which includes PS3_GAME and the SFB file), not its eboot
 			sys_log.notice("Game Directory: %s", dir);
@@ -795,7 +795,7 @@ int main(int argc, char** argv)
 			const fs::file sfo_file(sfo_dir + "/PARAM.SFO");
 			if (!sfo_file)
 			{
-				sys_log.notice("ERROR: Could note find SFO file! Attempted filename location: %s", (sfo_dir + "/PARAM.SFO"));
+				sys_log.notice("ERROR: Could not find SFO file! Attempted filename location: %s", (sfo_dir + "/PARAM.SFO"));
 				return 0;
 			}
 			sys_log.notice("SFO file location: %s", (sfo_dir + "/PARAM.SFO"));
@@ -823,7 +823,7 @@ int main(int argc, char** argv)
 
 			return 0;
 		}
-		else if (find_arg(arg_decrypt, argc, argv))
+		else if (parser.isSet(arg_decrypt))
 		{
 			std::string path;
 			path = sstr(QFileInfo(args.at(0)).absoluteFilePath());
