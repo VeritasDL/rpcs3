@@ -792,19 +792,25 @@ int main(int argc, char** argv)
 			std::string dir = (sstr(QFileInfo(args.at(0)).absoluteFilePath())); //assume the user will pick the game FOLDER (which includes PS3_GAME and the SFB file), not its eboot
 			sys_log.notice("Game Directory: %s", dir);
 			const std::string sfo_dir = Emulator::GetSfoDirFromGamePath(dir, Emu.GetUsr());
+			std::string hgsfodir;
 			const fs::file sfo_file(sfo_dir + "/PARAM.SFO");
-			if (!sfo_file)
+			fs::file hgsfofile;
+			if (!fs::is_dir(sfo_dir))
 			{
-				sfo_file(dir);
-				if(!sfo_file)
-				{
-					sys_log.notice("ERROR: Could not find SFO file! Attempted filename location: %s", (sfo_dir + "/PARAM.SFO"));
-					return 0;
-				}
-				sfo_dir = dir;
+				hgsfodir = dir;
+				hgsfofile = fs::file(hgsfodir + "/PARAM.SFO");
+			}
+			if (!sfo_file && !hgsfofile)
+			{
+				sys_log.notice("ERROR: Could not find SFO file! Attempted filename location: %s", (sfo_dir + "/PARAM.SFO"));
+				return 0;
 			}
 			GameInfo game;
-			const auto psf           = psf::load_object(sfo_file);
+			psf::registry psf;
+			if (sfo_file)
+				psf = psf::load_object(sfo_file);
+			if (hgsfofile)
+				psf = psf::load_object(hgsfofile);
 			game.path                = dir;
 			game.icon_path           = sfo_dir + "/ICON0.PNG";
 			game.serial              = std::string(psf::get_string(psf, "TITLE_ID", ""));
