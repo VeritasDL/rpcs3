@@ -52,12 +52,10 @@ DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResoluti
 #include "Emu/System.h"
 #include <thread>
 #include <charconv>
-#include <Crypto\unself.cpp> //RTC_Hijack: include unself.cpp so decryption via command line is possible
+#include <Crypto\unself.h> //RTC_Hijack: include unself.h so decryption via command line is possible
 #include <Emu\GameInfo.h> //RTC_Hijack: Include game info header
 #include "Loader/PSF.h" //RTC_Hijack: include PSF
 #include <filesystem> //RTC_Hijack: include filesystem for reading filepaths
-
-#include "util/sysinfo.hpp"
 
 #include "util/sysinfo.hpp"
 
@@ -789,30 +787,8 @@ int main(int argc, char** argv)
 
 	if (const QStringList args = parser.positionalArguments(); !args.isEmpty() && !is_updating)
 	{ //RTC_Hijack: Implement arguments for file decryption and gameinfo getting
-		sys_log.notice("Booting application from command line: %s", args.at(0).toStdString());
-		if (find_arg(arg_decrypt, argc, argv))
+		if (find_arg(arg_getgameinfo, argc, argv))
 		{
-			std::string path;
-			path = sstr(QFileInfo(args.at(0)).absoluteFilePath());
-
-			fs::file selectedElf(path);
-
-			if (selectedElf.read<u32>() == "SCE\0"_u32)
-			{
-				Emu.SetForceBoot(true);
-				Emu.Stop();
-				selectedElf = decrypt_self(std::move(selectedElf));
-				if (fs::file new_file{path, fs::rewrite})
-				{
-					new_file.write(selectedElf.to_string());
-				}
-
-				return 0;
-			}
-		}
-		else if (find_arg(arg_getgameinfo, argc, argv))
-		{
-			//god my code is ugly but hopefully it'll do
 			std::string dir = (sstr(QFileInfo(args.at(0)).absoluteFilePath())); //assume the user will pick the game FOLDER (which includes PS3_GAME and the SFB file), not its eboot
 			sys_log.notice("Game Directory: %s", dir);
 			const std::string sfo_dir = Emulator::GetSfoDirFromGamePath(dir, Emu.GetUsr());
@@ -839,84 +815,69 @@ int main(int argc, char** argv)
 			game.bootable            = psf::get_integer(psf, "BOOTABLE", 0);
 			game.attr                = psf::get_integer(psf, "ATTRIBUTE", 0);
 			std::string serialnumber = game.serial;
-			/*std::ofstream out("gameinfo.txt");
-			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
-			std::string outputText = "Game name: " + game.name + "\nGame serial: " + game.serial + "\nGame version: " + game.version;
-			out << outputText;*/
 			std::ofstream file(dir + "\\gameinfo.txt");
-			/*file.close();
-			fs::file outputText(dir + "/gameinfo.txt");
-			
-			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
-			outputText.write
-			(
-				"Game name: " + game.name + "\nGame serial: " + game.serial + "\nGame version: " + game.version
-			);*/
 			sys_log.notice("Attempted txt file location: %s", (dir + "/gameinfo.txt"));
 			std::string outputText = "NAME$$" + game.name + "\nSERIAL$$" + game.serial + "\nVERSION$$" + game.app_ver + "\nTYPE$$" + game.category + "\nPATH$$" + game.path + "\nUSRDIRPATH$$" + sfo_dir + "\nEBOOTPATH$$" + sfo_dir + "/USRDIR/EBOOT.BIN";
-			/*std::filesystem::path PATH(dir);
-			std::filesystem::path USRDIRLOCATION(sfo_dir);
-			std::filesystem::path EBOOTLOCATION(sfo_dir + "/USRDIR");
 			
-			int i = 0;
-			while (i < 256)//	This may be excessive and you may say there can't possibly be a game with this much elfs and sprxs, but I consider MGS4 having over 150 elfs to be excessive
-			{
-
-				for (const auto& USRDIR : std::filesystem::recursive_directory_iterator(EBOOTLOCATION))
-				{ 
-					 //	try to find subdirectories and gather filepaths of selfs and sprxs from them
-					std::string elfpath;
-					if (USRDIR.path().extension() == ".self" || USRDIR.path().extension() == ".sprx" || USRDIR.path().extension() == ".elf" || USRDIR.path().extension() == ".prx")
-					{
-						if (elfpath != USRDIR.path().string())
-						{
-							i++;
-							elfpath    = USRDIR.path().string();
-							if (outputText.find(elfpath) == std::string::npos)
-							{
-								outputText = outputText + "\nNONBINEXECUTABLE" + std::to_string(i) + "$$" + elfpath;
-							}
-						}
-					}
-				}
-			}*/
 			file << outputText;
 
 			return 0;
 		}
-		else
-		//RTC_Hijack end
+		else if (find_arg(arg_decrypt, argc, argv))
 		{
-			// Ugly workaround
-			// Propagate command line arguments
-			std::vector<std::string> argv;
+			std::string path;
+			path = sstr(QFileInfo(args.at(0)).absoluteFilePath());
+
+			fs::file selectedElf(path);
+
+			if (selectedElf.read<u32>() == "SCE\0"_u32)
+			{
+				Emu.SetForceBoot(true);
+				Emu.Stop();
+				selectedElf = decrypt_self(std::move(selectedElf));
+				if (fs::file new_file{path, fs::rewrite})
+				{
+					new_file.write(selectedElf.to_string());
+				}
+
+			}
+			return 0;
+		}
+		//RTC_Hijack end
+		sys_log.notice("Booting application from command line: %s", args.at(0).toStdString());
+
+		// Propagate command line arguments
+		std::vector<std::string> argv;
+
+		if (args.length() > 1)
+		{
+			argv.emplace_back();
+
+			for (int i = 1; i < args.length(); i++)
+			{
+				const std::string arg = args[i].toStdString();
+				argv.emplace_back(arg);
+				sys_log.notice("Optional command line argument %d: %s", i, arg);
+			}
+		}
+
+		// Postpone startup to main event loop
+		Emu.CallAfter([config_override_path, path = sstr(QFileInfo(args.at(0)).absoluteFilePath()), argv = std::move(argv)]() mutable
+		{
 			Emu.argv = std::move(argv);
 			Emu.SetForceBoot(true);
-			if (args.length() > 1)
-			{
-				argv.emplace_back();
 
-				for (int i = 1; i < args.length(); i++)
+			if (const game_boot_result error = Emu.BootGame(path, ""); error != game_boot_result::no_errors)
+			{
+				sys_log.error("Booting '%s' with cli argument failed: reason: %s", path, error);
+
+				if (s_headless || s_no_gui)
 				{
-					const std::string arg = args[i].toStdString();
-					argv.emplace_back(arg);
-					sys_log.notice("Optional command line argument %d: %s", i, arg);
+					report_fatal_error(fmt::format("Booting '%s' failed!\n\nReason: %s", path, error));
 				}
 			}
-			QTimer::singleShot(2, [config_override_path, path = sstr(QFileInfo(args.at(0)).absoluteFilePath()), argv = std::move(argv)]() mutable {
-				if (const game_boot_result error = Emu.BootGame(path, ""); error != game_boot_result::no_errors)
-				{
-					Emu.argv = std::move(argv);
-					Emu.SetForceBoot(true);
-					sys_log.error("Booting '%s' with cli argument failed: reason: %s", path, error);
-
-					if (s_headless || s_no_gui)
-					{
-						report_fatal_error(fmt::format("Booting '%s' failed!\n\nReason: %s", path, error));
-					}
-				}
-			});
-		}
+		});
+		
 	}
 
 	// run event loop (maybe only needed for the gui application)
