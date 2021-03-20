@@ -795,10 +795,14 @@ int main(int argc, char** argv)
 			const fs::file sfo_file(sfo_dir + "/PARAM.SFO");
 			if (!sfo_file)
 			{
-				sys_log.notice("ERROR: Could not find SFO file! Attempted filename location: %s", (sfo_dir + "/PARAM.SFO"));
-				return 0;
+				sfo_file(dir);
+				if(!sfo_file)
+				{
+					sys_log.notice("ERROR: Could not find SFO file! Attempted filename location: %s", (sfo_dir + "/PARAM.SFO"));
+					return 0;
+				}
+				sfo_dir = dir;
 			}
-			sys_log.notice("SFO file location: %s", (sfo_dir + "/PARAM.SFO"));
 			GameInfo game;
 			const auto psf           = psf::load_object(sfo_file);
 			game.path                = dir;
