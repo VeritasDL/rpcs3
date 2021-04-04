@@ -22,13 +22,13 @@ namespace vk
 		{
 			fragmentProgramData.Decompile(RSXFP);
 #if 0
-		if (RSXFP.ucode_length == 0xd0)
-		{
-			//__debugbreak();
-			fs::file patched_shader(R"(D:\Nikos\Reversing\Sly\Renderdoc\sly2_fs_vk.glsl)");
-			const std::string patched_shader_str = patched_shader.to_string();
-			fragmentProgramData.shader.create(glsl::glsl_fragment_program, patched_shader_str);
-		}
+			if (RSXFP.ucode_length == 0xd0) /// todo: based on hash
+			{
+				//__debugbreak();
+				fs::file patched_shader(R"(D:\Nikos\Reversing\Sly\Renderdoc\sly2_main.vk.frag.glsl)");
+				const std::string patched_shader_str = patched_shader.to_string();
+				fragmentProgramData.shader.create(::glsl::program_domain::glsl_fragment_program, patched_shader_str);
+			}
 #endif
 			fragmentProgramData.id = static_cast<u32>(ID);
 			fragmentProgramData.Compile();
