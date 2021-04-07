@@ -4,9 +4,16 @@
 
 #include "util/types.hpp"
 #include "util/typeindices.hpp"
+#include "Utilities/StrFmt.h"
 
 #include <utility>
 #include <type_traits>
+#include <typeinfo>
+#include <cstdio>
+
+//#include "util/logs.hpp"
+
+//LOG_CHANNEL(fixed_typemap, "FixedTypeMap");
 
 namespace stx
 {
@@ -238,6 +245,11 @@ namespace stx
 
 			*m_order++ = obj;
 			*m_info++ = &stx::typedata<typeinfo, std::decay_t<T>, std::decay_t<As>>();
+
+			//const auto str = fmt::format("init %8X %X %s\n", (u64)m_order, (u64)m_info, typeid(T).name());
+			//fputs(str.c_str(), g_ftm_log);
+			//fflush(g_ftm_log);
+
 			return obj;
 		}
 
@@ -260,6 +272,11 @@ namespace stx
 		template <typename T>
 		T& get() const noexcept
 		{
+			//const auto str = fmt::format("get  %8X %X %X %s\n",
+			//	(u64)m_order, (u64)m_info, (u64)stx::typeoffset<typeinfo, std::decay_t<T>>(), typeid(T).name());
+			//fputs(str.c_str(), g_ftm_log);
+			//fflush(g_ftm_log);
+
 			if constexpr (Size != 0)
 			{
 				return *std::launder(reinterpret_cast<T*>(m_data + stx::typeoffset<typeinfo, std::decay_t<T>>()));

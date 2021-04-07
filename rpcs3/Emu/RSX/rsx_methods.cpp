@@ -45,7 +45,7 @@ namespace rsx
 			rsx->sync();
 
 			// Write ref+get atomically (get will be written again with the same value at command end)
-			vm::_ref<atomic_be_t<u64>>(rsx->dma_address + ::offset32(&RsxDmaControl::get)).store(u64{rsx->fifo_ctrl->get_pos()} << 32 | arg);
+			vm::_ref<atomic_be_t<u64>>(rsx->dma_address + ::offset32(&RsxDmaControl::get)).store(u64{rsx->fifo_ctrl.get_pos()} << 32 | arg);
 		}
 
 		void semaphore_acquire(thread* rsx, u32 /*reg*/, u32 arg)
@@ -411,8 +411,8 @@ namespace rsx
 				static constexpr u8 subreg = index % 4;
 
 				// Get real args count
-				const u32 count = std::min<u32>({rsx->fifo_ctrl->get_remaining_args_count() + 1,
-					static_cast<u32>(((rsx->ctrl->put & ~3ull) - (rsx->fifo_ctrl->get_pos() - 4)) / 4), 32 - index});
+				const u32 count = std::min<u32>({rsx->fifo_ctrl.get_remaining_args_count() + 1,
+					static_cast<u32>(((rsx->ctrl->put & ~3ull) - (rsx->fifo_ctrl.get_pos() - 4)) / 4), 32 - index});
 
 				const u32 load = rsx::method_registers.transform_constant_load();
 
@@ -433,18 +433,18 @@ namespace rsx
 				if (rsx->m_graphics_state & rsx::pipeline_state::transform_constants_dirty)
 				{
 					// Minor optimization: don't compare values if we already know we need invalidation
-					stream_data_to_memory_swapped_u32<true>(values, vm::base(rsx->fifo_ctrl->get_current_arg_ptr()), rcount, 4);
+					stream_data_to_memory_swapped_u32<true>(values, vm::base(rsx->fifo_ctrl.get_current_arg_ptr()), rcount, 4);
 				}
 				else
 				{
-					if (stream_data_to_memory_swapped_and_compare_u32<true>(values, vm::base(rsx->fifo_ctrl->get_current_arg_ptr()), rcount * 4))
+					if (stream_data_to_memory_swapped_and_compare_u32<true>(values, vm::base(rsx->fifo_ctrl.get_current_arg_ptr()), rcount * 4))
 					{
 						// Transform constants invalidation is expensive (~8k bytes per update)
 						rsx->m_graphics_state |= rsx::pipeline_state::transform_constants_dirty;
 					}
 				}
 
-				rsx->fifo_ctrl->skip_methods(count - 1);
+				rsx->fifo_ctrl.skip_methods(count - 1);
 			}
 		};
 
@@ -454,8 +454,8 @@ namespace rsx
 			static void impl(thread* rsx, u32 /*reg*/, u32 /*arg*/)
 			{
 				// Get real args count
-				const u32 count = std::min<u32>({rsx->fifo_ctrl->get_remaining_args_count() + 1,
-					static_cast<u32>(((rsx->ctrl->put & ~3ull) - (rsx->fifo_ctrl->get_pos() - 4)) / 4), 32 - index});
+				const u32 count = std::min<u32>({rsx->fifo_ctrl.get_remaining_args_count() + 1,
+					static_cast<u32>(((rsx->ctrl->put & ~3ull) - (rsx->fifo_ctrl.get_pos() - 4)) / 4), 32 - index});
 
 				const u32 load_pos = rsx::method_registers.transform_program_load();
 
@@ -472,11 +472,11 @@ namespace rsx
 				}
 
 				stream_data_to_memory_swapped_u32<true>(&rsx::method_registers.transform_program[load_pos * 4 + index % 4]
-					, vm::base(rsx->fifo_ctrl->get_current_arg_ptr()), rcount, 4);
+					, vm::base(rsx->fifo_ctrl.get_current_arg_ptr()), rcount, 4);
 
 				rsx->m_graphics_state |= rsx::pipeline_state::vertex_program_ucode_dirty;
 				rsx::method_registers.transform_program_load_set(load_pos + ((rcount + index % 4) / 4));
-				rsx->fifo_ctrl->skip_methods(count - 1);
+				rsx->fifo_ctrl.skip_methods(count - 1);
 			}
 		};
 
@@ -892,10 +892,10 @@ namespace rsx
 				}
 
 				// Get position of the current command arg
-				const u32 src_offset = rsx->fifo_ctrl->get_pos() - 4;
+				const u32 src_offset = rsx->fifo_ctrl.get_pos() - 4;
 
 				// Get real args count (starting from NV3089_COLOR)
-				const u32 count = std::min<u32>({rsx->fifo_ctrl->get_remaining_args_count() + 1,
+				const u32 count = std::min<u32>({rsx->fifo_ctrl.get_remaining_args_count() + 1,
 					static_cast<u32>(((rsx->ctrl->put & ~3ull) - src_offset) / 4), 0x700 - index, out_x_max - index});
 
 				const u32 dst_dma = method_registers.blit_engine_output_location_nv3062();
@@ -923,7 +923,7 @@ namespace rsx
 					const u32 data_length = count * 4;
 					auto res = rsx::reservation_lock<true>(dst_address, data_length, src_address, data_length);
 
-					if (rsx->fifo_ctrl->last_cmd() & RSX_METHOD_NON_INCREMENT_CMD_MASK) [[unlikely]]
+					if (rsx->fifo_ctrl.last_cmd() & RSX_METHOD_NON_INCREMENT_CMD_MASK) [[unlikely]]
 					{
 						// Move last 32 bits
 						reinterpret_cast<u32*>(dst)[0] = reinterpret_cast<const u32*>(src)[count - 1];
@@ -970,7 +970,7 @@ namespace rsx
 						return static_cast<u16>((r << 11) | (g << 5) | b);
 					};
 
-					if (rsx->fifo_ctrl->last_cmd() & RSX_METHOD_NON_INCREMENT_CMD_MASK) [[unlikely]]
+					if (rsx->fifo_ctrl.last_cmd() & RSX_METHOD_NON_INCREMENT_CMD_MASK) [[unlikely]]
 					{
 						// Move last 16 bits
 						dst[0] = convert(src[count - 1]);
@@ -995,7 +995,7 @@ namespace rsx
 				//res->release(0);
 
 				// Skip "handled methods"
-				rsx->fifo_ctrl->skip_methods(count - 1);
+				rsx->fifo_ctrl.skip_methods(count - 1);
 			}
 		};
 	}

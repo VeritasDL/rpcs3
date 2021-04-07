@@ -4,6 +4,10 @@
 
 #include "Emu/Memory/vm_ptr.h"
 
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/deque.hpp>
+#include <cereal/types/tuple.hpp>
+
 class cpu_thread;
 
 // Event Queue Type
@@ -117,6 +121,12 @@ struct lv2_event_queue final : public lv2_obj
 	{
 		exists++;
 		return {};
+	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(exists, mutex/*, events, sq*/);
 	}
 };
 

@@ -14,7 +14,10 @@ namespace rsx
 			m_ctrl = pctrl->ctrl;
 			m_iotable = &pctrl->iomap_table;
 		}
-
+		FIFO_control::~FIFO_control()
+		{
+			//__debugbreak();
+		}
 		void FIFO_control::sync_get()
 		{
 			m_ctrl->get.release(m_internal_get);
@@ -383,7 +386,7 @@ namespace rsx
 	void thread::run_FIFO()
 	{
 		FIFO::register_pair command;
-		fifo_ctrl->read(command);
+		fifo_ctrl.read(command);
 		const auto cmd = command.reg;
 
 		if (cmd & (0xffff0000 | RSX_METHOD_NON_METHOD_CMD_MASK)) [[unlikely]]
@@ -432,7 +435,7 @@ namespace rsx
 			if ((cmd & RSX_METHOD_OLD_JUMP_CMD_MASK) == RSX_METHOD_OLD_JUMP_CMD)
 			{
 				const u32 offs = cmd & RSX_METHOD_OLD_JUMP_OFFSET_MASK;
-				if (offs == fifo_ctrl->get_pos())
+				if (offs == fifo_ctrl.get_pos())
 				{
 					//Jump to self. Often preceded by NOP
 					if (performance_counters.state == FIFO_state::running)
@@ -445,13 +448,13 @@ namespace rsx
 				}
 
 				//rsx_log.warning("rsx jump(0x%x) #addr=0x%x, cmd=0x%x, get=0x%x, put=0x%x", offs, m_ioAddress + get, cmd, get, put);
-				fifo_ctrl->set_get(offs);
+				fifo_ctrl.set_get(offs);
 				return;
 			}
 			if ((cmd & RSX_METHOD_NEW_JUMP_CMD_MASK) == RSX_METHOD_NEW_JUMP_CMD)
 			{
 				const u32 offs = cmd & RSX_METHOD_NEW_JUMP_OFFSET_MASK;
-				if (offs == fifo_ctrl->get_pos())
+				if (offs == fifo_ctrl.get_pos())
 				{
 					//Jump to self. Often preceded by NOP
 					if (performance_counters.state == FIFO_state::running)
@@ -464,7 +467,7 @@ namespace rsx
 				}
 
 				//rsx_log.warning("rsx jump(0x%x) #addr=0x%x, cmd=0x%x, get=0x%x, put=0x%x", offs, m_ioAddress + get, cmd, get, put);
-				fifo_ctrl->set_get(offs);
+				fifo_ctrl.set_get(offs);
 				return;
 			}
 			if ((cmd & RSX_METHOD_CALL_CMD_MASK) == RSX_METHOD_CALL_CMD)
@@ -478,8 +481,8 @@ namespace rsx
 				}
 
 				const u32 offs = cmd & RSX_METHOD_CALL_OFFSET_MASK;
-				fifo_ret_addr = fifo_ctrl->get_pos() + 4;
-				fifo_ctrl->set_get(offs);
+				fifo_ret_addr = fifo_ctrl.get_pos() + 4;
+				fifo_ctrl.set_get(offs);
 				return;
 			}
 			if ((cmd & RSX_METHOD_RETURN_MASK) == RSX_METHOD_RETURN_CMD)
@@ -491,7 +494,7 @@ namespace rsx
 					return;
 				}
 
-				fifo_ctrl->set_get(std::exchange(fifo_ret_addr, RSX_CALL_STACK_EMPTY));
+				fifo_ctrl.set_get(std::exchange(fifo_ret_addr, RSX_CALL_STACK_EMPTY));
 				return;
 			}
 
@@ -557,14 +560,14 @@ namespace rsx
 						{
 							if (reg >= range.first && reg < range.first + range.second)
 							{
-								const u32 remaining = std::min<u32>(fifo_ctrl->get_remaining_args_count() + 1,
-									(fifo_ctrl->last_cmd() & RSX_METHOD_NON_INCREMENT_CMD_MASK) ? UINT32_MAX : (range.first + range.second) - reg);
+								const u32 remaining = std::min<u32>(fifo_ctrl.get_remaining_args_count() + 1,
+									(fifo_ctrl.last_cmd() & RSX_METHOD_NON_INCREMENT_CMD_MASK) ? UINT32_MAX : (range.first + range.second) - reg);
 
-								commands.back().rsx_command.first = (fifo_ctrl->last_cmd() & RSX_METHOD_NON_INCREMENT_CMD_MASK) | (reg << 2) | (remaining << 18);
+								commands.back().rsx_command.first = (fifo_ctrl.last_cmd() & RSX_METHOD_NON_INCREMENT_CMD_MASK) | (reg << 2) | (remaining << 18);
 
-								for (u32 i = 1; i < remaining && fifo_ctrl->get_pos() + (i - 1) * 4 != (ctrl->put & ~3); i++)
+								for (u32 i = 1; i < remaining && fifo_ctrl.get_pos() + (i - 1) * 4 != (ctrl->put & ~3); i++)
 								{
-									replay_cmd.rsx_command = std::make_pair(0, vm::read32(fifo_ctrl->get_current_arg_ptr() + (i * 4)));
+									replay_cmd.rsx_command = std::make_pair(0, vm::read32(fifo_ctrl.get_current_arg_ptr() + (i * 4)));
 
 									commands.push_back(replay_cmd);
 								}
@@ -624,8 +627,8 @@ namespace rsx
 				method(this, reg, value);
 			}
 		}
-		while (fifo_ctrl->read_unsafe(command));
+		while (fifo_ctrl.read_unsafe(command));
 
-		fifo_ctrl->sync_get();
+		fifo_ctrl.sync_get();
 	}
 }

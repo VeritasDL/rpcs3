@@ -3,6 +3,9 @@
 #include "gcm_enums.h"
 #include "util/types.hpp"
 
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/vector.hpp>
+
 enum register_type
 {
 	RSX_FP_REGISTER_TYPE_TEMP = 0,
@@ -291,6 +294,11 @@ struct RSXFragmentProgram
 			}
 		}
 
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(/*data_ptr*/ local_storage);
+		}
 	} mutable data;
 
 	u32 offset = 0;
@@ -345,5 +353,12 @@ struct RSXFragmentProgram
 	{
 		ensure(ucode_length);
 		data.deep_copy(ucode_length);
+	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(data, offset, ucode_length, total_length, ctrl, unnormalized_coords, redirected_textures, shadow_textures,
+		    two_sided_lighting, texture_dimensions, texcoord_control_mask, texture_scale, valid);
 	}
 };

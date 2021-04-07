@@ -8,6 +8,9 @@
 #include "Utilities/span.h"
 #include "util/fnv_hash.hpp"
 
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/bitset.hpp>
+
 #include <deque>
 #include <unordered_map>
 
@@ -26,6 +29,12 @@ namespace program_hash_util
 			std::bitset<512> instruction_mask;
 			u32 ucode_length;
 			u32 referenced_textures_mask;
+
+			template <class Archive>
+			void serialize(Archive& ar)
+			{
+				ar(instruction_mask, ucode_length, referenced_textures_mask);
+			}
 		};
 
 		static usz get_vertex_program_ucode_hash(const RSXVertexProgram &program);
@@ -55,6 +64,13 @@ namespace program_hash_util
 			bool has_pack_instructions;
 			bool has_branch_instructions;
 			bool is_nop_shader;           // Does this affect Z-pass testing???
+
+			template <class Archive>
+			void serialize(Archive& ar)
+			{
+				ar(program_start_offset, program_ucode_length, program_constants_buffer_length, referenced_textures_mask,
+				    has_pack_instructions, has_branch_instructions, is_nop_shader);
+			}
 		};
 
 		/**

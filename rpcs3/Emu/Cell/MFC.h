@@ -94,6 +94,12 @@ struct alignas(16) spu_mfc_cmd
 	u32 lsa;
 	u32 eal;
 	u32 eah;
+	
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(cmd, tag, size, lsa, eal, eah);
+	}
 };
 
 struct mfc_cmd_dump
@@ -101,4 +107,10 @@ struct mfc_cmd_dump
 	spu_mfc_cmd cmd;
 
 	alignas(16) u8 data[128];
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(cmd, data);
+	}
 };

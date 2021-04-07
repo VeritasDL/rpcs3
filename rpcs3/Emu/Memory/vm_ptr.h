@@ -5,6 +5,8 @@
 #include "Utilities/StrFmt.h"
 #include "vm.h"
 
+#include <cereal/archives/binary.hpp>
+
 class ppu_thread;
 struct ppu_func_opd_t;
 
@@ -217,6 +219,12 @@ namespace vm
 		{
 			return m_addr;
 		}
+
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(m_addr);
+		}
 	};
 
 	template<typename AT, typename RT, typename... T>
@@ -277,6 +285,12 @@ namespace vm
 		// Callback; defined in PPUCallback.h, passing context is mandatory
 		RT operator()(ppu_thread& ppu, T... args) const;
 		const ppu_func_opd_t& opd() const;
+
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(m_addr);
+		}
 	};
 
 	template<typename AT, typename RT, typename... T>

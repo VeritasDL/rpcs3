@@ -229,6 +229,18 @@ void gs_frame::keyPressEvent(QKeyEvent *keyEvent)
 	case Qt::Key_F12:
 		screenshot_toggle = true;
 		break;
+	case Qt::Key_F7:
+		Emu.SavestateSaveToFile();
+		break;
+	case Qt::Key_F8:
+		Emu.SavestateLoadFromFile();
+		break;
+	case Qt::Key_F9:
+		Emu.SavestateSaveToMemory();
+		break;
+	case Qt::Key_F10:
+		Emu.SavestateLoadFromMemory();
+		break;
 	default:
 		break;
 	}

@@ -470,6 +470,13 @@ public:
 			*this = value;
 			return result;
 		}
+
+public:
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(m_data);
+		}
 	};
 }
 

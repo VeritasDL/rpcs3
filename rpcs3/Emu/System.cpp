@@ -1,7 +1,9 @@
 #include "stdafx.h"
+#pragma optimize("", off)
 #include "VFS.h"
 #include "Utilities/bin_patch.h"
 #include "Emu/Memory/vm.h"
+#include "Emu/Memory/vm_locking.h"
 #include "Emu/System.h"
 #include "Emu/perf_meter.hpp"
 
@@ -38,6 +40,10 @@
 #include "util/yaml.hpp"
 #include "util/logs.hpp"
 #include "util/cereal.hpp"
+
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/memory.hpp>
+#include <cereal/types/vector.hpp>
 
 #include <thread>
 #include <queue>
@@ -122,6 +128,102 @@ void fmt_class_string<game_boot_result>::format(std::string& out, u64 arg)
 		return unknown;
 	});
 }
+
+void Emulator::SavestateSaveToFile()
+{
+	sys_log.always("Saving savestate to file");
+	std::ofstream os("rpcs3_state.bin", std::ios::binary | std::ios::out);
+	cereal::BinaryOutputArchive archive(os);
+
+	archive(*this);
+}
+
+void Emulator::SavestateLoadFromFile()
+{
+	sys_log.always("Loading savestate from file");
+	std::ifstream is("rpcs3_state.bin", std::ios::binary | std::ios::in);
+	cereal::BinaryInputArchive archive(is);
+
+	archive(*this);
+}
+
+static std::stringstream g_ss_state;
+
+void Emulator::SavestateSaveToMemory()
+{
+	sys_log.always("Saving savestate to memory");
+
+	std::stringstream().swap(g_ss_state); // swap with a default constructed stringstream
+	//g_ss_state.str("");
+	cereal::BinaryOutputArchive archive(g_ss_state);
+
+	archive(*this);
+}
+
+void Emulator::SavestateLoadFromMemory()
+{
+	sys_log.always("Loading savestate from memory");
+	cereal::BinaryInputArchive archive(g_ss_state);
+
+	archive(*this);
+	g_ss_state.seekg(0, std::ios::beg);
+}
+
+template <class Archive>
+void serialize_common_start(Archive& ar)
+{
+	Emu.Pause();
+	ensure(Emu.IsPaused());
+
+	// First we do RSX so it has the chance to flush everything it has to memory
+
+	if (auto rsx = g_fxo->try_get<rsx::thread>())
+		ar(*rsx);
+	else
+		throw std::runtime_error("failed to get rsx::thread");
+
+	ar(rsx::method_registers);
+
+	// TODO: HLE stuff
+}
+
+template <class Archive>
+void serialize_common_end(Archive& ar)
+{
+	// TODO: this is wrong. order can be whatever
+	auto on_select_ppu = [&](u32, ppu_thread& ppu) {
+		ar(ppu);
+	};
+	auto on_select_spu = [&](u32, spu_thread& spu) {
+		ar(spu);
+	};
+
+	idm::select<named_thread<ppu_thread>>(on_select_ppu);
+	idm::select<named_thread<spu_thread>>(on_select_spu);
+
+	ar(spu_thread::g_raw_spu_ctr, spu_thread::g_raw_spu_id);
+
+	Emu.Resume();
+}
+
+template <class Archive>
+void Emulator::save(Archive& ar) const
+{
+	serialize_common_start(ar);
+	vm::save(ar);
+	serialize_common_end(ar);
+}
+
+template <class Archive>
+void Emulator::load(Archive& ar)
+{
+	serialize_common_start(ar);
+	vm::load(ar);
+	serialize_common_end(ar);
+}
+
+template void Emulator::load<>(cereal::BinaryInputArchive& ar);
+template void Emulator::save<>(cereal::BinaryOutputArchive& ar) const;
 
 void Emulator::Init(bool add_only)
 {

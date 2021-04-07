@@ -579,7 +579,8 @@ namespace rsx
 
 		performance_counters.state = FIFO_state::running;
 
-		fifo_ctrl = std::make_unique<::rsx::FIFO::FIFO_control>(this);
+		fifo_ctrl = ::rsx::FIFO::FIFO_control(this);
+		//fifo_ctrl = std::make_unique<::rsx::FIFO::FIFO_control>(this);
 
 		last_flip_time = get_system_time() - 1000000;
 
@@ -2543,7 +2544,7 @@ namespace rsx
 	void thread::flush_fifo()
 	{
 		// Make sure GET value is exposed before sync points
-		fifo_ctrl->sync_get();
+		fifo_ctrl.sync_get();
 	}
 
 	void thread::recover_fifo()
@@ -2566,10 +2567,10 @@ namespace rsx
 		}
 
 		// Error. Should reset the queue
-		fifo_ctrl->set_get(restore_point);
+		fifo_ctrl.set_get(restore_point);
 		fifo_ret_addr = saved_fifo_ret;
 		std::this_thread::sleep_for(2ms);
-		fifo_ctrl->abort();
+		fifo_ctrl.abort();
 
 		if (std::exchange(in_begin_end, false) && !rsx::method_registers.current_draw_clause.empty())
 		{
@@ -2577,7 +2578,7 @@ namespace rsx
 			rsx::thread::end();
 		}
 
-		recovered_fifo_cmds_history.push({fifo_ctrl->last_cmd(), current_time});
+		recovered_fifo_cmds_history.push({fifo_ctrl.last_cmd(), current_time});
 	}
 
 	std::vector<std::pair<u32, u32>> thread::dump_callstack_list() const
@@ -2650,7 +2651,7 @@ namespace rsx
 	u32 thread::get_fifo_cmd() const
 	{
 		// Last fifo cmd for logging and utility
-		return fifo_ctrl->last_cmd();
+		return fifo_ctrl.last_cmd();
 	}
 
 	void invalid_method(thread*, u32, u32);
@@ -3085,7 +3086,7 @@ namespace rsx
 		}
 	}
 
-
+	#include <intrin.h>
 	namespace reports
 	{
 		ZCULL_control::ZCULL_control()
@@ -3097,7 +3098,8 @@ namespace rsx
 		}
 
 		ZCULL_control::~ZCULL_control()
-		{}
+		{
+		}
 
 		void ZCULL_control::set_active(class ::rsx::thread* ptimer, bool state, bool flush_queue)
 		{

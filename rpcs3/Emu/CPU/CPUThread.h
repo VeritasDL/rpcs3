@@ -247,6 +247,12 @@ public:
 	// Send signal to the profiler(s) to flush results
 	static void flush_profilers() noexcept;
 
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(block_hash);
+	}
+
 private:
 	static thread_local cpu_thread* g_tls_this_thread;
 

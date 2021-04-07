@@ -3,6 +3,11 @@
 #include "gcm_enums.h"
 #include "util/types.hpp"
 
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/vector.hpp>
+#include <cereal/types/set.hpp>
+#include <cereal/types/bitset.hpp>
+
 #include <vector>
 #include <bitset>
 #include <set>
@@ -228,6 +233,12 @@ struct rsx_vertex_input
 		return location == other.location && size == other.size && frequency == other.frequency && is_modulo == other.is_modulo &&
 			is_array == other.is_array && int_type == other.int_type && flags == other.flags;
 	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(location, size, frequency, is_modulo, is_array, int_type, flags);
+	}
 };
 
 struct RSXVertexProgram
@@ -246,5 +257,12 @@ struct RSXVertexProgram
 	rsx::texture_dimension_extended get_texture_dimension(u8 id) const
 	{
 		return rsx::texture_dimension_extended{static_cast<u8>((texture_dimensions >> (id * 2)) & 0x3)};
+	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(data, rsx_vertex_inputs, output_mask, texture_dimensions, skip_vertex_input_check, base_address, entry,
+			instruction_mask, jump_table);
 	}
 };

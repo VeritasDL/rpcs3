@@ -86,6 +86,12 @@ struct RsxDmaControl
 	atomic_be_t<u32> ref;
 	be_t<u32> unk[2];
 	be_t<u32> unk1;
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(resv, put, get, ref, unk, unk1);
+	}
 };
 
 struct RsxSemaphore
@@ -123,6 +129,12 @@ struct RsxDisplayInfo
 	bool valid() const
 	{
 		return height != 0u && width != 0u;
+	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(offset, pitch, width, height);
 	}
 };
 

@@ -1,4 +1,5 @@
 #pragma once
+//#pragma optimize("", off)
 
 #include "util/types.hpp"
 #include "util/shared_ptr.hpp"
@@ -8,6 +9,8 @@
 #else
 #define ATTR_PURE /* nothing available */
 #endif
+
+//static FILE* g_ftm_log = fopen("rpcs3_ftm.log", "w");
 
 namespace stx
 {
@@ -193,6 +196,13 @@ namespace stx
 		: Info(info)
 	{
 		auto& tl = typelist<Info>();
+
+		/*
+		const auto str = fmt::format("type_info  %8X %X %X %s\n",
+			, typeid(T).name());
+		fputs(str.c_str(), g_ftm_log);
+		fflush(g_ftm_log);
+		*/
 
 		// Update type info
 		this->size = _size > this->size ? _size : this->size;

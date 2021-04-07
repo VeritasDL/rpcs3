@@ -255,6 +255,12 @@ namespace utils
 		{
 			return fmt::format("{0x%x->0x%x}", start, end);
 		}
+
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(start, end);
+		}
 	};
 
 	static inline address_range page_for(u32 addr)

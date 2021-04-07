@@ -3,6 +3,8 @@
 #include "util/types.hpp"
 #include "util/atomic.hpp"
 
+#include <cereal/types/base_class.hpp>
+
 //! Simple sizeless array base for concurrent access. Cannot shrink, only growths automatically.
 //! There is no way to know the current size. The smaller index is, the faster it's accessed.
 //!
@@ -47,6 +49,13 @@ public:
 		// Access recursively
 		return (*m_next)[index - N];
 	}
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		if (m_next)
+			__debugbreak();
+		ar(m_data/*, m_next*/);
+	}
 };
 
 //! Simple lock-free FIFO queue base. Based on lf_array<T, N> itself. Currently uses 32-bit counters.
@@ -54,6 +63,8 @@ public:
 template<typename T, usz N>
 class lf_fifo : public lf_array<T, N>
 {
+	using base = lf_array<T, N>;
+
 	// LSB 32-bit: push, MSB 32-bit: pop
 	atomic_t<u64> m_ctrl{};
 
@@ -95,6 +106,12 @@ public:
 
 			return static_cast<u32>(ctrl >> 32);
 		});
+	}
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(cereal::base_class<base>(this));
+		ar(m_ctrl);
 	}
 };
 

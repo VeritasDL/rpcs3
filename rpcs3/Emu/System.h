@@ -1,5 +1,5 @@
 #pragma once
-
+#pragma optimize("", off)
 #include "util/types.hpp"
 #include "util/atomic.hpp"
 #include <functional>
@@ -9,6 +9,15 @@
 #include <set>
 
 #include "Emu/Cell/timers.hpp"
+
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/memory.hpp>
+#include <cereal/types/vector.hpp>
+#include <cereal/types/array.hpp>
+#include <cereal/types/string.hpp>
+#include <cereal/types/utility.hpp>
+#include <cereal/types/unordered_set.hpp>
+#include <cereal/types/unordered_map.hpp>
 
 struct progress_dialog_workaround
 {
@@ -280,6 +289,17 @@ public:
 		if (m_stop_ctr == old) m_stop_ctr.wait(old);
 	}
 
+	void SavestateSaveToFile();
+	void SavestateLoadFromFile();
+
+	void SavestateSaveToMemory();
+	void SavestateLoadFromMemory();
+
+	template <class Archive>
+	void save(Archive& ar) const;
+
+	template <class Archive>
+	void load(Archive& ar);
 private:
 	void LimitCacheSize();
 };

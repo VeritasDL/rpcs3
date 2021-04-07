@@ -681,6 +681,23 @@ constexpr u64 operator""_u64(const char* s, usz /*length*/)
 	}
 }
 
+constexpr u64 operator"" _B(u64 bytes)
+{
+	return bytes;
+}
+constexpr u64 operator"" _KB(u64 bytes)
+{
+	return 1024ULL * bytes;
+}
+constexpr u64 operator"" _MB(u64 bytes)
+{
+	return 1024ULL * 1024ULL * bytes;
+}
+constexpr u64 operator"" _GB(u64 bytes)
+{
+	return 1024ULL * 1024ULL * 1024ULL * bytes;
+}
+
 #if !defined(__INTELLISENSE__) && !__has_builtin(__builtin_COLUMN) && !defined(_MSC_VER)
 constexpr unsigned __builtin_COLUMN()
 {

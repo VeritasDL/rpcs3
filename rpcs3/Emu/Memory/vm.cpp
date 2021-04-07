@@ -1,4 +1,5 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
+#pragma optimize("", off)
 #include "vm_locking.h"
 #include "vm_ptr.h"
 #include "vm_ref.h"
@@ -18,6 +19,11 @@
 
 #include "util/vm.hpp"
 #include "util/asm.hpp"
+
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/array.hpp>
+#include <cereal/types/memory.hpp>
+#include <cereal/types/vector.hpp>
 
 LOG_CHANNEL(vm_log, "VM");
 
@@ -1672,6 +1678,55 @@ namespace vm
 		std::memset(g_range_lock_set, 0, sizeof(g_range_lock_set));
 		g_range_lock_bits = 0;
 	}
+
+	// TODO: properly re-map blocks
+
+	template <class Archive>
+	void serialize_common(Archive& ar)
+	{
+		ar(cereal::binary_data(vm::g_reservations, sizeof(g_reservations)),
+			cereal::binary_data((u8*)vm::g_shmem, sizeof(vm::g_shmem)),
+		    vm::g_range_lock, vm::g_range_lock_bits, cereal::binary_data((u8*)vm::g_range_lock_set, sizeof(vm::g_range_lock_set)),
+		    cereal::binary_data((u8*)vm::g_pages.data(), sizeof(vm::g_pages)));
+
+		// TODO?(opt.): omit zero pages
+		// TODO?(opt.): batch nearby pages?
+		// TODO?(opt.): align to 4k boundary
+
+		for (size_t page_i = 0; page_i < g_pages.size(); page_i++)
+		{
+			const u8 page_info = g_pages[page_i];
+
+			if (page_info & page_allocated)
+			{
+				// vm_log.always("page %08llX addr %08llX  %02X", page_i, page_i * 0x1000, page_info);
+				ar(cereal::binary_data(g_sudo_addr + page_i * 0x1000, 0x1000));
+			}
+			if (page_info != 0 && !(page_info & page_allocated))
+			{
+				vm_log.always("weird page %08llX addr %08llX  %02X", page_i, page_i * 0x1000, page_info);
+				__debugbreak();
+			}
+		}
+	}
+
+	template <class Archive>
+	void save(Archive& ar)
+	{
+		serialize_common(ar);
+
+		// TODO: non-default vm::g_locations
+	}
+	template <class Archive>
+	void load(Archive& ar)
+	{
+		serialize_common(ar);
+
+		// TODO: non-default vm::g_locations
+	}
+
+	template void save<>(cereal::BinaryOutputArchive& ar);
+	template void load<>(cereal::BinaryInputArchive& ar);
 }
 
 void fmt_class_string<vm::_ptr_base<const void, u32>>::format(std::string& out, u64 arg)

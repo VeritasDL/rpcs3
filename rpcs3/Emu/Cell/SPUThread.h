@@ -10,6 +10,10 @@
 #include "util/logs.hpp"
 #include "util/to_endian.hpp"
 
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/base_class.hpp>
+#include <cereal/types/memory.hpp>
+
 LOG_CHANNEL(spu_log, "SPU");
 
 struct lv2_event_queue;
@@ -363,6 +367,12 @@ public:
 	{
 		return static_cast<u32>(data >> off_count);
 	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(data);
+	}
 };
 
 struct spu_channel_4_t
@@ -375,6 +385,12 @@ struct spu_channel_4_t
 		u32 value0;
 		u32 value1;
 		u32 value2;
+	
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(waiting, count, _pad, value0, value1, value2);
+		}
 	};
 
 	atomic_t<sync_var_t> values;
@@ -468,6 +484,12 @@ public:
 		this->values.raw() = { 0, static_cast<u8>(count), {}, value0, value1, value2 };
 		this->value3 = value3;
 	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(values, value3);
+	}
 };
 
 struct spu_int_ctrl_t
@@ -490,6 +512,12 @@ struct spu_int_ctrl_t
 		stat.release(0);
 		tag.reset();
 	}
+	
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(mask, stat/*, tag*/);
+	}
 };
 
 struct spu_imm_table_t
@@ -508,6 +536,12 @@ struct spu_imm_table_t
 		FORCE_INLINE const auto& operator [](s32 scale) const
 		{
 			return m_data[scale + 155].vf;
+		}
+
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(m_data);
 		}
 	}
 	const scale;
@@ -613,6 +647,12 @@ public:
 		r._u32[2] = _u32[2];
 		r._u32[1] = _u32[1];
 		r._u32[0] = _u32[0];
+	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(_u32);
 	}
 };
 
@@ -732,6 +772,12 @@ public:
 	{
 		u32 status; // SPU Status register
 		u32 npc; // SPU Next Program Counter register
+
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(status, npc);
+		}
 	};
 
 	atomic_t<status_npc_sync_var> status_npc;
@@ -851,6 +897,29 @@ public:
 
 		return -1;
 	}
+
+	
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(cereal::base_class<cpu_thread>(this));
+		ar(pc, dbg_step_pc, base_pc /*memory_base_addr*/);
+
+		ar(fpscr, ch_mfc_cmd, mfc_queue, mfc_size, mfc_barrier, mfc_fence, mfc_prxy_cmd, mfc_prxy_mtx, mfc_prxy_mask,
+		    mfc_prxy_write_state.all, rtime, rdata, raddr /*range_lock*/, srr0, ch_tag_upd, ch_tag_mask, ch_tag_stat, ch_stall_mask,
+		    ch_stall_stat, ch_atomic_stat, ch_in_mbox, ch_out_mbox, ch_out_intr_mbox, snr_config, ch_snr1, ch_snr2,
+			cereal::binary_data((u8*)&ch_events.raw().all, sizeof(ch_events)),
+		    interrupts_enabled, ch_dec_start_timestamp, ch_dec_value, run_ctrl, run_ctrl_mtx, status_npc, int_ctrl/*, spuq, spup*/,
+		    exit_status, last_exit_status/*, shm ls, jit*/, block_counter, block_recover,
+		    block_failure, saved_native_sp, ftx, stx, last_ftsc, last_ftime, last_faddr, last_fail, last_succ, mfc_dump_idx
+		    /*current_func*/, start_time, debugger_float_mode);
+
+		for (auto gpr_i : gpr)
+			ar(gpr_i._bytes);
+
+		for (auto stack_mirror_i : stack_mirror)
+			ar(stack_mirror_i._bytes);
+	}	
 };
 
 class spu_function_logger

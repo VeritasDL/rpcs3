@@ -1,4 +1,5 @@
 #pragma once
+//#pragma optimize("", off)
 
 #include "util/types.hpp"
 #include "Utilities/mutex.h"

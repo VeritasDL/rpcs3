@@ -26,6 +26,16 @@
 #include "Emu/IdManager.h"
 #include "Emu/system_config.h"
 
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/memory.hpp>
+#include <cereal/types/array.hpp>
+#include <cereal/types/atomic.hpp>
+#include <cereal/types/deque.hpp>
+#include <cereal/types/queue.hpp>
+#include <cereal/types/map.hpp>
+#include <cereal/types/unordered_map.hpp>
+#include <cereal/types/vector.hpp>
+
 extern atomic_t<bool> g_user_asked_for_frame_capture;
 extern rsx::frame_trace_data frame_debug;
 extern rsx::frame_capture_data frame_capture;
@@ -94,6 +104,11 @@ namespace rsx
 					rs[block].unlock_shared();
 				}
 			}
+		}
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(ea, io, rs);
 		}
 	};
 
@@ -349,6 +364,14 @@ namespace rsx
 		rsx::surface_raster_type raster_type;
 		u32 aa_factors[2];
 		bool ignore_change;
+
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(width, height, color_addresses, color_pitch, actual_color_pitch, color_write_enabled, zeta_address, zeta_pitch,
+			    actual_zeta_pitch, zeta_write_enabled, target, color_format, depth_format, aa_mode, raster_type, aa_factors,
+			    ignore_change);
+		}
 	};
 
 	namespace reports
@@ -364,6 +387,12 @@ namespace rsx
 			bool pending;
 			bool active;
 			bool owned;
+
+			template <class Archive>
+			void serialize(Archive& ar)
+			{
+				ar(driver_handle, result, num_draws, data_type, sync_tag, timestamp, pending, active, owned);
+			}
 		};
 
 		struct queued_report_write
@@ -375,6 +404,12 @@ namespace rsx
 
 			vm::addr_t sink;                      // Memory location of the report
 			std::vector<vm::addr_t> sink_alias;   // Aliased memory addresses
+
+			template <class Archive>
+			void serialize(Archive& ar)
+			{
+				ar(type, counter_tag, sink, sink_alias);
+			}
 		};
 
 		struct query_search_result
@@ -489,6 +524,18 @@ namespace rsx
 			virtual bool check_occlusion_query_status(occlusion_query_info* /*query*/) { return true; }
 			virtual void get_occlusion_query_result(occlusion_query_info* query) { query->result = UINT32_MAX; }
 			virtual void discard_occlusion_query(occlusion_query_info* /*query*/) {}
+
+			template <class Archive>
+			void serialize(Archive& ar)
+			{
+				if (!m_free_occlusion_pool.empty())
+					throw std::runtime_error("ayy");
+				if (m_current_task)
+					throw std::runtime_error("ayy");
+				ar(unit_enabled, write_enabled, stats_enabled, zpass_count_enabled, host_queries_active, m_occlusion_query_data,
+				    m_statistics_tag_id, m_tsc, m_next_tsc, m_sync_tag, m_timer, m_pending_writes, m_statistics_map);
+				// todo: this is polymorphic, needs more work
+			}
 		};
 
 		// Helper class for conditional rendering
@@ -526,6 +573,12 @@ namespace rsx
 
 			// Evaluates the condition by accessing memory directly
 			void eval_result(thread* pthr);
+
+			template <class Archive>
+			void serialize(Archive& ar)
+			{
+				// TODO(velo): ar(enabled, eval_failed, hw_cond_active, reserved /*eval_sources*/, eval_sync_tag, eval_address);
+			}
 		};
 	}
 
@@ -577,6 +630,12 @@ namespace rsx
 			rsx_log.error("Display queue was discarded while not empty!");
 			return false;
 		}
+
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(buffer_queue, buffer, skip_frame, emu_flip, in_progress/*stats*/);
+		}
 	};
 
 	struct backend_configuration
@@ -613,7 +672,8 @@ namespace rsx
 
 		// FIFO
 	public:
-		std::unique_ptr<FIFO::FIFO_control> fifo_ctrl;
+		// std::unique_ptr<FIFO::FIFO_control> fifo_ctrl;
+		FIFO::FIFO_control fifo_ctrl;
 		std::vector<std::pair<u32, u32>> dump_callstack_list() const override;
 
 	protected:
@@ -773,6 +833,12 @@ namespace rsx
 		{
 			u32 cmd;
 			u64 timestamp;
+
+			template <class Archive>
+			void serialize(Archive& ar)
+			{
+				ar(cmd, timestamp);
+			}
 		};
 
 		std::queue<desync_fifo_cmd_info> recovered_fifo_cmds_history;
@@ -969,6 +1035,34 @@ namespace rsx
 
 		// Returns true if the current thread is the active RSX thread
 		bool is_current_thread() const { return std::this_thread::get_id() == m_rsx_thread; }
+		
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			flush_fifo();
+
+			ar(timestamp_ctrl, timestamp_subvalue, m_queued_flip, fifo_ctrl, m_flattener, fifo_ret_addr, saved_fifo_ret,
+			    zcull_surface_active /*, zcull_ctrl*/, m_surface_info, m_depth_surface_info, m_framebuffer_layout,
+			    framebuffer_status_valid /*m_overlay_manager*/, m_invalidated_memory_range /*m_profiler, m_frame_stats*/,
+			    /**ctrl,*/ dma_address, iomap_table, restore_point, dbg_step_pc, external_interrupt_lock, external_interrupt_ack,
+			    is_inited /*performance_counters, async_flip_requested, async_flip_buffer*/, tiles, zculls /*intr_thread*/,
+				isHLE, flip_status, debug_level, requested_vsync, enable_second_vhandler, display_buffers, display_buffers_count,
+			    current_display_buffer, device_addr, label_addr, main_mem_size, local_mem_size, m_rtts_dirty, m_textures_dirty,
+			    m_vertex_textures_dirty, m_framebuffer_state_contested, m_current_framebuffer_context,
+			    m_graphics_state, ROP_sync_timestamp, current_fp_metadata, current_vp_metadata, current_vertex_program,
+				current_fragment_program, target_rsx_flip_time, int_flip_index, last_flip_time, flip_handler, user_handler,
+				vblank_handler, vblank_count, sync_point_request, in_begin_end, recovered_fifo_cmds_history, async_tasks_pending,
+				zcull_stats_enabled, zcull_rendering_enabled, zcull_pixel_cnt_enabled, cond_render_ctrl);
+
+			if constexpr (std::is_same_v<Archive, cereal::BinaryInputArchive>)
+			{
+				m_rtts_dirty = true;
+				m_textures_dirty.fill(true);
+				m_vertex_textures_dirty.fill(true);
+
+				m_graphics_state = pipeline_state::all_dirty;
+			}
+		}
 	};
 
 	inline thread* get_current_renderer()

@@ -5,6 +5,8 @@
 #include "Utilities/geometry.h"
 #include "gcm_enums.h"
 
+#include <cereal/archives/binary.hpp>
+
 #include <memory>
 #include <bitset>
 #include <chrono>
@@ -146,6 +148,12 @@ namespace rsx
 		{
 			ensure(range.start == address);
 			return range;
+		}
+
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(address, pitch, color_format, depth_format, width, height, bpp, samples, range);
 		}
 	};
 
@@ -1204,6 +1212,12 @@ namespace rsx
 		const_iterator end() const
 		{
 			return _data ? _data + _size : nullptr;
+		}
+
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(_capacity, _size, cereal::binary_data(_data, _size * sizeof(Ty)));
 		}
 	};
 

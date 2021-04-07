@@ -125,6 +125,12 @@ struct GcmZcullInfo
 
 		return ret;
 	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(offset, width, height, cullStart, zFormat, aaFormat, zcullDir, zcullFormat, sFunc, sRef, sMask, bound);
+	}
 };
 
 struct GcmTileInfo
@@ -148,6 +154,12 @@ struct GcmTileInfo
 		ret.format = base | ((base + ((size - 1) / 0x10000)) << 13) | (comp << 26) | (1 << 30);
 
 		return ret;
+	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(location, offset, size, pitch, comp, base, bank);
 	}
 };
 

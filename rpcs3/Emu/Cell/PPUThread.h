@@ -7,6 +7,8 @@
 #include "util/logs.hpp"
 #include "util/v128.hpp"
 
+#include <cereal/types/base_class.hpp>
+
 LOG_CHANNEL(ppu_log, "PPU");
 
 enum class ppu_cmd : u32
@@ -108,6 +110,12 @@ struct cmd64
 	{
 		return std::bit_cast<T>(std::bit_cast<pair_t>(m_data).arg2);
 	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(m_data);
+	}
 };
 
 class ppu_thread : public cpu_thread
@@ -204,6 +212,13 @@ public:
 		bool ov{}; // Overflow
 		bool ca{}; // Carry
 		u8 cnt{};  // 0..6
+
+		
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(so, ov, ca, cnt);
+		}
 	}
 	xer;
 
@@ -288,6 +303,18 @@ public:
 
 	static u32 stack_push(u32 size, u32 align_v);
 	static void stack_pop_verbose(u32 addr, u32 size) noexcept;
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(cereal::base_class<cpu_thread>(this));
+		ar(gpr, fpr, cr.bits, fpscr.bits.bits, lr, ctr, vrsave, cia, xer, sat, nj, jm_mask, raddr, rtime, rdata, use_full_rdata,
+		    prio, joiner, cmd_queue, cmd_notify, start_time, syscall_args/*, ppu_tname*/, saved_native_sp,
+		    last_ftsc, last_ftime, last_faddr, last_fail, last_succ, dbg_step_pc);
+
+		for (auto vr_i : vr)
+			ar(vr_i._bytes);
+	}
 };
 
 static_assert(ppu_join_status::max <= ppu_join_status{ppu_thread::id_base});

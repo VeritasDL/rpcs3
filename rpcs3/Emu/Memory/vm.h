@@ -1,12 +1,15 @@
 #pragma once
-
-#include <memory>
+#pragma optimize("", off)
 #include "util/types.hpp"
 #include "util/atomic.hpp"
 #include "util/auto_typemap.hpp"
 #include "Utilities/StrFmt.h"
 
 #include "util/to_endian.hpp"
+
+#include <memory>
+
+#include <cereal/archives/binary.hpp>
 
 namespace utils
 {
@@ -333,4 +336,10 @@ namespace vm
 
 	template <typename T, typename AT>
 	class _ref_base;
+
+	template <class Archive>
+	void save(Archive& ar);
+
+	template <class Archive>
+	void load(Archive& ar);
 }

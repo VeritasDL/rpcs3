@@ -106,6 +106,12 @@ namespace rsx
 			void force_disable();
 			void evaluate_performance(u32 total_draw_count);
 			inline flatten_op test(register_pair& command);
+
+			template <class Archive>
+			void serialize(Archive& ar)
+			{
+				ar(deferred_primitive, draw_count, begin_end_ctr, enabled, num_collapsed, fifo_hint);
+			}
 		};
 
 		class FIFO_control
@@ -125,8 +131,9 @@ namespace rsx
 			u32 m_cmd = ~0u;
 
 		public:
+			FIFO_control() = default;
 			FIFO_control(rsx::thread* pctrl);
-			~FIFO_control() = default;
+			~FIFO_control();
 
 			u32 get_pos() const { return m_internal_get; }
 			u32 last_cmd() const { return m_cmd; }
@@ -141,6 +148,13 @@ namespace rsx
 			void read(register_pair& data);
 			inline bool read_unsafe(register_pair& data);
 			bool skip_methods(u32 count);
+			
+			template <class Archive>
+			void serialize(Archive& ar)
+			{
+				ar(m_internal_get, m_memwatch_addr, m_memwatch_cmp, m_command_reg, m_command_inc,
+					m_remaining_commands, m_args_ptr, m_cmd);
+			}
 		};
 	}
 }

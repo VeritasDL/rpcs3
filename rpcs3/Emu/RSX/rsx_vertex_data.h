@@ -114,6 +114,12 @@ struct push_buffer_vertex_info
 		u32* dst = data.data() + ((vertex_count - 1) * vertex_size) + sub_index;
 		*dst = arg;
 	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(size, type, vertex_count, attribute_mask, data);
+	}
 };
 
 struct register_vertex_data_info

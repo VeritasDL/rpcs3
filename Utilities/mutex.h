@@ -171,6 +171,12 @@ public:
 	{
 		return m_value.load() < c_one - 1;
 	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(m_value);
+	}
 };
 
 // Simplified shared (reader) lock implementation.

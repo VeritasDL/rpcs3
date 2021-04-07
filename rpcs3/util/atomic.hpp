@@ -4,6 +4,9 @@
 #include <functional>
 #include <mutex>
 
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/base_class.hpp>
+
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable: 4996)
@@ -1618,10 +1621,16 @@ public:
 		const u128 mask = std::bit_cast<get_uint_t<sizeof(T)>>(mask_value);
 		atomic_wait_engine::notify_all(&m_data, sizeof(T), mask);
 	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(m_data);
+	}
 };
 
 template <usz Align>
-class atomic_t<bool, Align> : private atomic_t<uchar, Align>
+class atomic_t<bool, Align> : public atomic_t<uchar, Align>
 {
 	using base = atomic_t<uchar, Align>;
 
@@ -1707,6 +1716,12 @@ public:
 	void notify_all() noexcept
 	{
 		base::notify_all(1);
+	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(cereal::base_class<base>(this));
 	}
 };
 

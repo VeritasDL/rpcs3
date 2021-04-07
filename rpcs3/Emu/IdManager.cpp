@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#pragma optimize("", off)
 #include "IdManager.h"
 #include "Utilities/Thread.h"
 
