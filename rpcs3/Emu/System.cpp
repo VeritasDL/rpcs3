@@ -129,9 +129,29 @@ void fmt_class_string<game_boot_result>::format(std::string& out, u64 arg)
 	});
 }
 
+class duration_printer
+{
+public:
+	duration_printer()
+	    : m_start(std::chrono::high_resolution_clock::now()) {}
+	~duration_printer()
+	{
+		using namespace std::chrono;
+
+		const high_resolution_clock::time_point end = high_resolution_clock::now();
+		const auto dur                              = duration<float, std::milli>(end - m_start);
+		sys_log.always("...   %.2f ms", dur.count());
+	}
+
+private:
+	std::chrono::high_resolution_clock::time_point m_start;
+};
+
 void Emulator::SavestateSaveToFile()
 {
 	sys_log.always("Saving savestate to file");
+	duration_printer dp;
+
 	std::ofstream os("rpcs3_state.bin", std::ios::binary | std::ios::out);
 	cereal::BinaryOutputArchive archive(os);
 
@@ -141,6 +161,8 @@ void Emulator::SavestateSaveToFile()
 void Emulator::SavestateLoadFromFile()
 {
 	sys_log.always("Loading savestate from file");
+	duration_printer dp;
+
 	std::ifstream is("rpcs3_state.bin", std::ios::binary | std::ios::in);
 	cereal::BinaryInputArchive archive(is);
 
@@ -152,6 +174,7 @@ static std::stringstream g_ss_state;
 void Emulator::SavestateSaveToMemory()
 {
 	sys_log.always("Saving savestate to memory");
+	duration_printer dp;
 
 	std::stringstream().swap(g_ss_state); // swap with a default constructed stringstream
 	//g_ss_state.str("");
@@ -163,6 +186,8 @@ void Emulator::SavestateSaveToMemory()
 void Emulator::SavestateLoadFromMemory()
 {
 	sys_log.always("Loading savestate from memory");
+	duration_printer dp;
+
 	cereal::BinaryInputArchive archive(g_ss_state);
 
 	archive(*this);
