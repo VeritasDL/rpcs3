@@ -13,6 +13,7 @@
 #include "Emu/RSX/RSXThread.h"
 #include "Emu/Cell/SPURecompiler.h"
 #include "Emu/perf_meter.hpp"
+#include <array> 
 #include <thread>
 #include <deque>
 #include <shared_mutex>
@@ -1679,33 +1680,56 @@ namespace vm
 		g_range_lock_bits = 0;
 	}
 
-	// TODO: properly re-map blocks
+	// TODO IMPORTANT: properly re-map blocks
 
+	// TODO: non-default vm::g_locations
+
+	// temporary steal from StackOverflow
+	typedef intmax_t biggestint;
+	int check_memory_zeroed(void* ptr, size_t size)
+	{
+		if (ptr == NULL)
+			return -1;
+		int bis          = sizeof(biggestint);
+		char* pc         = (char*)ptr;
+		biggestint* pbi0 = (biggestint*)pc;
+		if ((size_t)pc % bis)                                      /* is aligned ? */
+			pbi0 = (biggestint*)(pc + (bis - ((size_t)pc % bis))); /* minimal pointer larger than ptr but aligned */
+		assert((size_t)pbi0 % bis == 0);                           /* check that pbi0 is aligned */
+		for (char* p = pc; p < (char*)pbi0; p++)
+			if (*p)
+				return 0; /* check beginning of non aligned array */
+		biggestint* pbi      = pbi0;
+		biggestint* pbiUpper = ((biggestint*)(pc + size)) - 1;
+		for (; pbi <= pbiUpper; pbi++)
+			if (*pbi)
+				return 0; /* check with the biggest int available most of the array : its aligned part */
+		for (char* p = (char*)pbi; p < pc + size; p++)
+			if (*p)
+				return 0; /* check end of non aligned array */
+		return 1;
+	}
+	
 	template <class Archive>
 	void serialize_common(Archive& ar)
 	{
 		ar(cereal::binary_data(vm::g_reservations, sizeof(g_reservations)),
-			cereal::binary_data((u8*)vm::g_shmem, sizeof(vm::g_shmem)),
-		    vm::g_range_lock, vm::g_range_lock_bits, cereal::binary_data((u8*)vm::g_range_lock_set, sizeof(vm::g_range_lock_set)),
-		    cereal::binary_data((u8*)vm::g_pages.data(), sizeof(vm::g_pages)));
+		    cereal::binary_data((u8*)vm::g_shmem, sizeof(vm::g_shmem)),
+		    vm::g_range_lock, vm::g_range_lock_bits, cereal::binary_data((u8*)vm::g_range_lock_set,
+			sizeof(vm::g_range_lock_set)), cereal::binary_data((u8*)vm::g_pages.data(), sizeof(vm::g_pages)));
+	}
 
-		// TODO?(opt.): omit zero pages
-		// TODO?(opt.): batch nearby pages?
-		// TODO?(opt.): align to 4k boundary
+	constexpr size_t zero_page_bitmap_size = sizeof(g_pages) / sizeof(u8);
+	using zero_page_bitmap_t = std::array<u8, zero_page_bitmap_size>; // 0 bit means zero page
 
+	template <class Archive>
+	void serialize_pages(Archive& ar, const zero_page_bitmap_t& zero_page_bitmap)
+	{
 		for (size_t page_i = 0; page_i < g_pages.size(); page_i++)
 		{
-			const u8 page_info = g_pages[page_i];
-
-			if (page_info & page_allocated)
+			if (zero_page_bitmap[page_i / 8] & (1 << (page_i & 0b111)))
 			{
-				// vm_log.always("page %08llX addr %08llX  %02X", page_i, page_i * 0x1000, page_info);
 				ar(cereal::binary_data(g_sudo_addr + page_i * 0x1000, 0x1000));
-			}
-			if (page_info != 0 && !(page_info & page_allocated))
-			{
-				vm_log.always("weird page %08llX addr %08llX  %02X", page_i, page_i * 0x1000, page_info);
-				__debugbreak();
 			}
 		}
 	}
@@ -1715,14 +1739,33 @@ namespace vm
 	{
 		serialize_common(ar);
 
-		// TODO: non-default vm::g_locations
+		// TODO?(opt.): batch nearby pages
+		// TODO?(opt.): align to 4k boundary
+
+		zero_page_bitmap_t zero_page_bitmap{};			
+		for (size_t page_i = 0; page_i < g_pages.size(); page_i++)
+		{
+			const u8 page = g_pages[page_i];
+
+			if (page & page_allocated && !check_memory_zeroed(g_sudo_addr + page_i * 0x1000, 0x1000))
+			{
+				zero_page_bitmap[page_i / 8] |= 1 << (page_i & 0b111);
+			}
+		}
+
+		ar(zero_page_bitmap);
+		serialize_pages(ar, zero_page_bitmap);
 	}
+
 	template <class Archive>
 	void load(Archive& ar)
 	{
 		serialize_common(ar);
 
-		// TODO: non-default vm::g_locations
+		zero_page_bitmap_t zero_page_bitmap;
+
+		ar(zero_page_bitmap);
+		serialize_pages(ar, zero_page_bitmap);
 	}
 
 	template void save<>(cereal::BinaryOutputArchive& ar);
