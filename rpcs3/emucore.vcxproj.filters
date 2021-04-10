@@ -722,9 +722,6 @@
     <ClCompile Include="Emu\Cell\PPUTranslator.cpp">
       <Filter>Emu\Cell</Filter>
     </ClCompile>
-    <ClCompile Include="Emu\Cell\timers.hpp">
-      <Filter>Emu\Cell</Filter>
-    </ClCompile>
     <ClCompile Include="Emu\CPU\CPUTranslator.cpp">
       <Filter>Emu\CPU</Filter>
     </ClCompile>
@@ -804,6 +801,9 @@
       <Filter>Emu\Cell\Modules</Filter>
     </ClCompile>
     <ClCompile Include="Emu\Cell\lv2\sys_net.cpp">
+      <Filter>Emu\Cell\lv2</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\Cell\lv2\sys_sync.cpp">
       <Filter>Emu\Cell\lv2</Filter>
     </ClCompile>
     <ClCompile Include="Emu\Io\PadHandler.cpp">
@@ -1672,6 +1672,9 @@
     <ClInclude Include="Emu\Cell\lv2\sys_gpio.h">
       <Filter>Emu\Cell\lv2</Filter>
     </ClInclude>
+    <ClInclude Include="Emu\Cell\lv2\sys_gpio.h">
+      <Filter>Emu\Cell\lv2</Filter>
+    </ClInclude>
     <ClInclude Include="Emu\Cell\Modules\cellVoice.h">
       <Filter>Emu\Cell\Modules</Filter>
     </ClInclude>
@@ -1932,6 +1935,9 @@
     </ClInclude>
     <ClInclude Include="Loader\mself.hpp">
       <Filter>Loader</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\Cell\timers.hpp">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

@@ -156,6 +156,7 @@ namespace id_manager
 // Object manager for emulated process. Multiple objects of specified arbitrary type are given unique IDs.
 class idm
 {
+public: // TODO: remove
 	// Last allocated ID for constructors
 	static thread_local u32 g_id;
 
@@ -382,6 +383,29 @@ public:
 		}
 
 		return id_manager::id_traits<Made>::invalid;
+	}
+
+	// Emplace object with specific ID (returns whether it was emplaced, false on ID collision)
+	// TODO: document, re-evaluate name/API
+	template <typename T, typename Made = T>
+	static bool import_existing_id(u32 id, const std::shared_ptr<T>& ptr)
+	{
+		static_assert(id_manager::id_verify<T, Made>::value, "Invalid ID type combination");
+
+		// ID traits
+		using traits = id_manager::id_traits<Made>;
+
+		std::lock_guard lock(id_manager::g_mutex);
+
+		if (!get_unlocked<T, Made>(id))
+			return false;
+
+		auto& map = g_fxo->get<id_manager::id_map<T>>();
+
+		auto& place = map.vec.emplace_back(id_manager::id_key(id, get_type<Made>()), nullptr);
+
+		place.second = std::move(ptr);
+		return true;
 	}
 
 	// Add a new ID for an object returned by provider()
@@ -652,5 +676,11 @@ public:
 		}
 
 		return {nullptr};
+	}
+
+	template <class Archive>
+	static void serialize(Archive& ar)
+	{
+		ar(g_id);
 	}
 };

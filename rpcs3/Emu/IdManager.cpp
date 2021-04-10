@@ -7,7 +7,7 @@ shared_mutex id_manager::g_mutex;
 
 thread_local DECLARE(idm::g_id);
 
-idm::map_data* idm::allocate_id(std::vector<map_data>& vec, u32 type_id,  u32 base, u32 step, u32 count, std::pair<u32, u32> invl_range)
+idm::map_data* idm::allocate_id(std::vector<map_data>& vec, u32 type_id, u32 base, u32 step, u32 count, std::pair<u32, u32> invl_range)
 {
 	if (vec.size() < count)
 	{

@@ -383,6 +383,7 @@ public:
 	}
 
 private:
+public: // TODO: remove
 	// Scheduler mutex
 	static shared_mutex g_mutex;
 
@@ -395,8 +396,18 @@ private:
 	// Waiting for the response from
 	static std::deque<class cpu_thread*> g_pending;
 
+	// TODO: What to do about this? do we even need to do anything? can we ie. call schedule_all to empty it?
 	// Scheduler queue for timeouts (wait until -> thread)
 	static std::deque<std::pair<u64, class cpu_thread*>> g_waiting;
 
 	static void schedule_all();
 };
+
+namespace lv2
+{
+	template <class Archive>
+	void save(Archive& ar);
+
+	template <class Archive>
+	void load(Archive& ar);
+}

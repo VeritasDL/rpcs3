@@ -104,6 +104,35 @@ struct lv2_lwmutex final : lv2_obj
 	}
 };
 
+namespace lv2
+{
+	template <class Archive>
+	void save_lwmutex(Archive& ar, const lv2_lwmutex& lwmutex)
+	{
+		if (!lwmutex.sq.empty())
+			__debugbreak();
+
+		ar(lwmutex.protocol, lwmutex.control, lwmutex.name, lwmutex.mutex, lwmutex.signaled /*lwmutex.sq*/, lwmutex.lwcond_waiters);
+	}
+
+	// TODO: instead of this whole annoyance, maybe just create lv2_lwmutex default ctor and non-constify the needed fields?
+	// 	     then just straight 'ar'ing everything in a single serialize() would work
+	// TODO: don't return shared_ptr ?
+	template <class Archive>
+	std::shared_ptr<lv2_lwmutex> load_lwmutex(Archive& ar)
+	{
+		lv2_protocol protocol;
+		vm::ptr<sys_lwmutex_t> control;
+		be_t<u64> name;
+		ar(protocol, control, name);
+
+		auto lwmutex = std::make_shared<lv2_lwmutex>(protocol, control, name);
+
+		ar(lwmutex->mutex, lwmutex->signaled /*lwmutex->sq*/, lwmutex->lwcond_waiters);
+		return lwmutex;
+	}
+}
+
 // Aux
 class ppu_thread;
 

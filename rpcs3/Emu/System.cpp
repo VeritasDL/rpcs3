@@ -212,18 +212,21 @@ void serialize_common_start(Archive& ar)
 	// TODO: HLE stuff
 }
 
+// TODO: ipc_manager
+
 template <class Archive>
 void serialize_common_end(Archive& ar)
 {
-	// TODO: this is wrong. order can be whatever
+	// TODO: Properly initialize
 	auto on_select_ppu = [&](u32, ppu_thread& ppu) {
 		ar(ppu);
 	};
+	idm::select<named_thread<ppu_thread>>(on_select_ppu);
+
+	// TODO: Properly initialize
 	auto on_select_spu = [&](u32, spu_thread& spu) {
 		ar(spu);
 	};
-
-	idm::select<named_thread<ppu_thread>>(on_select_ppu);
 	idm::select<named_thread<spu_thread>>(on_select_spu);
 
 	ar(spu_thread::g_raw_spu_ctr, spu_thread::g_raw_spu_id);
@@ -236,6 +239,8 @@ void Emulator::save(Archive& ar) const
 {
 	serialize_common_start(ar);
 	vm::save(ar);
+	idm::serialize(ar);
+	lv2::save(ar);
 	serialize_common_end(ar);
 }
 
@@ -244,6 +249,8 @@ void Emulator::load(Archive& ar)
 {
 	serialize_common_start(ar);
 	vm::load(ar);
+	idm::serialize(ar);
+	lv2::load(ar);
 	serialize_common_end(ar);
 }
 
