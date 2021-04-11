@@ -403,7 +403,7 @@ public: // TODO: remove
 	static void schedule_all();
 };
 
-namespace lv2
+namespace lv2::sync
 {
 	template <class Archive>
 	void save(Archive& ar);

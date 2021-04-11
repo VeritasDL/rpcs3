@@ -55,15 +55,16 @@ struct lv2_lwmutex final : lv2_obj
 {
 	static const u32 id_base = 0x95000000;
 
-	const lv2_protocol protocol;
-	const vm::ptr<sys_lwmutex_t> control;
-	const be_t<u64> name;
+	/*const*/ lv2_protocol protocol;
+	/*const*/ vm::ptr<sys_lwmutex_t> control;
+	/*const*/ be_t<u64> name;
 
 	shared_mutex mutex;
 	atomic_t<s32> signaled{0};
 	std::deque<cpu_thread*> sq;
 	atomic_t<s32> lwcond_waiters{0};
 
+	lv2_lwmutex() = default;
 	lv2_lwmutex(u32 protocol, vm::ptr<sys_lwmutex_t> control, u64 name)
 		: protocol{protocol}
 		, control(control)
@@ -102,36 +103,61 @@ struct lv2_lwmutex final : lv2_obj
 		// Failed - lwmutex was set to be destroyed and all lwcond waiters quit 
 		return false;
 	}
-};
 
-namespace lv2
-{
 	template <class Archive>
-	void save_lwmutex(Archive& ar, const lv2_lwmutex& lwmutex)
+	void serialize(Archive& ar)
 	{
-		if (!lwmutex.sq.empty())
+		if (!sq.empty())
 			__debugbreak();
 
-		ar(lwmutex.protocol, lwmutex.control, lwmutex.name, lwmutex.mutex, lwmutex.signaled /*lwmutex.sq*/, lwmutex.lwcond_waiters);
+		ar(protocol, control, name, mutex, signaled /*sq*/, lwcond_waiters);
 	}
 
-	// TODO: instead of this whole annoyance, maybe just create lv2_lwmutex default ctor and non-constify the needed fields?
-	// 	     then just straight 'ar'ing everything in a single serialize() would work
-	// TODO: don't return shared_ptr ?
-	template <class Archive>
-	std::shared_ptr<lv2_lwmutex> load_lwmutex(Archive& ar)
-	{
-		lv2_protocol protocol;
-		vm::ptr<sys_lwmutex_t> control;
-		be_t<u64> name;
-		ar(protocol, control, name);
+	// NOTE: see NOTE in idm::load
 
-		auto lwmutex = std::make_shared<lv2_lwmutex>(protocol, control, name);
+	//template <class Archive>
+	//void save(Archive& ar) const
+	//{
+	//	ar(protocol, control, name, mutex, signaled /*sq*/, lwcond_waiters);
+	//}
 
-		ar(lwmutex->mutex, lwmutex->signaled /*lwmutex->sq*/, lwmutex->lwcond_waiters);
-		return lwmutex;
-	}
-}
+	//template <class Archive>
+	//void load(Archive& ar)
+	//{
+	//	new (&sq) std::deque<cpu_thread*>();
+	//	ar(protocol, control, name, mutex, signaled /*sq*/, lwcond_waiters);
+    //}
+
+	//template <class Archive>
+	//void save(Archive& ar) const
+	//{
+	//	if (!sq.empty())
+	//		__debugbreak();
+
+	//	ar(protocol, control, name, mutex, signaled /*sq*/, lwcond_waiters);
+	//}
+
+	//template <class Archive>
+	//void load(Archive& ar)
+	//{
+	//	__debugbreak();
+	//}
+
+	//template <class Archive>
+	//static void load_and_construct(Archive& ar, cereal::construct<lv2_lwmutex>& construct)
+	//{
+	//	__debugbreak();
+	//	lv2_protocol protocol;
+	//	vm::ptr<sys_lwmutex_t> control;
+	//	be_t<u64> name;
+
+	//	//ar(protocol, ffs, name);
+	//	//construct(protocol, ffs, name);
+	//	ar(protocol, control, name);
+	//	construct(protocol, control, name);
+	//	ar(construct->mutex, construct->signaled /*construct->sq*/, construct->lwcond_waiters);
+	//}
+};
 
 // Aux
 class ppu_thread;

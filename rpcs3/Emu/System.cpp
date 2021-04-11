@@ -44,6 +44,7 @@
 #include <cereal/archives/binary.hpp>
 #include <cereal/types/memory.hpp>
 #include <cereal/types/vector.hpp>
+#include <cereal/access.hpp>
 
 #include <thread>
 #include <queue>
@@ -239,8 +240,8 @@ void Emulator::save(Archive& ar) const
 {
 	serialize_common_start(ar);
 	vm::save(ar);
-	idm::serialize(ar);
-	lv2::save(ar);
+	idm::serialize_globals(ar);
+	lv2::sync::save(ar);
 	serialize_common_end(ar);
 }
 
@@ -249,8 +250,8 @@ void Emulator::load(Archive& ar)
 {
 	serialize_common_start(ar);
 	vm::load(ar);
-	idm::serialize(ar);
-	lv2::load(ar);
+	idm::serialize_globals(ar);
+	lv2::sync::load(ar);
 	serialize_common_end(ar);
 }
 

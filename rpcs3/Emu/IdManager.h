@@ -1,5 +1,5 @@
 #pragma once
-//#pragma optimize("", off)
+#pragma optimize("", off)
 
 #include "util/types.hpp"
 #include "Utilities/mutex.h"
@@ -386,7 +386,6 @@ public:
 	}
 
 	// Emplace object with specific ID (returns whether it was emplaced, false on ID collision)
-	// TODO: document, re-evaluate name/API
 	template <typename T, typename Made = T>
 	static bool import_existing_id(u32 id, const std::shared_ptr<T>& ptr)
 	{
@@ -397,15 +396,40 @@ public:
 
 		std::lock_guard lock(id_manager::g_mutex);
 
-		if (!get_unlocked<T, Made>(id))
+		const u32 index = get_index<Made>(id);
+
+		if (index >= id_manager::id_traits<Made>::count)
+		{
 			return false;
+		}
 
 		auto& map = g_fxo->get<id_manager::id_map<T>>();
+		auto& vec = map.vec;
 
-		auto& place = map.vec.emplace_back(id_manager::id_key(id, get_type<Made>()), nullptr);
+		if (index >= vec.size())
+		{
+			// Add new object
+			map.vec.emplace_back(id_manager::id_key(id, get_type<Made>()), std::move(ptr));
 
-		place.second = std::move(ptr);
-		return true;
+			return true;
+		}
+
+		auto& data = vec[index];
+
+		if (std::is_same<T, Made>::value || data.first.type() == get_type<Made>())
+		{
+			if (!id_manager::id_traits<Made>::invl_range.second || data.first.value() == id)
+			{
+				// Replace existing object
+				data.second = std::move(ptr);
+
+				return true;
+			}
+		}
+
+		 // TODO: decide what to do here
+		__debugbreak();
+		return false;
 	}
 
 	// Add a new ID for an object returned by provider()
@@ -679,8 +703,52 @@ public:
 	}
 
 	template <class Archive>
-	static void serialize(Archive& ar)
+	static void serialize_globals(Archive& ar)
 	{
 		ar(g_id);
+	}
+
+	template <typename T, typename Get = T, class Archive>
+	static void save(Archive& ar)
+	{
+		std::vector<u32> ids;
+		std::vector<Get*> objs;
+		idm::select<T, Get>([&](u32 id, Get& obj) {
+			ids.push_back(id);
+			objs.push_back(&obj);
+		});
+		ar(ids);
+
+		for (auto obj : objs)
+		{
+			ar(*obj);
+		}
+	}
+
+	template <typename T, typename Get = T, class Archive>
+	static void load(Archive& ar)
+	{
+		// TODO: idm remove_all (?)
+		std::vector<u32> ids_to_remove;
+		idm::select<T, Get>([&](u32 id, Get& lwmutex) {
+			ids_to_remove.push_back(id);
+		});
+		for (auto id : ids_to_remove)
+			if (!idm::remove<T, Get>(id))
+				__debugbreak();
+
+		std::vector<u32> ids;
+		ar(ids);
+		// NOTE: tried to keep lv2_lwmutex fields const but cereal assings to them, we can't without modifying it to const_cast or whatever
+		//std::allocator<Get> obj_allocator;
+		//Get* objs = obj_allocator.allocate(ids.size());
+		for (size_t i = 0; i < ids.size(); ++i)
+		{
+			//std::shared_ptr<Get> obj(&objs[i]);
+			auto obj = std::make_shared<Get>();
+			ar(*obj);
+			if (!idm::import_existing_id<T, Get>(ids[i], obj))
+				__debugbreak();
+		}
 	}
 };

@@ -17,6 +17,7 @@ LOG_CHANNEL(sys_sync);
 // TODO: will need to solve cereal needing default ctor issue. can just add default ctor to required classes (?)
 
 // EXPERIMENTING
+/*
 namespace lv2
 {
 	template <class Archive>
@@ -55,6 +56,7 @@ namespace lv2
 		auto on_select_lv2_lwmutex = [&](u32 id, lv2_lwmutex& lwmutex) {
 			ids_to_remove.push_back(id);
 		};
+		idm::select<lv2_obj, lv2_lwmutex>(on_select_lv2_lwmutex);
 		for (auto id : ids_to_remove)
 			idm::remove<lv2_obj, lv2_lwmutex>(id);
 
@@ -71,3 +73,24 @@ namespace lv2
 	template void save<>(cereal::BinaryOutputArchive& ar);
 	template void load<>(cereal::BinaryInputArchive& ar);
 } // namespace lv2
+*/
+
+namespace lv2::sync
+{
+	template <class Archive>
+	void save(Archive& ar)
+	{
+		idm::save<lv2_obj, lv2_lwmutex, Archive>(ar);
+		// TODO: more. easy to add now
+	}
+
+	template <class Archive>
+	void load(Archive& ar)
+	{
+		idm::load<lv2_obj, lv2_lwmutex, Archive>(ar);
+		// TODO: more. easy to add now
+	}
+
+	template void save<>(cereal::BinaryOutputArchive& ar);
+	template void load<>(cereal::BinaryInputArchive& ar);
+}
