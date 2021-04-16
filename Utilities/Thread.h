@@ -1,15 +1,19 @@
 #pragma once
-
+#pragma optimize("", off)
 #include "util/types.hpp"
 #include "util/atomic.hpp"
 #include "util/shared_ptr.hpp"
 
 #include <string>
 #include <memory>
+#include <type_traits>
 #include <string_view>
 
 #include "mutex.h"
 #include "lockless.h"
+
+#include <cereal/access.hpp>
+#include <cereal/types/base_class.hpp>
 
 // Hardware core layout
 enum class native_core_arrangement : u32
@@ -39,7 +43,7 @@ enum class thread_state : u32
 
 class need_wakeup {};
 
-template <class Context>
+template <class Context, bool RunStart = true>
 class named_thread;
 
 class thread_base;
@@ -50,6 +54,12 @@ struct result_storage
 	static constexpr bool empty = true;
 
 	using type = void;
+
+	template <class Archive>
+	__declspec(noinline) void serialize(Archive& ar)
+	{
+		//__debugbreak();
+	}
 };
 
 template <typename Ctx, typename... Args>
@@ -83,6 +93,13 @@ struct result_storage<Ctx, std::enable_if_t<!std::is_void_v<std::invoke_result_t
 	void destroy() noexcept
 	{
 		_get()->~T();
+	}
+
+	template <class Archive>
+	__declspec(noinline) void serialize(Archive& ar)
+	{
+		__debugbreak();
+		ar(data);
 	}
 };
 
@@ -129,7 +146,7 @@ public:
 	using native_entry = void*(*)(void* arg);
 #endif
 
-	const native_entry entry_point;
+	/*const*/ native_entry entry_point;
 
 private:
 	// Thread handle (platform-specific)
@@ -164,7 +181,7 @@ private:
 
 	friend class thread_ctrl;
 
-	template <class Context>
+	template <class Context, bool RunStart>
 	friend class named_thread;
 
 protected:
@@ -191,6 +208,29 @@ public:
 private:
 	// Clear task queue (execute unless aborting)
 	void exec();
+
+public:
+	// TODO: atomic_ptr
+
+	template <class Archive>
+	__declspec(noinline) void save(Archive& ar) const
+	{
+		//__debugbreak();
+		ar(*m_tname.load().get());
+		ar((u64)entry_point, m_sync /*m_taskq*/);
+	}
+	template <class Archive>
+	__declspec(noinline) void load(Archive& ar)
+	{
+		__debugbreak();
+		std::string tname;
+		ar(tname);
+		m_tname = make_single<std::string>(tname);
+
+		u64 entry_point_ptr;
+		ar(entry_point_ptr, m_sync /*m_taskq*/);
+		entry_point = reinterpret_cast<decltype(entry_point)>(entry_point_ptr);
+	}
 };
 
 // Collection of global function for current thread
@@ -429,8 +469,8 @@ public:
 };
 
 // Derived from the callable object Context, possibly a lambda
-template <class Context>
-class named_thread final : public Context, result_storage<Context>, thread_base
+template <class Context, bool RunStart>
+class named_thread final : public Context, public result_storage<Context>, public thread_base
 {
 	using result = result_storage<Context>;
 	using thread = thread_base;
@@ -439,6 +479,8 @@ class named_thread final : public Context, result_storage<Context>, thread_base
 	{
 		return static_cast<named_thread*>(_base)->entry_point2();
 	}
+
+	//virtual void foo() {}
 
 	u64 entry_point2()
 	{
@@ -483,11 +525,16 @@ class named_thread final : public Context, result_storage<Context>, thread_base
 public:
 	// Default constructor
 	template <bool Valid = std::is_default_constructible_v<Context> && thread_thread_name<Context>(), typename = std::enable_if_t<Valid>>
+	// TODO: temporary
+	// template <bool Valid = std::is_default_constructible_v<Context>, typename = std::enable_if_t<Valid>>
+	// template <bool HasName = thread_thread_name<Context>()>
+	// template <bool Valid = std::is_default_constructible_v<Context> && (!RunStart || thread_thread_name<Context>()), typename = std::enable_if_t<Valid>>
 	named_thread()
 		: Context()
 		, thread(trampoline, Context::thread_name)
 	{
-		thread::start();
+		if constexpr (RunStart)
+			thread::start();
 	}
 
 	// Normal forwarding constructor
@@ -645,7 +692,46 @@ public:
 			result::destroy();
 		}
 	}
+
+	// TODO we ignore lambda-constructed named_threads for now
+	//      only PPU/SPU/RSX (which ones use the other one?)
+
+	// TODO unify
+
+	template <class Archive>
+	__declspec(noinline) void save(Archive& ar) const
+	{
+		//__debugbreak();
+		ar(cereal::base_class<result>(this));
+		ar(cereal::base_class<thread>(this));
+		ar(cereal::base_class<Context>(this));
+	}
+	template <class Archive>
+	void load(Archive& ar)
+	{
+		__debugbreak();
+		ar(cereal::base_class<result>(this));
+		ar(cereal::base_class<thread>(this));
+		ar(cereal::base_class<Context>(this));
+	}
+
+	template <class Archive>
+	__declspec(noinline) static void load_and_construct(Archive& ar, cereal::construct<named_thread<Context, false>>& construct)
+	{
+		__debugbreak();
+		construct();
+		ar(cereal::base_class<result>(construct.ptr()));
+		ar(cereal::base_class<thread>(construct.ptr()));
+		ar(cereal::base_class<Context>(construct.ptr()));
+		construct->start();
+	}
 };
+
+namespace cereal
+{
+	template <class Archive, class Context, bool RunStart>
+	struct specialize<Archive, named_thread<Context, RunStart>, cereal::specialization::member_load_save> {};
+}
 
 // Group of named threads, similar to named_thread
 template <class Context>

@@ -79,21 +79,24 @@ struct sys_event_t
 // Source, data1, data2, data3
 using lv2_event = std::tuple<u64, u64, u64, u64>;
 
-struct lv2_event_queue final : public lv2_obj
+struct lv2_event_queue final : lv2_obj
 {
 	static const u32 id_base = 0x8d000000;
 
-	const lv2_protocol protocol;
-	const s32 type;
-	const u64 name;
-	const u64 key;
-	const s32 size;
+	/*const*/ lv2_protocol protocol;
+	/*const*/ s32 type;
+	/*const*/ u64 name;
+	/*const*/ u64 key;
+	/*const*/ s32 size;
 
 	atomic_t<u32> exists = 0; // Existence validation (workaround for shared-ptr ref-counting)
 	shared_mutex mutex;
 	std::deque<lv2_event> events;
+	// TODO: uncomment / attempt to fix when properly initing threads
+	// std::deque<std::weak_ptr<cpu_thread>> sq;
 	std::deque<cpu_thread*> sq;
 
+	lv2_event_queue() = default;
 	lv2_event_queue(u32 protocol, s32 type, u64 name, u64 ipc_key, s32 size)
 		: protocol{protocol}
 		, type(type)
@@ -126,7 +129,10 @@ struct lv2_event_queue final : public lv2_obj
 	template <class Archive>
 	void serialize(Archive& ar)
 	{
-		ar(exists, mutex/*, events, sq*/);
+		if (!sq.empty())
+			__debugbreak();
+
+		ar(protocol, type, name, key, size, exists, mutex, events/*, sq*/);
 	}
 };
 
@@ -134,15 +140,29 @@ struct lv2_event_port final : lv2_obj
 {
 	static const u32 id_base = 0x0e000000;
 
-	const s32 type; // Port type, must be SYS_EVENT_PORT_LOCAL
-	const u64 name; // Event source (generated from id and process id if not set)
+	/*const*/ s32 type; // Port type, must be SYS_EVENT_PORT_LOCAL
+	/*const*/ u64 name; // Event source (generated from id and process id if not set)
 
 	std::weak_ptr<lv2_event_queue> queue; // Event queue this port is connected to
 
+	lv2_event_port() = default;
 	lv2_event_port(s32 type, u64 name)
 		: type(type)
 		, name(name)
 	{
+	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		if (!queue.expired())
+			__debugbreak();
+
+		ar(type, name, queue);
+
+		idm::select<lv2_obj, lv2_event_queue>([&](u32 id, lv2_event_queue & q) __declspec(noinline) {
+			__debugbreak();
+		});
 	}
 };
 

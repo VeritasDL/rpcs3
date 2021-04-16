@@ -1,5 +1,5 @@
 #pragma once
-
+#pragma optimize("", off)
 #include "../CPU/CPUThread.h"
 #include "../Memory/vm_ptr.h"
 #include "Utilities/lockless.h"
@@ -51,6 +51,12 @@ struct ppu_func_opd_t
 {
 	be_t<u32> addr;
 	be_t<u32> rtoc;
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(addr, rtoc);
+	}
 };
 
 // ppu_thread constructor argument
@@ -62,6 +68,12 @@ struct ppu_thread_params
 	ppu_func_opd_t entry;
 	u64 arg0;
 	u64 arg1;
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(stack_addr, stack_size, tls_addr, entry, arg0, arg1);
+	}
 };
 
 struct cmd64
@@ -135,6 +147,7 @@ public:
 	virtual void cpu_on_stop() override;
 	virtual ~ppu_thread() override;
 
+	ppu_thread();
 	ppu_thread(const ppu_thread_params&, std::string_view name, u32 prio, int detached = 0);
 
 	ppu_thread(const ppu_thread&) = delete;
@@ -264,8 +277,8 @@ public:
 	bool use_full_rdata{};
 
 	atomic_t<s32> prio{0}; // Thread priority (0..3071)
-	const u32 stack_size; // Stack size
-	const u32 stack_addr; // Stack address
+	/*const*/ u32 stack_size; // Stack size
+	/*const*/ u32 stack_addr; // Stack address
 
 	atomic_t<ppu_join_status> joiner; // Joining thread or status
 
@@ -278,7 +291,7 @@ public:
 	cmd64 cmd_get(u32 index) { return cmd_queue[cmd_queue.peek() + index].load(); }
 	atomic_t<u32> cmd_notify = 0;
 
-	alignas(64) const ppu_func_opd_t entry_func;
+	alignas(64) /*const*/ ppu_func_opd_t entry_func;
 	u64 start_time{0}; // Sleep start timepoint
 	u64 syscall_args[8]{0}; // Last syscall arguments stored
 	const char* current_function{}; // Current function name for diagnosis, optimized for speed.
@@ -304,17 +317,55 @@ public:
 	static u32 stack_push(u32 size, u32 align_v);
 	static void stack_pop_verbose(u32 addr, u32 size) noexcept;
 
+	static constexpr auto thread_name = "PPU"sv; // TODO: hacky, just so we can use named_thread def. ctor easily, remove
+
 	template <class Archive>
-	void serialize(Archive& ar)
+	__declspec(noinline) void save(Archive& ar) const
 	{
 		ar(cereal::base_class<cpu_thread>(this));
-		ar(gpr, fpr, cr.bits, fpscr.bits.bits, lr, ctr, vrsave, cia, xer, sat, nj, jm_mask, raddr, rtime, rdata, use_full_rdata,
-		    prio, joiner, cmd_queue, cmd_notify, start_time, syscall_args/*, ppu_tname*/, saved_native_sp,
-		    last_ftsc, last_ftime, last_faddr, last_fail, last_succ, dbg_step_pc);
-
+		ar(gpr, fpr, cr.bits, fpscr.bits.bits, lr, ctr, vrsave, cia, xer, sat, nj, jm_mask, raddr, rtime, rdata,
+		    use_full_rdata, prio, stack_size, stack_addr, joiner, cmd_queue, cmd_notify, entry_func, start_time,
+		    syscall_args, saved_native_sp, last_ftsc, last_ftime, last_faddr, last_fail, last_succ, dbg_step_pc);
 		for (auto vr_i : vr)
 			ar(vr_i._bytes);
+
+		ar(*ppu_tname.load().get());
 	}
+
+	template <class Archive>
+	__declspec(noinline) void load(Archive& ar)
+	{
+		ar(cereal::base_class<cpu_thread>(this));
+		ar(gpr, fpr, cr.bits, fpscr.bits.bits, lr, ctr, vrsave, cia, xer, sat, nj, jm_mask, raddr, rtime, rdata,
+		    use_full_rdata, prio, stack_size, stack_addr, joiner, cmd_queue, cmd_notify, entry_func, start_time,
+		    syscall_args, saved_native_sp, last_ftsc, last_ftime, last_faddr, last_fail, last_succ, dbg_step_pc);
+		for (auto vr_i : vr)
+			ar(vr_i._bytes);
+
+		std::string ppu_tname_str;
+		ar(ppu_tname_str);
+		ppu_tname = make_single<std::string>(ppu_tname_str);
+	}
+
+	//template <class Archive>
+	//static void load_and_construct(Archive &ar, cereal::construct<ppu_thread>& construct)
+	//{
+	//	serialize_common(ar);
+
+	//	ppu_thread_params params;
+	//	// params.
+
+	//	std::string name_str;
+	//	ar(name_str);
+	//	ar(prio);
+	//	ar(detached);
+
+	//	std::string ppu_tname_str;
+	//	ar(ppu_tname_str);
+	//	ppu_tname = make_single<std::string>(ppu_tname_str);
+
+	//	construct(params, name, prio, detached);
+	//}
 };
 
 static_assert(ppu_join_status::max <= ppu_join_status{ppu_thread::id_base});

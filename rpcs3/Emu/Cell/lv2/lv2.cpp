@@ -1386,3 +1386,29 @@ void lv2_obj::schedule_all()
 		}
 	}
 }
+
+namespace lv2::obj
+{
+	template <class Archive>
+	void save(Archive& ar)
+	{
+		idm::save<lv2_obj, lv2_lwmutex>(ar);
+		// TODO: need to be initing threads properly for these (for cereal idm shared_ptr tracking)
+		//idm::save<lv2_obj, lv2_event_queue>(ar);
+		//idm::save<lv2_obj, lv2_event_port>(ar);
+		// TODO: more. easy to add now
+	}
+
+	template <class Archive>
+	void load(Archive& ar)
+	{
+		idm::load<lv2_obj, lv2_lwmutex>(ar);
+		// TODO: need to be initing threads properly for these (for cereal idm shared_ptr tracking)
+		//idm::load<lv2_obj, lv2_event_queue>(ar);
+		//idm::load<lv2_obj, lv2_event_port>(ar);
+		// TODO: more. easy to add now
+	}
+
+	template void save<>(cereal::BinaryOutputArchive& ar);
+	template void load<>(cereal::BinaryInputArchive& ar);
+}

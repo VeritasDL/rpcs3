@@ -680,6 +680,7 @@ public:
 	static const u32 id_step = 1;
 	static const u32 id_count = (0xFFFC0000 - SPU_FAKE_BASE_ADDR) / SPU_LS_SIZE;
 
+	spu_thread();
 	spu_thread(lv2_spu_group* group, u32 index, std::string_view name, u32 lv2_id, bool is_isolated = false, u32 option = 0);
 
 	spu_thread(const spu_thread&) = delete;
@@ -789,15 +790,15 @@ public:
 	atomic_t<u32> last_exit_status; // Value to be written in exit_status after checking group termination
 
 private:
-	lv2_spu_group* const group; // SPU Thread Group (only safe to access in the spu thread itself)
+	lv2_spu_group* /*const*/ group; // SPU Thread Group (only safe to access in the spu thread itself)
 public:
 
-	const u32 index; // SPU index
+	/*const*/ u32 index; // SPU index
 	std::shared_ptr<utils::shm> shm; // SPU memory
-	const std::add_pointer_t<u8> ls; // SPU LS pointer
-	const spu_type thread_type;
-	const u32 option; // sys_spu_thread_initialize option
-	const u32 lv2_id; // The actual id that is used by syscalls
+	/*const*/ std::add_pointer_t<u8> ls; // SPU LS pointer
+	/*const*/ spu_type thread_type;
+	/*const*/ u32 option; // sys_spu_thread_initialize option
+	/*const*/ u32 lv2_id; // The actual id that is used by syscalls
 
 	// Thread name
 	atomic_ptr<std::string> spu_tname;
@@ -828,6 +829,8 @@ public:
 	u64 start_time{}; // Starting time of STOP or RDCH bloking function
 
 	atomic_t<u8> debugger_float_mode = 0;
+
+	bool is_isolated;
 
 	void push_snr(u32 number, u32 value);
 	static void do_dma_transfer(spu_thread* _this, const spu_mfc_cmd& args, u8* ls);
@@ -898,28 +901,55 @@ public:
 		return -1;
 	}
 
+	static constexpr auto thread_name = "SPU"sv; // TODO: hacky, remove
+
+	template <class Archive>
+	void serialize_common(Archive& ar)
+	{
+		ar(cereal::base_class<cpu_thread>(this));
+		ar(pc, dbg_step_pc, base_pc /*memory_base_addr*/);
+		ar(fpscr, ch_mfc_cmd, mfc_queue, mfc_size, mfc_barrier, mfc_fence, mfc_prxy_cmd, mfc_prxy_mtx, mfc_prxy_mask,
+		    mfc_prxy_write_state.all, rtime, rdata, raddr /*range_lock*/, srr0, ch_tag_upd, ch_tag_mask, ch_tag_stat, ch_stall_mask,
+		    ch_stall_stat, ch_atomic_stat, ch_in_mbox, ch_out_mbox, ch_out_intr_mbox, snr_config, ch_snr1, ch_snr2,
+		    cereal::binary_data((u8*)&ch_events.raw().all, sizeof(ch_events)),
+		    interrupts_enabled, ch_dec_start_timestamp, ch_dec_value, run_ctrl, run_ctrl_mtx, status_npc, int_ctrl /*, spuq, spup*/,
+		    exit_status, last_exit_status /*, shm ls, jit*/, block_counter, block_recover,
+		    block_failure, saved_native_sp, ftx, stx, last_ftsc, last_ftime, last_faddr, last_fail, last_succ, mfc_dump_idx
+		    /*current_func*/,
+		    start_time, debugger_float_mode);
+	}
 	
 	template <class Archive>
 	void serialize(Archive& ar)
 	{
-		ar(cereal::base_class<cpu_thread>(this));
-		ar(pc, dbg_step_pc, base_pc /*memory_base_addr*/);
+		//__debugbreak();
+		ar(index, *spu_tname.load(), lv2_id, is_isolated, option);
 
-		ar(fpscr, ch_mfc_cmd, mfc_queue, mfc_size, mfc_barrier, mfc_fence, mfc_prxy_cmd, mfc_prxy_mtx, mfc_prxy_mask,
-		    mfc_prxy_write_state.all, rtime, rdata, raddr /*range_lock*/, srr0, ch_tag_upd, ch_tag_mask, ch_tag_stat, ch_stall_mask,
-		    ch_stall_stat, ch_atomic_stat, ch_in_mbox, ch_out_mbox, ch_out_intr_mbox, snr_config, ch_snr1, ch_snr2,
-			cereal::binary_data((u8*)&ch_events.raw().all, sizeof(ch_events)),
-		    interrupts_enabled, ch_dec_start_timestamp, ch_dec_value, run_ctrl, run_ctrl_mtx, status_npc, int_ctrl/*, spuq, spup*/,
-		    exit_status, last_exit_status/*, shm ls, jit*/, block_counter, block_recover,
-		    block_failure, saved_native_sp, ftx, stx, last_ftsc, last_ftime, last_faddr, last_fail, last_succ, mfc_dump_idx
-		    /*current_func*/, start_time, debugger_float_mode);
+		serialize_common(ar);
 
 		for (auto gpr_i : gpr)
 			ar(gpr_i._bytes);
 
 		for (auto stack_mirror_i : stack_mirror)
 			ar(stack_mirror_i._bytes);
-	}	
+	}
+
+	template <class Archive>
+	static void load_and_construct(Archive & ar, cereal::construct<spu_thread>& construct)
+	{
+		__debugbreak();
+		u32 index;
+		std::string name;
+		u32 lv2_id;
+		bool is_isolated;
+		u32 option;
+		ar(index, name, lv2_id, is_isolated, option);
+
+		//        TODO
+		construct(nullptr, index, name, lv2_id, is_isolated, option);
+
+		construct->serialize_common(ar);
+	}
 };
 
 class spu_function_logger
@@ -934,3 +964,9 @@ public:
 		spu.start_time = 0;
 	}
 };
+
+namespace cereal
+{
+	template <class Archive>
+	struct specialize<Archive, spu_thread, cereal::specialization::member_serialize> {};
+}

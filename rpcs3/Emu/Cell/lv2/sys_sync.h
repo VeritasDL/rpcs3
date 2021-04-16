@@ -10,6 +10,8 @@
 #include "Emu/IPC.h"
 #include "Emu/system_config.h"
 
+#include <cereal/access.hpp>
+
 #include <deque>
 #include <thread>
 #include <string_view>
@@ -383,7 +385,7 @@ public:
 	}
 
 private:
-public: // TODO: remove
+public: // TODO remove?
 	// Scheduler mutex
 	static shared_mutex g_mutex;
 
@@ -403,7 +405,7 @@ public: // TODO: remove
 	static void schedule_all();
 };
 
-namespace lv2::sync
+namespace lv2::obj
 {
 	template <class Archive>
 	void save(Archive& ar);

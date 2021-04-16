@@ -1708,11 +1708,18 @@ spu_thread::~spu_thread()
 	perf_log.notice("Perf stats for PUTLLC reload: successs %u, failure %u", last_succ, last_fail);
 }
 
+spu_thread::spu_thread()
+    : cpu_thread() // TODO: test
+{
+	__debugbreak();
+}
+
 spu_thread::spu_thread(lv2_spu_group* group, u32 index, std::string_view name, u32 lv2_id, bool is_isolated, u32 option)
 	: cpu_thread(idm::last_id())
 	, group(group)
 	, index(index)
 	, shm(std::make_shared<utils::shm>(SPU_LS_SIZE))
+	, is_isolated(is_isolated)
 	, ls([&]()
 	{
 		if (g_cfg.core.mfc_debug)

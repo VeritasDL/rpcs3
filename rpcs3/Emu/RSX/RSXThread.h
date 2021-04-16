@@ -26,6 +26,7 @@
 #include "Emu/IdManager.h"
 #include "Emu/system_config.h"
 
+#include <cereal/access.hpp>
 #include <cereal/archives/binary.hpp>
 #include <cereal/types/memory.hpp>
 #include <cereal/types/array.hpp>
@@ -1130,4 +1131,10 @@ namespace rsx
 			}
 		}
 	};
+}
+
+namespace cereal
+{
+	template <class Archive> 
+	struct specialize<Archive, rsx::thread, cereal::specialization::member_serialize> {};
 }

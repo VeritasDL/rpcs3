@@ -3,6 +3,8 @@
 #include "../Utilities/Thread.h"
 #include "../Utilities/bit_set.h"
 
+#include <cereal/access.hpp>
+
 #include <vector>
 
 // Thread state flags
@@ -43,6 +45,7 @@ public:
 	u64 block_hash = 0;
 
 protected:
+	cpu_thread();
 	cpu_thread(u32 id);
 
 public:
@@ -53,7 +56,7 @@ public:
 	void operator()();
 
 	// Self identifier
-	const u32 id;
+	/*const*/ u32 id;
 
 	// Public thread state
 	atomic_bs_t<cpu_flag> state{cpu_flag::stop + cpu_flag::wait};
@@ -248,9 +251,14 @@ public:
 	static void flush_profilers() noexcept;
 
 	template <class Archive>
-	void serialize(Archive& ar)
+	__declspec(noinline) void save(Archive& ar) const
 	{
-		ar(block_hash);
+		ar(block_hash, id);
+	}
+	template <class Archive>
+	__declspec(noinline) void load(Archive& ar)
+	{
+		ar(block_hash, id);
 	}
 
 private:
@@ -263,6 +271,8 @@ inline cpu_thread* get_current_cpu_thread() noexcept
 {
 	return cpu_thread::g_tls_this_thread;
 }
+
+
 
 class ppu_thread;
 class spu_thread;

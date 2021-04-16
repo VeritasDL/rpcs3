@@ -144,7 +144,6 @@
     </ClCompile>
     <ClCompile Include="Emu\Cell\lv2\sys_gpio.cpp" />
     <ClCompile Include="Emu\Cell\lv2\sys_net.cpp" />
-    <ClCompile Include="Emu\Cell\lv2\sys_sync.cpp" />
     <ClCompile Include="Emu\Cell\Modules\StaticHLE.cpp" />
     <ClCompile Include="Emu\Cell\lv2\sys_overlay.cpp" />
     <ClCompile Include="Emu\Cell\PPUAnalyser.cpp" />

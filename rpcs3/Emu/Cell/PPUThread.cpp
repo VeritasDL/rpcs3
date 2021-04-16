@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "Utilities/JIT.h"
 #include "Utilities/StrUtil.h"
 #include "Crypto/sha1.h"
@@ -1117,8 +1117,14 @@ ppu_thread::~ppu_thread()
 	perf_log.notice("Perf stats for STCX reload: successs %u, failure %u", last_succ, last_fail);
 }
 
+ppu_thread::ppu_thread()
+    : cpu_thread() // TODO: test
+{
+	__debugbreak();
+}
+
 ppu_thread::ppu_thread(const ppu_thread_params& param, std::string_view name, u32 prio, int detached)
-	: cpu_thread(idm::last_id())
+    : cpu_thread(idm::last_id())
 	, prio(prio)
 	, stack_size(param.stack_size)
 	, stack_addr(param.stack_addr)

@@ -215,15 +215,32 @@ void serialize_common_start(Archive& ar)
 
 // TODO: ipc_manager
 
+namespace threads
+{
+	template <class Archive>
+	void save(Archive& ar)
+	{
+		idm::save<named_thread<ppu_thread>>(ar);
+		//idm::save<named_thread<spu_thread>>(ar);
+	}
+	template <class Archive>
+	void load(Archive& ar)
+	{
+		idm::load<named_thread<ppu_thread>, named_thread<ppu_thread>, named_thread<ppu_thread, false>, Archive>(ar);
+		//idm::load<named_thread<spu_thread>, named_thread<spu_thread>, named_thread<spu_thread, false>, Archive>(ar);
+	}
+}
+
 template <class Archive>
 void serialize_common_end(Archive& ar)
 {
 	// TODO: Properly initialize
+#if 0
 	auto on_select_ppu = [&](u32, ppu_thread& ppu) {
 		ar(ppu);
 	};
 	idm::select<named_thread<ppu_thread>>(on_select_ppu);
-
+#endif
 	// TODO: Properly initialize
 	auto on_select_spu = [&](u32, spu_thread& spu) {
 		ar(spu);
@@ -241,7 +258,8 @@ void Emulator::save(Archive& ar) const
 	serialize_common_start(ar);
 	vm::save(ar);
 	idm::serialize_globals(ar);
-	lv2::sync::save(ar);
+	lv2::obj::save(ar);
+	threads::save(ar);
 	serialize_common_end(ar);
 }
 
@@ -251,7 +269,8 @@ void Emulator::load(Archive& ar)
 	serialize_common_start(ar);
 	vm::load(ar);
 	idm::serialize_globals(ar);
-	lv2::sync::load(ar);
+	lv2::obj::load(ar);
+	threads::load(ar);
 	serialize_common_end(ar);
 }
 

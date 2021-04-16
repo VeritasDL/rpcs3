@@ -582,6 +582,32 @@ public:
 		return result;
 	}
 
+	// Access all objects of specified type. Returns the number of objects processed.
+	// TODO: re-evaluate / rename / re add FT/FRT ?
+	template <typename T, typename Get = T, typename F>
+	static inline u32 select_shared_ptr(F&& func, int = 0)
+	{
+		static_assert(id_manager::id_verify<T, Get>::value, "Invalid ID type combination");
+
+		reader_lock lock(id_manager::g_mutex);
+
+		u32 result = 0;
+
+		for (auto& id : g_fxo->get<id_manager::id_map<T>>().vec)
+		{
+			if (id.second)
+			{
+				if (std::is_same<T, Get>::value || id.first.type() == get_type<Get>())
+				{
+					func(id.first, std::static_pointer_cast<Get>(id.second));
+					result++;
+				}
+			}
+		}
+
+		return result;
+	}
+
 	// Access all objects of specified type. If function result evaluates to true, stop and return the object and the value.
 	template <typename T, typename Get = T, typename F, typename FT = decltype(&std::decay_t<F>::operator()), typename FRT = typename function_traits<FT>::result_type>
 	static inline auto select(F&& func)
@@ -712,20 +738,20 @@ public:
 	static void save(Archive& ar)
 	{
 		std::vector<u32> ids;
-		std::vector<Get*> objs;
-		idm::select<T, Get>([&](u32 id, Get& obj) {
+		std::vector<std::shared_ptr<Get>> objs;
+		idm::select_shared_ptr<T, Get>([&](u32 id, std::shared_ptr<Get> obj) {
 			ids.push_back(id);
-			objs.push_back(&obj);
+			objs.push_back(obj);
 		});
 		ar(ids);
 
 		for (auto obj : objs)
 		{
-			ar(*obj);
+			ar(obj);
 		}
 	}
 
-	template <typename T, typename Get = T, class Archive>
+	template <typename T, typename Get = T, typename Get2 = Get, class Archive>
 	static void load(Archive& ar)
 	{
 		// TODO: idm remove_all (?)
@@ -745,9 +771,9 @@ public:
 		for (size_t i = 0; i < ids.size(); ++i)
 		{
 			//std::shared_ptr<Get> obj(&objs[i]);
-			auto obj = std::make_shared<Get>();
-			ar(*obj);
-			if (!idm::import_existing_id<T, Get>(ids[i], obj))
+			auto obj = std::make_shared<Get2>();
+			ar(obj);
+			if (!idm::import_existing_id<T, Get>(ids[i], std::reinterpret_pointer_cast<Get>(obj)))
 				__debugbreak();
 		}
 	}

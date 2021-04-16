@@ -595,6 +595,38 @@ cpu_thread::~cpu_thread()
 {
 }
 
+cpu_thread::cpu_thread() {
+	// TODO:
+
+	__debugbreak();
+	sys_log.always("cpu_thread::cpu_thread() id %X", id);
+
+	while (Emu.GetStatus() == system_state::paused)
+	{
+		// Solve race between Emulator::Pause and this construction of thread which most likely is guarded by IDM mutex
+		state += cpu_flag::dbg_global_pause;
+
+		if (Emu.GetStatus() != system_state::paused)
+		{
+			// Emulator::Resume was called inbetween
+			state -= cpu_flag::dbg_global_pause;
+
+			// Recheck if state is inconsistent
+			continue;
+		}
+
+		break;
+	}
+
+	if (Emu.IsStopped())
+	{
+		// For similar race as above
+		state += cpu_flag::exit;
+	}
+
+	g_threads_created++;
+}
+
 cpu_thread::cpu_thread(u32 id)
 	: id(id)
 {
