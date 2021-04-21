@@ -2,6 +2,12 @@
 
 #include "PPUOpcodes.h"
 
+//#define DEBUG_LOG
+//#define DEBUG_LOG_SLY2
+//#define DEBUG_DUMP_SLY2_OFFSETS_ONLY
+//#define DEBUG_LOG_TEXTURE
+//#define DUMP_DEC
+
 class ppu_thread;
 
 using ppu_inter_func_t = bool(*)(ppu_thread& ppu, ppu_opcode_t op);

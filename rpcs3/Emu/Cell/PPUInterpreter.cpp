@@ -1,4 +1,5 @@
 #include "stdafx.h"
+//#pragma optimize("", off)
 #include "PPUInterpreter.h"
 
 #include "Emu/Memory/vm_reservation.h"
@@ -13,11 +14,9 @@
 #include <cmath>
 #include <string>
 #include <sstream>
-
-//#define DEBUG_LOG
-//#define DEBUG_LOG_SLY2
-//#define DEBUG_LOG_TEXTURE
-//#define DUMP_DEC
+#include <vector>
+#include <array>
+#include <fstream>
 
 #include "util/asm.hpp"
 #include "util/v128.hpp"
@@ -30,6 +29,7 @@
 #endif
 
 #if defined(_MSC_VER)
+//#include <debugapi.h>
 #define SSSE3_FUNC
 #else
 #define SSSE3_FUNC __attribute__((__target__("ssse3")))
@@ -3186,7 +3186,9 @@ static FILE* fp_dbg = fopen("rpcs3_sly1_debug4.log", "w");
 #endif
 
 #ifdef DEBUG_LOG_SLY2
-static FILE* fp_dbg = fopen("rpcs3_sly2_debug4.log", "w");
+#ifndef DEBUG_DUMP_SLY2_OFFSETS_ONLY
+static FILE* fp_dbg = fopen("rpcs3_sly2_debug5.log", "w");
+#endif
 #endif
 
 static bool change_file_dec = true;
@@ -3196,6 +3198,24 @@ static u32 data_unpack_data_ptr{};
 static u32 data_unpack_len{};
 static u32 data_unpack_off{};
 static std::string data_unpack_str{};
+
+#ifdef DEBUG_DUMP_SLY2_OFFSETS_ONLY
+static std::vector<u32> g_sly2_objectOffsets;
+static std::vector<u32> g_sly2_textureDescOffsets;
+static std::vector<u32> g_sly2_scriptOffsets;
+static std::vector<u32> g_sly2_meshContOffsets;
+static std::vector<u32> g_sly2_dynObjOffsets;
+static std::vector<std::array<char, 256>> g_sly2_last_asset;
+
+void clear_vecs() {
+	g_sly2_objectOffsets.clear();
+	g_sly2_textureDescOffsets.clear();
+	g_sly2_scriptOffsets.clear();
+	g_sly2_meshContOffsets.clear();
+	g_sly2_dynObjOffsets.clear();
+};
+
+#endif
 
 bool ppu_interpreter::BCLR(ppu_thread& ppu, ppu_opcode_t op)
 {
@@ -3283,6 +3303,7 @@ bool ppu_interpreter::BCLR(ppu_thread& ppu, ppu_opcode_t op)
 		data_unpack_off += data_unpack_len;
 		//#ifndef SHOW_PACKED_DATA_STRUCT
 
+#ifndef DEBUG_DUMP_SLY2_OFFSETS_ONLY
 		if (data_unpack_dst)
 		{
 			auto dst_ptr = vm::base(data_unpack_dst);
@@ -3307,6 +3328,7 @@ bool ppu_interpreter::BCLR(ppu_thread& ppu, ppu_opcode_t op)
 		{
 			fprintf(fp_dbg, "%s SKIP\n", data_unpack_str.c_str());
 		}
+#endif
 	}
 
 	auto log_get_call_stack =
@@ -3320,8 +3342,45 @@ bool ppu_interpreter::BCLR(ppu_thread& ppu, ppu_opcode_t op)
 		    return call_stack_str;
 	    };
 
+
+	/*
+	// scanstring: "LR=151688"
+let objectOffsets_f_nightclub_exterior = [0x0FD1A0,
+// scanstring: "LR=18F0A4,127288,027BD8"
+let textureDescOffsets_f_nightclub_exterior = [0x0F
+// scanstring: "LR=1520C8"
+// let textureDataOffsets_f_nightclub_exterior = [0
+// scanstring: "LR=1868D0,11D5D0,02A038"
+let scriptOffsets_f_nightclub_exterior = [0x0FE055,
+// scanstring: "LR=10CCD0,10E8C0,027BEC"
+let meshcontOffsets_f_nightclub_exterior = [0x107E6
+// scanstring: "LR=0E08E0"
+let dynObjInstOffsets_f_nightclub_exterior = [0x138
+    0x2D17DD6, 0x2D17E25, 0x2D17E74, 0x2D17EC3, 0x2
+	*/
+
 	auto log_get_packed = [&](int size, const char* str, bool is_double = false) {
-		const auto data_unpack_str2 = fmt::format("        %s LR=%s off=%06X len=0x8     (%5d) dst=ret     ", str, log_get_call_stack().c_str(), data_unpack_off, size, size);
+#ifdef DEBUG_DUMP_SLY2_OFFSETS_ONLY
+		const u32 lr          = (u32)ppu.lr;
+		const auto call_stack = ppu.dump_callstack_list();
+		const u32 cs1        = call_stack[1].first;
+		u32 cs2{};
+		if (call_stack.size() > 2)
+			cs2 = call_stack[2].first;
+
+		if (lr == 0x151688)
+			g_sly2_objectOffsets.push_back(data_unpack_off);
+		else if (lr == 0x10CCD0 && cs1 == 0x10E8C0 && cs2 == 0x027BEC)
+			g_sly2_textureDescOffsets.push_back(data_unpack_off);
+		else if (lr == 0x18F0A4 && cs1 == 0x127288 && cs2 == 0x027BD8)
+			g_sly2_scriptOffsets.push_back(data_unpack_off);
+		else if (lr == 0x1868D0 && cs1 == 0x11D5D0 && cs2 == 0x02A038)
+			g_sly2_meshContOffsets.push_back(data_unpack_off);
+		else if (lr == 0x0E08E0)
+			g_sly2_dynObjOffsets.push_back(data_unpack_off);
+#else
+		const auto data_unpack_str2 = fmt::format("        %s LR=%s off=%06X len=0x8     (%5d) dst=ret     ",
+			str, log_get_call_stack().c_str(), data_unpack_off, size, size);
 		std::string hex_str;
 		std::stringstream hex_ss;
 
@@ -3365,11 +3424,12 @@ bool ppu_interpreter::BCLR(ppu_thread& ppu, ppu_opcode_t op)
 			hex_str += fmt::format(" | %16X", (u64)data_);
 		}
 
+		fprintf(fp_dbg, "%s  %s\n", data_unpack_str2.c_str(), hex_str.c_str());
+#endif
+
 		const auto ip = ppu.cia;
 		if (ip == 0x18f27c || ip == 0x18ec2c || ip == 0x18eb44 || ip == 0x18edfc || ip == 0x18eed8 || ip == 0x18e7a8 || ip == 0x18ecc0)
 			data_unpack_off += size;
-
-		fprintf(fp_dbg, "%s  %s\n", data_unpack_str2.c_str(), hex_str.c_str());
 	};
 
 	const auto ip = ppu.cia;
@@ -3388,6 +3448,7 @@ bool ppu_interpreter::BCLR(ppu_thread& ppu, ppu_opcode_t op)
 		log_get_packed(4, "f32", true);
 	else if (ip == 0x18ee60 || ip == 0x018edfc || ip == 0x18eb44 || ip == 0x18ebb0)
 		log_get_packed(4, "i32");
+#ifndef DEBUG_DUMP_SLY2_OFFSETS_ONLY
 	else if (ip == 0x18e9b8)
 		fprintf(fp_dbg, "            LR=%s --- get_next_umat3 ---\n", log_get_call_stack().c_str());
 	else if (ip == 0x18ea24)
@@ -3398,7 +3459,29 @@ bool ppu_interpreter::BCLR(ppu_thread& ppu, ppu_opcode_t op)
 		fprintf(fp_dbg, "            LR=%s --- get_next_uvec3 ---\n", log_get_call_stack().c_str());
 	//else if (ip == 0x18e54c || ip == 0x18e514)
 	//	fprintf(fp_dbg, "            LR=%s --- unk 0x%llX ---\n", log_get_call_stack().c_str(), ip);
-	
+#else
+	else if (ip == 0x27e5c)
+	{
+		//static int offs_idx = 0;
+		std::ofstream file(fmt::format("sly2-%s-offsets.bin", g_sly2_last_asset.back().data() + 4), std::ios::out | std::ios::binary);
+		g_sly2_last_asset.clear();
+
+		auto serialize_vec = [&](std::vector<u32>& vec) {
+			u32 sz = (u32)vec.size();
+			file.write((const char*)&sz, 4);
+			file.write((const char*)vec.data(), vec.size() * sizeof(u32));
+
+			//OutputDebugStringA(fmt::format("serialized vec, count %d", (u32)vec.size()).c_str());
+			vec.clear();
+		};
+		serialize_vec(g_sly2_objectOffsets);
+		serialize_vec(g_sly2_textureDescOffsets);
+		serialize_vec(g_sly2_scriptOffsets);
+		serialize_vec(g_sly2_meshContOffsets);
+		serialize_vec(g_sly2_dynObjOffsets);
+	}
+#endif
+
 #endif
 
 	const bool bo0 = (op.bo & 0x10) != 0;
@@ -3897,7 +3980,9 @@ bool ppu_interpreter::NEG(ppu_thread& ppu, ppu_opcode_t op)
 		int val = ppu.gpr[0];
 		int alignment = ppu.gpr[4];
 		int offs     = (-val) & (alignment - 1);
+#ifndef DEBUG_DUMP_SLY2_OFFSETS_ONLY
 		fprintf(fp_dbg, "align(0x%X, 0x%X) %d LR=0x%llX\n", val, alignment, offs, ppu.lr);
+#endif
 		data_unpack_off += offs;
 	}
 #endif
@@ -5130,7 +5215,10 @@ bool ppu_interpreter::STDU(ppu_thread& ppu, ppu_opcode_t op)
 #ifdef DEBUG_LOG_SLY2
 	if (ppu.cia == 0x0018e560)
 	{
-		data_unpack_str      = fmt::format("data_unpack LR=%06X,------,------ off=%06X len=0x%5X (%5d) dst=%08X", ppu.lr, data_unpack_off, ppu.gpr[4], ppu.gpr[4], ppu.gpr[5]);
+#ifndef DEBUG_DUMP_SLY2_OFFSETS_ONLY
+		data_unpack_str      = fmt::format("data_unpack LR=%06X,------,------ off=%06X len=0x%5X (%5d) dst=%08X",
+			ppu.lr, data_unpack_off, ppu.gpr[4], ppu.gpr[4], ppu.gpr[5]);
+#endif
 		data_unpack_dst      = ppu.gpr[5];
 		data_unpack_len      = ppu.gpr[4];
 		data_unpack_data_ptr = ppu.gpr[3];
@@ -5139,12 +5227,21 @@ bool ppu_interpreter::STDU(ppu_thread& ppu, ppu_opcode_t op)
 	}
 	else if (ppu.cia == 0x3a2e0)
 	{
+#ifdef DEBUG_DUMP_SLY2_OFFSETS_ONLY
+		if (ppu.lr == 0x153db0 && *(const char*)vm::base(ppu.gpr[4]) == 'Y')
+		{
+			g_sly2_last_asset.emplace_back();
+			strncpy(g_sly2_last_asset.back().data(), (const char*)vm::base(ppu.gpr[4]), 255);
+		}
+#else
 		char name[256]{};
 		strncpy(name, (const char*)vm::base(ppu.gpr[4]), 255);
 		fprintf(fp_dbg, "load_asset name: \"%s\"\n", name);
 		//if (type == 'W' && ppu.gpr[6])
 			//data_unpack_off = 0;
+#endif
 	}
+
 #endif
 
 
