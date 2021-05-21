@@ -313,7 +313,7 @@ namespace utils
 #endif
 	}
 
-	shm::shm(u32 size, u32 flags)
+	shm::shm(u64 size, u32 flags)
 		: m_flags(flags)
 		, m_size(utils::align(size, 0x10000))
 	{

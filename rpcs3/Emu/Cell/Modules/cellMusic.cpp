@@ -78,6 +78,26 @@ struct music_state
 	{
 		handler = Emu.GetCallbacks().get_music_handler();
 	}
+
+	music_state(utils::serial& ar)
+		: music_state()
+	{
+		save(ar);
+	}
+
+	void save(utils::serial& ar)
+	{
+		ar(func);
+
+		if (!func)
+		{
+			return;
+		}
+
+		USING_SERIALIZATION_VERSION_COND(ar.is_writing(), cellMusic);
+
+		ar(userData);
+	}
 };
 
 error_code cell_music_select_contents()
@@ -117,6 +137,12 @@ error_code cell_music_select_contents()
 			});
 		});
 	return error;
+}
+
+template <>
+void fxo_serialize<music_state>(utils::serial* ar)
+{
+	fxo_serialize_body<music_state>(ar);
 }
 
 error_code cellMusicGetSelectionContext(vm::ptr<CellMusicSelectionContext> context)

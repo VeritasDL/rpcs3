@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "Emu/System.h"
 #include "Emu/system_utils.hpp"
 #include "Emu/VFS.h"
@@ -402,6 +402,12 @@ void fmt_class_string<SceNpError>::format(std::string& out, u64 arg)
 void message_data::print() const
 {
 	sceNp.notice("commId: %s, msgId: %d, mainType: %d, subType: %d, subject: %s, body: %s, data_size: %d", static_cast<const char *>(commId.data), msgId, mainType, subType, subject, body, data.size());
+}
+
+template <>
+void fxo_serialize<named_thread<np::np_handler>>(utils::serial* ar)
+{
+	fxo_serialize_body<named_thread<np::np_handler>>(ar);
 }
 
 error_code sceNpInit(u32 poolsize, vm::ptr<void> poolptr)

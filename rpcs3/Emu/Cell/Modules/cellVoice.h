@@ -182,6 +182,8 @@ struct voice_manager
 	{
 		s32 state = CELLVOICE_PORTSTATE_NULL;
 		CellVoicePortParam info;
+
+		ENABLE_BITWISE_SERIALIZATION;
 	};
 
 	// See cellVoiceCreatePort
@@ -210,4 +212,8 @@ struct voice_manager
 	void reset();
 	shared_mutex mtx;
 	atomic_t<bool> is_init{ false };
+
+	voice_manager() = default;
+	voice_manager(utils::serial& ar) { save(ar); }
+	void save(utils::serial& ar);
 };

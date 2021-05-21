@@ -68,8 +68,6 @@ namespace gl
 
 class GLGSRender : public GSRender, public ::rsx::reports::ZCULL_control
 {
-private:
-
 	gl::sampler_state m_fs_sampler_states[rsx::limits::fragment_textures_count];         // Fragment textures
 	gl::sampler_state m_fs_sampler_mirror_states[rsx::limits::fragment_textures_count];  // Alternate views of fragment textures with different format (e.g Depth vs Stencil for D24S8)
 	gl::sampler_state m_vs_sampler_states[rsx::limits::vertex_textures_count];           // Vertex textures
@@ -144,7 +142,10 @@ private:
 
 public:
 	u64 get_cycles() final;
-	GLGSRender();
+
+	GLGSRender(utils::serial* ar) noexcept;
+	GLGSRender(utils::serial& ar) noexcept : GLGSRender(std::addressof(ar)) {}
+	GLGSRender() noexcept : GLGSRender(nullptr) {}
 
 private:
 

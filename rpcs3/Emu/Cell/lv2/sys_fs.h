@@ -160,18 +160,20 @@ struct lv2_fs_object
 	static const u32 id_step = 1;
 	static const u32 id_count = 255 - id_base;
 
-	// Mount Point
-	const std::add_pointer_t<lv2_fs_mount_point> mp;
-
 	// File Name (max 1055)
 	const std::array<char, 0x420> name;
 
+	// Mount Point
+	const std::add_pointer_t<lv2_fs_mount_point> mp;
+
 protected:
 	lv2_fs_object(lv2_fs_mount_point* mp, std::string_view filename)
-		: mp(mp)
-		, name(get_name(filename))
+		: name(get_name(filename))
+		, mp(mp)
 	{
 	}
+
+	lv2_fs_object(utils::serial& ar, bool dummy);
 
 public:
 	lv2_fs_object(const lv2_fs_object&) = delete;
@@ -193,6 +195,8 @@ public:
 		name[filename.size()] = 0;
 		return name;
 	}
+
+	void save(utils::serial&) {}
 };
 
 struct lv2_file final : lv2_fs_object
@@ -233,6 +237,9 @@ struct lv2_file final : lv2_fs_object
 		, type(type)
 	{
 	}
+
+	lv2_file(utils::serial& ar);
+	void save(utils::serial& ar);
 
 	struct open_raw_result_t
 	{
@@ -288,6 +295,9 @@ struct lv2_dir final : lv2_fs_object
 		, entries(std::move(entries))
 	{
 	}
+
+	lv2_dir(utils::serial& ar);
+	void save(utils::serial& ar);
 
 	// Read next
 	const fs::dir_entry* dir_read()

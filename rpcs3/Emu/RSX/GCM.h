@@ -99,6 +99,8 @@ struct CellGcmTileInfo
 
 struct GcmZcullInfo
 {
+	ENABLE_BITWISE_SERIALIZATION;
+
 	u32 offset;
 	u32 width;
 	u32 height;
@@ -129,6 +131,8 @@ struct GcmZcullInfo
 
 struct GcmTileInfo
 {
+	ENABLE_BITWISE_SERIALIZATION;
+
 	u32 location;
 	u32 offset;
 	u32 size;

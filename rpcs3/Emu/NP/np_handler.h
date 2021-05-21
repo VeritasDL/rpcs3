@@ -28,6 +28,8 @@ namespace np
 	{
 	public:
 		np_handler();
+		np_handler(utils::serial& ar);
+		void save(utils::serial& ar);
 
 		const std::array<u8, 6>& get_ether_addr() const;
 		const std::string& get_hostname() const;
