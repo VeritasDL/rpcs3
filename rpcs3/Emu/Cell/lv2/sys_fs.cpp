@@ -10,6 +10,8 @@
 #include "Emu/IdManager.h"
 #include "Utilities/StrUtil.h"
 
+#include <span>
+
 LOG_CHANNEL(sys_fs);
 
 lv2_fs_mount_point g_mp_sys_dev_root;
@@ -191,6 +193,12 @@ lv2_fs_mount_point* lv2_fs_object::get_mp(std::string_view filename)
 	return &g_mp_sys_dev_root;
 }
 
+lv2_fs_object::lv2_fs_object(utils::serial& ar)
+	: name(ar)
+	, mp(get_mp(name.data()))
+{
+}
+
 u64 lv2_file::op_read(const fs::file& file, vm::ptr<void> buf, u64 size)
 {
 	// Copy data from intermediate buffer (avoid passing vm pointer to a native API)
@@ -236,6 +244,143 @@ u64 lv2_file::op_write(const fs::file& file, vm::cptr<void> buf, u64 size)
 	}
 
 	return result;
+}
+
+template <>
+void fxo_serialize<loaded_npdrm_keys>(utils::serial* ar)
+{
+	fxo_serialize_body<loaded_npdrm_keys>(ar);
+	fxo_serialize_body<id_manager::id_map<lv2_fs_object>>(ar);
+}
+
+lv2_file::lv2_file(utils::serial& ar)
+	: lv2_fs_object(ar)
+	, mode(ar)
+	, flags(ar)
+	, type(ar)
+{
+	ar(lock);
+
+	be_t<u64> arg = 0;
+	u64 size = 0;
+
+	switch (type)
+	{
+	case lv2_file_type::regular: break;
+	case lv2_file_type::sdata: arg = 0x18000000010, size = 8; break; // TODO: Fix
+	case lv2_file_type::edata: arg = 0x2, size = 8; break;
+	}
+
+	const std::string retrieve_real = ar;
+
+	open_result_t res = lv2_file::open(retrieve_real, flags & CELL_FS_O_ACCMODE, mode, size ? &arg : nullptr, size);
+	file = std::move(res.file);
+	real_path = std::move(res.real_path);
+
+	g_fxo->get<loaded_npdrm_keys>().npdrm_fds.raw() += type != lv2_file_type::regular;
+
+	if (ar.operator bool()) // see lv2_file::save in_mem
+	{
+		std::vector<u8> buf = ar;
+		const fs::stat_t stat = ar;
+		file = fs::make_stream<std::vector<u8>>(std::move(buf), stat);
+	}
+
+	if (!file)
+	{
+		sys_fs.error("Failed to load %s for savestates", name.data());
+		ar.pos += sizeof(u64);
+		ensure(!!g_cfg.savestate.state_inspection_mode);
+		return;
+	}
+
+	file.seek(ar);
+}
+
+void lv2_file::save(utils::serial& ar)
+{
+	USING_SERIALIZATION_VERSION(lv2_fs);
+	ar(name, mode, flags, type, lock, vfs::retrieve(real_path));
+
+	if (!(mp->flags & lv2_mp_flag::read_only) && flags & CELL_FS_O_ACCMODE)
+	{
+		// Ensure accurate timestamps and content on disk
+		file.sync();
+	}
+
+	// UNIX allows deletion of files while descriptors are still opened
+	// descriptpors shall keep the data in memory in this case
+	const bool in_mem = [&]()
+	{
+		if (mp->flags & lv2_mp_flag::read_only)
+		{
+			return false;
+		}
+
+		fs::file test{real_path};
+
+		if (!test) return true;
+
+		return test.stat() != file.stat();
+	}();
+
+	ar(in_mem);
+
+	if (in_mem)
+	{
+		ar(file.to_vector<u8>());
+		ar(file.stat());
+	}
+
+	ar(file.pos());
+}
+
+lv2_dir::lv2_dir(utils::serial& ar)
+	: lv2_fs_object(ar)
+	, entries([&]
+	{
+		std::vector<fs::dir_entry> entries;
+
+		u64 size = 0;
+		ar.deserialize_vle(size);
+		entries.resize(size);
+
+		for (auto& entry : entries)
+		{
+			ar(entry.name, static_cast<fs::stat_t&>(entry));
+		}
+
+		return entries;
+	}())
+	, pos(ar)
+{
+}
+
+void lv2_dir::save(utils::serial& ar)
+{
+	USING_SERIALIZATION_VERSION(lv2_fs);
+
+	ar(name);
+
+	ar.serialize_vle(entries.size());
+
+	for (auto& entry : entries)
+	{
+		ar(entry.name, static_cast<const fs::stat_t&>(entry));
+	}
+
+	ar(pos);
+}
+
+loaded_npdrm_keys::loaded_npdrm_keys(utils::serial& ar)
+{
+	save(ar);
+}
+
+void loaded_npdrm_keys::save(utils::serial& ar)
+{
+	ar(dec_keys_pos);
+	ar(std::span(dec_keys, std::min<usz>(std::size(dec_keys), dec_keys_pos)));
 }
 
 struct lv2_file::file_view : fs::file_base
@@ -2034,11 +2179,6 @@ error_code sys_fs_fget_block_size(ppu_thread& ppu, u32 fd, vm::ptr<u64> sector_s
 		return CELL_EBADF;
 	}
 
-	if (ppu.is_stopped())
-	{
-		return {};
-	}
-
 	// TODO
 	*sector_size = file->mp->sector_size;
 	*block_size = file->mp->block_size;
@@ -2086,11 +2226,6 @@ error_code sys_fs_get_block_size(ppu_thread& ppu, vm::cptr<char> path, vm::ptr<u
 		}
 
 		return {CELL_EIO, path}; // ???
-	}
-
-	if (ppu.is_stopped())
-	{
-		return {};
 	}
 
 	// TODO

@@ -54,12 +54,12 @@ EmuCallbacks main_application::CreateCallbacks()
 		{
 		case keyboard_handler::null:
 		{
-			g_fxo->init<KeyboardHandlerBase, NullKeyboardHandler>();
+			fxo_serialize_body<KeyboardHandlerBase, NullKeyboardHandler>(Emu.DeserialManager());
 			break;
 		}
 		case keyboard_handler::basic:
 		{
-			basic_keyboard_handler* ret = g_fxo->init<KeyboardHandlerBase, basic_keyboard_handler>();
+			basic_keyboard_handler* ret = fxo_serialize_body<KeyboardHandlerBase, basic_keyboard_handler>(Emu.DeserialManager());
 			ret->moveToThread(get_thread());
 			ret->SetTargetWindow(m_game_window);
 			break;
@@ -75,18 +75,18 @@ EmuCallbacks main_application::CreateCallbacks()
 		{
 			if (g_cfg.io.move == move_handler::mouse)
 			{
-				basic_mouse_handler* ret = g_fxo->init<MouseHandlerBase, basic_mouse_handler>();
+				basic_mouse_handler* ret = fxo_serialize_body<MouseHandlerBase, basic_mouse_handler>(Emu.DeserialManager());
 				ret->moveToThread(get_thread());
 				ret->SetTargetWindow(m_game_window);
 			}
 			else
-				g_fxo->init<MouseHandlerBase, NullMouseHandler>();
+				fxo_serialize_body<MouseHandlerBase, NullMouseHandler>(Emu.DeserialManager());
 
 			break;
 		}
 		case mouse_handler::basic:
 		{
-			basic_mouse_handler* ret = g_fxo->init<MouseHandlerBase, basic_mouse_handler>();
+			basic_mouse_handler* ret = fxo_serialize_body<MouseHandlerBase, basic_mouse_handler>(Emu.DeserialManager());
 			ret->moveToThread(get_thread());
 			ret->SetTargetWindow(m_game_window);
 			break;

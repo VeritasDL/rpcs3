@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #ifdef _WIN32
 #include <QWinTHumbnailToolbar>
@@ -112,6 +112,7 @@ private Q_SLOTS:
 	void BootElf();
 	void BootGame();
 	void BootVSH();
+	void BootSavestate();
 	void BootRsxCapture(std::string path = "");
 	void DecryptSPRXLibraries();
 	static void show_boot_error(game_boot_result status);

@@ -120,6 +120,8 @@ struct RsxDisplayInfo
 	be_t<u32> width{0};
 	be_t<u32> height{0};
 
+	using enable_bitcopy = std::true_type;
+
 	bool valid() const
 	{
 		return height != 0u && width != 0u;
