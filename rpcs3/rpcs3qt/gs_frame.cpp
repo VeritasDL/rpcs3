@@ -47,6 +47,8 @@
 #include <QtDBus/QDBusConnection>
 #endif
 
+#include <Emu/RSX/RSXThread.h>
+
 LOG_CHANNEL(screenshot_log, "SCREENSHOT");
 LOG_CHANNEL(mark_log, "MARK");
 LOG_CHANNEL(gui_log, "GUI");
@@ -288,6 +290,12 @@ void gs_frame::keyPressEvent(QKeyEvent *keyEvent)
 	case Qt::Key_F12:
 		screenshot_toggle = true;
 		break;
+	case Qt::Key_F11:
+	{
+		std::lock_guard lk(g_mesh_dumper_mtx);
+		g_mesh_dumper.enabled = true;
+		break;
+	}
 	default:
 		break;
 	}
