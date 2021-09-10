@@ -1,4 +1,6 @@
 #include "stdafx.h"
+
+#pragma optimize("", off)
 #include "../Common/BufferUtils.h"
 #include "../rsx_methods.h"
 #include "GLGSRender.h"
@@ -48,6 +50,7 @@ namespace
 
 	struct vertex_input_state
 	{
+		std::byte* index_buf;
 		bool index_rebase;
 		u32 min_index;
 		u32 max_index;
@@ -77,10 +80,10 @@ namespace
 					rsx::method_registers.current_draw_clause.primitive, m_index_ring_buffer,
 					rsx::method_registers.current_draw_clause.get_elements_count());
 
-				return{ false, min_index, max_index, index_count, 0, std::make_tuple(static_cast<GLenum>(GL_UNSIGNED_SHORT), offset_in_index_buffer) };
+				return{ nullptr, false, min_index, max_index, index_count, 0, std::make_tuple(static_cast<GLenum>(GL_UNSIGNED_SHORT), offset_in_index_buffer) };
 			}
 
-			return{ false, min_index, max_index, vertex_count, 0, std::optional<std::tuple<GLenum, u32>>() };
+			return{ nullptr, false, min_index, max_index, vertex_count, 0, std::optional<std::tuple<GLenum, u32>>() };
 		}
 
 		vertex_input_state operator()(const rsx::draw_indexed_array_command& command)
@@ -115,13 +118,13 @@ namespace
 			if (min_index >= max_index)
 			{
 				//empty set, do not draw
-				return{ false, 0, 0, 0, 0, std::make_tuple(get_index_type(type), offset_in_index_buffer) };
+				return{ nullptr, false, 0, 0, 0, 0, std::make_tuple(get_index_type(type), offset_in_index_buffer) };
 			}
 
 			// Prefer only reading the vertices that are referenced in the index buffer itself
 			// Offset data source by min_index verts, but also notify the shader to offset the vertexID (important for modulo op)
 			const auto index_offset = rsx::method_registers.vertex_data_base_index();
-			return{ true, min_index, max_index, index_count, index_offset, std::make_tuple(get_index_type(type), offset_in_index_buffer) };
+			return { reinterpret_cast<std::byte*>(ptr), true, min_index, max_index, index_count, index_offset, std::make_tuple(get_index_type(type), offset_in_index_buffer)};
 		}
 
 		vertex_input_state operator()(const rsx::draw_inlined_array& /*command*/)
@@ -136,10 +139,10 @@ namespace
 				std::tie(index_count, offset_in_index_buffer) = get_index_array_for_emulated_non_indexed_draw(
 					rsx::method_registers.current_draw_clause.primitive, m_index_ring_buffer, vertex_count);
 
-				return{ false, 0, vertex_count, index_count, 0, std::make_tuple(static_cast<GLenum>(GL_UNSIGNED_SHORT), offset_in_index_buffer) };
+				return{ nullptr, false, 0, vertex_count, index_count, 0, std::make_tuple(static_cast<GLenum>(GL_UNSIGNED_SHORT), offset_in_index_buffer) };
 			}
 
-			return{ false, 0, vertex_count, vertex_count, 0, std::optional<std::tuple<GLenum, u32>>() };
+			return{ nullptr, false, 0, vertex_count, vertex_count, 0, std::optional<std::tuple<GLenum, u32>>() };
 		}
 
 	private:
@@ -171,6 +174,7 @@ gl::vertex_upload_info GLGSRender::set_vertex_buffer()
 	std::pair<void*, u32> persistent_mapping = {}, volatile_mapping = {};
 	gl::vertex_upload_info upload_info =
 	{
+	    result.index_buf,
 		result.vertex_draw_count,                // Vertex count
 		vertex_count,                            // Allocated vertex count
 		vertex_base,                             // First vertex in block

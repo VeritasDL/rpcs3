@@ -24,6 +24,14 @@
 #include "util/serialization.hpp"
 #include "util/asm.hpp"
 
+#pragma optimize("", off)
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <Emu/RSX/stb_image_write.h>
+#include <Emu/RSX/s3tc.h>
+
 #include <span>
 #include <sstream>
 #include <thread>
@@ -41,6 +49,12 @@ rsx::frame_capture_data frame_capture;
 
 extern CellGcmOffsetTable offsetTable;
 extern thread_local std::string(*g_tls_log_prefix)();
+
+extern mesh_dumper g_mesh_dumper{};
+extern std::mutex g_mesh_dumper_mtx{};
+extern u32 g_clears_this_frame{};
+// key is tex_raw_data_ptr_t (can't actually use it)
+std::map<u64, texture_info_t> g_dump_texture_info;
 
 template <>
 bool serialize<rsx::rsx_state>(utils::serial& ar, rsx::rsx_state& o)
@@ -106,6 +120,50 @@ bool serialize<rsx::rsx_iomap_table>(utils::serial& ar, rsx::rsx_iomap_table& o)
 
 	return true;
 }
+
+namespace neolib
+{
+	template <class Elem, class Traits>
+	inline void hex_dump(const void* aData, std::size_t aLength, std::basic_ostream<Elem, Traits>& aStream, std::size_t aWidth = 16, ::std::string prepend_line = "")
+	{
+		const char* const start = static_cast<const char*>(aData);
+		const char* const end   = start + aLength;
+		const char* line        = start;
+		while (line != end)
+		{
+			aStream << prepend_line;
+			aStream.width(4);
+			aStream.fill('0');
+			aStream << std::hex << line - start << " ";
+			std::size_t lineLength = std::min(aWidth, static_cast<std::size_t>(end - line));
+			for (std::size_t pass = 1; pass <= 2; ++pass)
+			{
+				for (const char* next = line; next != end && next != line + aWidth; ++next)
+				{
+					char ch = *next;
+					switch (pass)
+					{
+					case 1:
+						aStream << (ch < 32 ? '.' : ch);
+						break;
+					case 2:
+						if (next != line)
+							aStream << " ";
+						aStream.width(2);
+						aStream.fill('0');
+						aStream << std::hex << std::uppercase << static_cast<int>(static_cast<unsigned char>(ch));
+						break;
+					}
+				}
+				if (pass == 1 && lineLength != aWidth)
+					aStream << std::string(aWidth - lineLength, ' ');
+				aStream << " ";
+			}
+			aStream << std::endl;
+			line = line + lineLength;
+		}
+	}
+} // namespace neolib
 
 namespace rsx
 {
@@ -731,6 +789,8 @@ namespace rsx
 
 	void thread::on_task()
 	{
+		g_mesh_dumper_mtx.lock();
+
 		g_tls_log_prefix = []
 		{
 			const auto rsx = get_current_renderer();
@@ -2629,15 +2689,299 @@ namespace rsx
 				const u32 data_size = range.second * block.attribute_stride;
 				const u32 vertex_base = range.first * block.attribute_stride;
 
+				if (g_mesh_dumper.enabled)
+				{
+					const auto vertex_data_start = vm::_ptr<char>(block.real_offset_address) + vertex_base;
+
+					if (g_mesh_dumper.dumps.empty())
+						__debugbreak();
+
+					auto& mesh_draw_dump = g_mesh_dumper.dumps.back();
+#if 0					
+					if (!mesh_draw_dump.vertices.empty())
+					{
+						//mesh_draw_dump.vertices.clear();
+						//__debugbreak();
+					}
+					mesh_draw_dump.vertices.resize(vertex_count);
+					memcpy(mesh_draw_dump.vertices.data(), vertex_data_start, data_size);
+#elif 0
+					const auto prev_size = mesh_draw_dump.vertex_data.size();
+					mesh_draw_dump.vertex_data.resize(prev_size + data_size);
+					memcpy((u8*)mesh_draw_dump.vertex_data.data() + prev_size, vertex_data_start, data_size);
+#else
+
+					mesh_draw_dump_block dump_block;
+
+					dump_block.vertex_data.resize(data_size);
+					memcpy((u8*)dump_block.vertex_data.data(), vertex_data_start, data_size);
+
+					dump_block.interleaved_range_info = block;
+
+					if (transient)
+					{
+						const auto vol      = static_cast<char*>(volatile_data);
+						const auto vol_size = transient - vol;
+						if (vol)
+						{
+							mesh_draw_dump.volatile_data.resize(vol_size);
+							memcpy(mesh_draw_dump.volatile_data.data(), vol, vol_size);
+						}
+					}
+
+					mesh_draw_dump.blocks.push_back(dump_block);
+
+#endif
+				}
+
 				g_fxo->get<rsx::dma_manager>().copy(persistent, vm::_ptr<char>(block.real_offset_address) + vertex_base, data_size);
 				persistent += data_size;
 			}
 		}
 	}
 
+	#define MESHDUMP_DEBUG false
+
 	void thread::flip(const display_flip_info_t& info)
 	{
+
 		m_eng_interrupt_mask.clear(rsx::display_interrupt);
+
+		if (g_mesh_dumper.enabled)
+		{
+			Emu.Pause();
+
+			static u32 frame_idx{};
+
+			srand(time(NULL));
+			static int rand_ = rand();
+
+			const std::string dump_dir = fmt::format("meshdump_%X", rand_);
+			std::filesystem::create_directory(dump_dir);
+
+			const std::string mtl_file_name = fmt::format("%s/rpcs3_objtest_%X_%d.mtl", dump_dir.c_str(), rand_, frame_idx);
+
+			std::ofstream file_obj(fmt::format("%s/rpcs3_objtest_%X_%d.obj", dump_dir.c_str(), rand_, frame_idx));
+			std::string obj_str;
+
+			obj_str += fmt::format("mtllib %s", mtl_file_name);
+
+			u32 vertex_index_base{ 1 };
+
+			for (auto dump_idx = 0; dump_idx < g_mesh_dumper.dumps.size(); ++dump_idx)
+			{
+				auto& d = g_mesh_dumper.dumps[dump_idx];
+
+				obj_str += fmt::format("g %d_%X_clr:%d_blk:%d_shd:%d\n", dump_idx, rand_, d.clear_count, d.blocks.size(), d.shader_id);
+
+#if MESHDUMP_DEBUG
+				if (auto it = g_dump_texture_info.find((u64)d.texture_raw_data_ptr); it != g_dump_texture_info.end())
+				{
+					obj_str += fmt::format("# Texture %dx%d fmt 0x%X\n", it->second.width, it->second.height, it->second.format);
+				}
+#endif
+				obj_str += fmt::format("usemtl 0x%X\n", d.texture_raw_data_ptr);
+
+				//auto dst_ptr = d.vertex_data.data();
+				//std::stringstream hex_ss;
+				//neolib::hex_dump((const void*)dst_ptr, d.vertex_data.size(), hex_ss, 36);
+				//auto hex_str = hex_ss.str();
+				////hex_str.pop_back(); // remove newline
+				//obj_str += hex_str;
+
+#if MESHDUMP_DEBUG
+				for (int i = 0; i < d.blocks.size(); ++i)
+				{
+					std::string hex_str;
+					const auto& block = d.blocks[i];
+					hex_str += fmt::format("# Block %d, %s\n", i, block.interleaved_range_info.to_str().c_str());
+					auto dst_ptr = block.vertex_data.data();
+					std::stringstream hex_ss;
+					neolib::hex_dump((const void*)dst_ptr, d.blocks[i].vertex_data.size(), hex_ss, 36, " # ");
+					hex_str += hex_ss.str();
+					//hex_str.pop_back(); // remove newline
+					obj_str += hex_str;
+				}
+
+				if (!d.volatile_data.empty())
+				{
+					obj_str += fmt::format("# Volatile Data size 0x%X\n", d.volatile_data.size());
+					auto dst_ptr = d.volatile_data.data();
+					std::stringstream hex_ss;
+					neolib::hex_dump((const void*)dst_ptr, d.volatile_data.size(), hex_ss, 32, " # ");
+					auto hex_str = hex_ss.str();
+					//hex_str.pop_back(); // remove newline
+					obj_str += hex_str;
+				}
+#endif
+				size_t vertex_count = 0;
+
+				if (!d.blocks.empty())
+				{
+					const auto& block0 = d.blocks[0];
+					if (block0.interleaved_range_info.interleaved && block0.interleaved_range_info.attribute_stride == 36)
+					{
+						const mesh_draw_vertex* vertex_data = (mesh_draw_vertex*)block0.vertex_data.data();
+						vertex_count = block0.vertex_data.size() / sizeof(mesh_draw_vertex);
+
+						for (auto i = 0; i < vertex_count; ++i)
+						{
+							const auto& v = vertex_data[i];
+
+							obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
+							obj_str += fmt::format("vn %f %f %f\n", (float)v.normal.x, (float)v.normal.z, (float)v.normal.y);
+							obj_str += fmt::format("vt %f %f\n", (float)v.uv.u, (float)v.uv.v);
+						}
+					}
+
+
+				}
+
+#if 0
+				for (auto& v : d.vertices)
+				{
+					obj_str += fmt::format("v %f %f %f\n", v.pos.x, v.pos.y, v.pos.z);
+					obj_str += fmt::format("vt %f %f\n", v.uv.u, v.uv.v);
+				}
+#endif
+				if (vertex_count > 0)
+				{
+#if MESHDUMP_DEBUG
+					obj_str += fmt::format("# base is %d\n", vertex_index_base);
+#endif
+					// TODO: move to structs
+
+					auto print_vec4 = [](vec4le v) {
+						return fmt::format("{ %5.2f, %5.2f, %5.2f, %5.2f }", v.x, v.y, v.z, v.w);
+					};
+
+					auto print_mat4 = [](vec4le _0, vec4le _1, vec4le _2, vec4le _3) {
+						return fmt::format("# { %5.2f, %5.2f, %5.2f, %5.2f\n#   %5.2f, %5.2f, %5.2f, %5.2f\n#   %5.2f, %5.2f, %5.2f, %5.2f\n#   %5.2f, %5.2f, %5.2f, %5.2f }",
+						    _0.x, _1.x, _2.x, _3.x,
+						    _0.y, _1.y, _2.y, _3.y,
+						    _0.z, _1.z, _2.z, _3.z,
+						    _0.w, _1.w, _2.w, _3.w);
+					};
+
+#if 0
+					if (d.vertex_constants_buffer.size() >= 17)
+						obj_str += fmt::format("# xform matrix:\n%s\n",
+							print_mat4(d.vertex_constants_buffer[13], d.vertex_constants_buffer[14], d.vertex_constants_buffer[15], d.vertex_constants_buffer[16]));
+#else
+#if MESHDUMP_DEBUG
+					obj_str += "# VertexConstantsBuffer:\n";
+					for (auto i = 0; i < 60; i++)
+					{
+						obj_str += fmt::format(" # %02d: %s\n", i, print_vec4(d.vertex_constants_buffer[i]));
+					}
+#endif
+#endif
+
+					u32 min_idx = *std::min_element(d.indices.begin(), d.indices.end());
+#if MESHDUMP_DEBUG
+					if (min_idx > 0)
+						obj_str += fmt::format("# warning: min_idx is %d\n", min_idx);
+#endif
+
+					for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
+					{
+						const auto f0 = vertex_index_base + d.indices[tri_idx * 3 + 0] - min_idx;
+						const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx;
+						const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx;
+						obj_str += fmt::format("f %d/%d/%d %d/%d/%d %d/%d/%d\n",
+							f0, f0, f0,
+						    f1, f1, f1,
+							f2, f2, f2);
+					}
+
+					g_dump_texture_info[(u64)d.texture_raw_data_ptr].is_used = true;
+				}
+
+				vertex_index_base += vertex_count;
+			}
+
+			file_obj.write(obj_str.c_str(), obj_str.size());
+					
+			std::ofstream file_mtl(mtl_file_name);
+			std::string mtl_str;
+
+			std::vector<u8> work_buf;
+			std::vector<u8> decompressed_data;
+			for (auto [raw_data_ptr, info_] : g_dump_texture_info)
+			{
+				if (info_.is_used && info_.format == CELL_GCM_TEXTURE_COMPRESSED_DXT45)
+				{
+					mtl_str += fmt::format("newmtl 0x%X\n", (u64)raw_data_ptr);
+
+					const std::string tex_dir_name = fmt::format("%s/textures_%d", dump_dir.c_str(), frame_idx);
+					std::filesystem::create_directory(tex_dir_name);
+
+					const std::string tex_file_name = fmt::format("%s/0x%X.png", tex_dir_name, (u64)raw_data_ptr);
+
+					const auto src = (const unsigned char*)((tex_raw_data_ptr_t)raw_data_ptr)->data();
+
+					if (src == 0 || src == (const unsigned char *const) 0xf) // hacky af
+					{
+						mtl_str += fmt::format("# warning: skipped texture, src is 0");
+						continue;
+					}
+
+					decompressed_data.resize(info_.width * info_.height * 4);
+					BlockDecompressImageDXT5(info_.width, info_.height, src, (unsigned long*)decompressed_data.data());
+
+					bool is_fully_opaque = true;
+					// argb -> rgba
+					// also a sly specific thing, it's PS2 port, and GS's RGBA reg alpha is weird like that
+					for (auto i = 0; i < decompressed_data.size() / 4; ++i)
+					{
+						u32* ptr = &((u32*)decompressed_data.data())[i];
+						const u32 v = *ptr;
+						if ((v & 0x000000FF) == 0x00000080)
+						{
+							*ptr = (((v & 0xFF000000) >> 24) |
+							       ((v & 0x00FF0000) >> 8) |
+							       ((v & 0x0000FF00) << 8) |
+							       0xFF000000);
+						}
+						else
+						{
+							*ptr = (((v & 0xFF000000) >> 24) |
+							       ((v & 0x00FF0000) >> 8) |
+							       ((v & 0x0000FF00) << 8) |
+							       (((v & 0x000000FF) * 2) << 24));
+							is_fully_opaque = false;
+						}
+					}
+
+					mtl_str += fmt::format("newmtl 0x%X\n", raw_data_ptr);
+					mtl_str += fmt::format("map_Kd %s\n", tex_file_name.c_str());
+					if (!is_fully_opaque)
+						mtl_str += fmt::format("map_D %s\n", tex_file_name.c_str());
+
+					work_buf.resize(decompressed_data.size());
+					const auto stride = info_.width * 4;
+					for (auto i = 0; i < info_.height; i++)
+					{
+						memcpy(work_buf.data() + i * stride, decompressed_data.data() + (decompressed_data.size() - ((i+1) * stride)), stride);
+					}
+
+					if (!stbi_write_png(tex_file_name.c_str(), info_.width, info_.height, 4, work_buf.data(), info_.width * 4))
+						__debugbreak();
+				}
+			}
+
+			file_mtl.write(mtl_str.c_str(), mtl_str.size());
+
+			frame_idx++;
+
+			g_mesh_dumper.enabled = false;
+			g_mesh_dumper.enable_this_frame = false;
+			g_mesh_dumper.enable_this_frame2 = false;
+			g_mesh_dumper.dumps.clear();
+						
+			Emu.Resume();
+		}
+		g_clears_this_frame = 0;
 
 		if (async_flip_requested & flip_request::any)
 		{
@@ -2661,6 +3005,12 @@ namespace rsx
 				Emu.Pause();
 				m_pause_on_first_flip = false;
 			}
+
+			//if (performance_counters.sampled_frames >= 70 && (performance_counters.sampled_frames % 180 == 0))
+			//{
+			//	g_mesh_dumper.enable_this_frame = true;
+			//	g_mesh_dumper.enabled = true;
+			//}
 		}
 
 		last_host_flip_timestamp = rsx::uclock();
@@ -3411,6 +3761,15 @@ namespace rsx
 			}
 
 			flip_notification_count = 1;
+
+		if (!isHLE)
+		{
+			sys_rsx_context_attribute(0x55555555, 0xFEC, buffer, 0, 0, 0);
+			g_mesh_dumper_mtx.unlock();
+			for (auto i = 0; i < 100; ++i) // lol
+				std::this_thread::yield();
+			g_mesh_dumper_mtx.lock();
+			return;
 		}
 		else if (frame_limit == frame_limit_type::_ps3)
 		{

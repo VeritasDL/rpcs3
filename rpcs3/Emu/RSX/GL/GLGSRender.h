@@ -28,6 +28,7 @@ namespace gl
 
 	struct vertex_upload_info
 	{
+		std::byte* index_buf;
 		u32 vertex_draw_count;
 		u32 allocated_vertex_count;
 		u32 first_vertex;
