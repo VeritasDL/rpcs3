@@ -8,6 +8,11 @@
 
 #include "util/asm.hpp"
 
+
+#include <Emu/RSX/stb_image_write.h>
+#include <Emu/RSX/s3tc.h>
+
+
 namespace gl
 {
 	namespace debug
@@ -600,7 +605,6 @@ namespace gl
 
 		return new gl::viewable_image(target, width, height, depth, mipmaps, internal_format, format_class);
 	}
-
 	void fill_texture(texture* dst, int format,
 			const std::vector<rsx::subresource_layout> &input_layouts,
 			bool is_swizzled, GLenum gl_format, GLenum gl_type, std::vector<std::byte>& staging_buffer)
@@ -642,6 +646,23 @@ namespace gl
 				}
 				case texture::target::texture2D:
 				{
+					if (layout.level == 0 && format == CELL_GCM_TEXTURE_COMPRESSED_DXT45 /* && !dumped.contains((u64)dst->raw_data.data()) */)
+					{
+						//todo: hacky
+						//static std::set<u64> dumped;
+
+						const auto compr_size = (u64)layout.width_in_block * layout.height_in_block * 16;
+						dst->raw_data.resize(compr_size);
+						memcpy(dst->raw_data.data(), staging_buffer.data(), compr_size);
+
+						//if (!stbi_write_png(fmt::format("src_textest_0x%X.png", (u64)dst->raw_data.data()).c_str(), layout.width_in_texel, layout.height_in_texel, 4, decompressed_data.data(), (u32)layout.width_in_texel * 4))
+							//__debugbreak();
+						//dumped.insert((u64)dst->raw_data.data());
+
+						//for (auto i = 0; i < dst->raw_data.size() / 4; ++i)
+						//((u32*)dst->raw_data.data())[i] = _byteswap_ulong(((u32*)dst->raw_data.data())[i]);
+					}
+
 					const GLsizei size = layout.width_in_block * layout.height_in_block * format_block_size;
 					glCompressedTexSubImage2D(GL_TEXTURE_2D, layout.level, 0, 0, layout.width_in_texel, layout.height_in_texel, gl_format, size, staging_buffer.data());
 					break;
