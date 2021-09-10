@@ -771,7 +771,8 @@ namespace gl
 
 	class ring_buffer : public buffer
 	{
-	protected:
+	//protected:
+	public:
 
 		u32 m_data_loc = 0;
 		void *m_memory_mapping = nullptr;
@@ -1399,6 +1400,9 @@ namespace gl
 				glBindTexture(target, old_binding);
 			}
 		};
+
+	public:
+		std::vector<std::byte> raw_data;
 	public:
 		texture(const texture&) = delete;
 		texture(texture&& texture_) = delete;
@@ -1505,7 +1509,7 @@ namespace gl
 				{
 					if (m_aspect_flags != image_aspect::color)
 					{
-						rsx_log.error("Undefined format class for depth texture is not allowed");
+						//rsx_log.error("Undefined format class for depth texture is not allowed");
 					}
 					else
 					{
