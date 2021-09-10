@@ -507,6 +507,7 @@ void GLGSRender::on_exit()
 
 void GLGSRender::clear_surface(u32 arg)
 {
+	g_clears_this_frame++;
 	if (skip_current_frame) return;
 
 	// If stencil write mask is disabled, remove clear_stencil bit
@@ -758,6 +759,12 @@ void GLGSRender::load_program_env()
 	const bool update_raster_env = (rsx::method_registers.polygon_stipple_enabled() && !!(m_graphics_state & rsx::pipeline_state::polygon_stipple_pattern_dirty));
 
 	m_program->use();
+
+	if (g_mesh_dumper.enabled)
+	{
+		auto& dump     = g_mesh_dumper.dumps.back();
+		dump.shader_id = m_program->id();
+	}
 
 	if (manually_flush_ring_buffers)
 	{
