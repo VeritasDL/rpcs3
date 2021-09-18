@@ -800,6 +800,8 @@ namespace rsx
 		m_rsx_thread_exiting = true;
 		g_fxo->get<rsx::dma_manager>().join();
 		state += cpu_flag::exit;
+
+		g_mesh_dumper_mtx.unlock();
 	}
 
 	void thread::fill_scale_offset_data(void *buffer, bool flip_y) const
@@ -2484,7 +2486,7 @@ namespace rsx
 		}
 	}
 
-	#define MESHDUMP_DEBUG false
+	#define MESHDUMP_DEBUG true
 
 	void thread::flip(const display_flip_info_t& info)
 	{
@@ -2494,26 +2496,26 @@ namespace rsx
 
 			static u32 frame_idx{};
 
-			srand(time(NULL));
-			static int rand_ = rand();
+			static int dump_id = time(NULL) & 0xFFFFFF;
 
-			const std::string dump_dir = fmt::format("meshdump_%X", rand_);
+			const std::string dump_dir = fmt::format("meshdump_%X", dump_id);
 			std::filesystem::create_directory(dump_dir);
 
-			const std::string mtl_file_name = fmt::format("%s/rpcs3_objtest_%X_%d.mtl", dump_dir.c_str(), rand_, frame_idx);
+			const std::string mtl_file_name = fmt::format("%s/rpcs3_objtest_%X_%d.mtl", dump_dir.c_str(), dump_id, frame_idx);
 
-			std::ofstream file_obj(fmt::format("%s/rpcs3_objtest_%X_%d.obj", dump_dir.c_str(), rand_, frame_idx));
+			std::ofstream file_obj(fmt::format("%s/rpcs3_objtest_%X_%d.obj", dump_dir.c_str(), dump_id, frame_idx));
 			std::string obj_str;
 
 			obj_str += fmt::format("mtllib %s", mtl_file_name);
 
 			u32 vertex_index_base{ 1 };
+			u32 vertex_index_base_normal_offset{};
 
 			for (auto dump_idx = 0; dump_idx < g_mesh_dumper.dumps.size(); ++dump_idx)
 			{
 				auto& d = g_mesh_dumper.dumps[dump_idx];
 
-				obj_str += fmt::format("g %d_%X_clr:%d_blk:%d_shd:%d\n", dump_idx, rand_, d.clear_count, d.blocks.size(), d.shader_id);
+				obj_str += fmt::format("g %d_%X_clr:%d_blk:%d_shd:%d\n", dump_idx, dump_id, d.clear_count, d.blocks.size(), d.shader_id);
 
 #if MESHDUMP_DEBUG
 				if (auto it = g_dump_texture_info.find((u64)d.texture_raw_data_ptr); it != g_dump_texture_info.end())
@@ -2536,11 +2538,21 @@ namespace rsx
 					std::string hex_str;
 					const auto& block = d.blocks[i];
 					hex_str += fmt::format("# Block %d, %s\n", i, block.interleaved_range_info.to_str().c_str());
-					auto dst_ptr = block.vertex_data.data();
-					std::stringstream hex_ss;
-					neolib::hex_dump((const void*)dst_ptr, d.blocks[i].vertex_data.size(), hex_ss, 36, " # ");
-					hex_str += hex_ss.str();
-					//hex_str.pop_back(); // remove newline
+					if (i == 0 && (block.interleaved_range_info.attribute_stride == 36 || block.interleaved_range_info.attribute_stride == 28))
+					{
+						hex_str += " # skipping block data log\n";
+					}
+					else
+					{
+						auto dst_ptr = block.vertex_data.data();
+						std::stringstream hex_ss;
+						auto hex_width = block.interleaved_range_info.attribute_stride;
+						if (block.interleaved_range_info.attribute_stride <= 4)
+							hex_width = 64;
+						neolib::hex_dump((const void*)dst_ptr, d.blocks[i].vertex_data.size(), hex_ss, hex_width, " # ");
+						hex_str += hex_ss.str();
+						//hex_str.pop_back(); // remove newline
+					}
 					obj_str += hex_str;
 				}
 
@@ -2555,27 +2567,159 @@ namespace rsx
 					obj_str += hex_str;
 				}
 #endif
+
+				// TODO: move to structs
+
+				auto dot = [](const vec4le& v0, const vec4le& v1) -> float {
+					return v0.x * v1.x + v0.y * v1.y + v0.z * v1.z + v0.w * v1.w;
+				};
+
+				auto mult = [&](const vec4le& v0, const mat4& v1) -> vec4le {
+					return {
+					    dot(v0, v1[0]),
+					    dot(v0, v1[1]),
+					    dot(v0, v1[2]),
+					    dot(v0, v1[3])};
+				};
+
+				auto print_vec4 = [](vec4le v) {
+					return fmt::format("{ %5.2f, %5.2f, %5.2f, %5.2f }", v.x, v.y, v.z, v.w);
+				};
+
+				auto print_mat43 = [](vec4le _0, vec4le _1, vec4le _2) {
+					return fmt::format("# ((( %5.2f, %5.2f, %5.2f, %5.2f ),\n#   ( %5.2f, %5.2f, %5.2f, %5.2f ),\n#   ( %5.2f, %5.2f, %5.2f, %5.2f ),\n#   ( %5.2f, %5.2f, %5.2f, %5.2f )))",
+					    _0.x, _1.x, _2.x, 0.0,
+					    _0.y, _1.y, _2.y, 0.0,
+					    _0.z, _1.z, _2.z, 0.0,
+					    _0.w, _1.w, _2.w, 1.0);
+				};
+
+				auto print_mat4 = [](vec4le _0, vec4le _1, vec4le _2, vec4le _3) {
+					return fmt::format("# ((( %5.2f, %5.2f, %5.2f, %5.2f ),\n#   ( %5.2f, %5.2f, %5.2f, %5.2f ),\n#   ( %5.2f, %5.2f, %5.2f, %5.2f ),\n#   ( %5.2f, %5.2f, %5.2f, %5.2f )))",
+					    _0.x, _1.x, _2.x, _3.x,
+					    _0.y, _1.y, _2.y, _3.y,
+					    _0.z, _1.z, _2.z, _3.z,
+					    _0.w, _1.w, _2.w, _3.w);
+				};
+
+				mat4 xform_mat = {1, 0, 0, 0,
+				    0, 1, 0, 0,
+				    0, 0, 1, 0,
+				    0, 0, 0, 1};				
+				mat4 xform_mat2 = {1, 0, 0, 0,
+				    0, 1, 0, 0,
+				    0, 0, 1, 0,
+				    0, 0, 0, 1};
+				mat4 xform_mat3 = {1, 0, 0, 0,
+				    0, 1, 0, 0,
+				    0, 0, 1, 0,
+				    0, 0, 0, 1};
+
+				const bool has_bones = d.blocks.size() == 4;
+
+				if (d.vertex_constants_buffer.size() >= 17)
+				{
+					xform_mat = {d.vertex_constants_buffer[13],
+					    d.vertex_constants_buffer[14],
+					    d.vertex_constants_buffer[15],
+					    d.vertex_constants_buffer[16]};
+					if (has_bones && d.vertex_constants_buffer.size() >= 44)
+					{
+						xform_mat2 = {d.vertex_constants_buffer[32],
+						    d.vertex_constants_buffer[33],
+						    d.vertex_constants_buffer[34],
+                            {0, 0, 0, 1}};
+						xform_mat3 = {d.vertex_constants_buffer[0],
+						    d.vertex_constants_buffer[1],
+						    d.vertex_constants_buffer[2],
+						    d.vertex_constants_buffer[3]};
+					}
+				}
+
+				auto transform_pos = [&](const vec3& pos) -> vec3 {
+					vec4le out;
+					vec4le a = {pos.x, pos.y, pos.z, 1};
+					if (has_bones)
+					{
+						out = mult(a, xform_mat2);
+						out = mult(out, xform_mat);
+						out = mult(out, xform_mat3);
+					}
+					else
+					{
+						out = mult(a, xform_mat);
+					}
+					return {out.x * 0.01f, -out.z * 0.01f, out.y * 0.01f};
+				};
+
 				size_t vertex_count = 0;
+
+				enum class vertex_format_t
+				{
+					none,
+					_36,
+					_28
+				} vertex_format{};
 
 				if (!d.blocks.empty())
 				{
 					const auto& block0 = d.blocks[0];
-					if (block0.interleaved_range_info.interleaved && block0.interleaved_range_info.attribute_stride == 36)
+					if (block0.interleaved_range_info.interleaved)
 					{
-						const mesh_draw_vertex* vertex_data = (mesh_draw_vertex*)block0.vertex_data.data();
-						vertex_count = block0.vertex_data.size() / sizeof(mesh_draw_vertex);
-
-						for (auto i = 0; i < vertex_count; ++i)
+						if (block0.interleaved_range_info.attribute_stride == 36)
 						{
-							const auto& v = vertex_data[i];
+							static bool b1{true};
+							if (b1)
+							{
+								const mesh_draw_vertex* vertex_data = (mesh_draw_vertex*)block0.vertex_data.data();
+								vertex_count                        = block0.vertex_data.size() / sizeof(mesh_draw_vertex);
 
-							obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
-							obj_str += fmt::format("vn %f %f %f\n", (float)v.normal.x, (float)v.normal.z, (float)v.normal.y);
-							obj_str += fmt::format("vt %f %f\n", (float)v.uv.u, (float)v.uv.v);
+								for (auto i = 0; i < vertex_count; ++i)
+								{
+									const auto& v = vertex_data[i];
+		#if false && MESHDUMP_DEBUG
+									const auto posu = *(vec3u*)(&v.pos);
+									obj_str += fmt::format("v %f %f %f # %08X %08X %08X\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01,
+										posu.x_u, posu.y_u, posu.z_u);
+		#else
+									vec3 pos = transform_pos(v.pos);
+									//obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
+									obj_str += fmt::format("v %f %f %f\n", pos.x,pos.z,pos.y);
+		#endif
+									obj_str += fmt::format("vn %f %f %f\n", (float)v.normal.x, (float)v.normal.y, (float)v.normal.z);
+									obj_str += fmt::format("vt %f %f\n", (float)v.uv.u, (float)v.uv.v);
+								}
+								vertex_format = vertex_format_t::_36;
+							}
+						}
+						else if (block0.interleaved_range_info.attribute_stride == 28)
+						{
+							static bool b2{true};
+							if (b2)
+							{
+								const mesh_draw_vertex_28* vertex_data = (mesh_draw_vertex_28*)block0.vertex_data.data();
+								vertex_count                           = block0.vertex_data.size() / sizeof(mesh_draw_vertex_28);
+
+								for (auto i = 0; i < vertex_count; ++i)
+								{
+									const auto& v = vertex_data[i];
+#if false && MESHDUMP_DEBUG
+									const auto posu = *(vec3u*)(&v.pos);
+									obj_str += fmt::format("v %f %f %f # %08X %08X %08X\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01,
+										posu.x_u, posu.y_u, posu.z_u);
+#else
+									vec3 pos = transform_pos(v.pos);
+									//obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
+									obj_str += fmt::format("v %f %f %f\n", pos.x, pos.y, pos.z);
+#endif
+									obj_str += fmt::format("vt %f %f\n", (float)v.uv.u, (float)v.uv.v);
+								}
+
+								vertex_index_base_normal_offset += vertex_count;
+								vertex_format = vertex_format_t::_28;
+							}
 						}
 					}
-
-
 				}
 
 #if 0
@@ -2585,37 +2729,39 @@ namespace rsx
 					obj_str += fmt::format("vt %f %f\n", v.uv.u, v.uv.v);
 				}
 #endif
+
+#if MESHDUMP_DEBUG
+
+				if (d.vertex_constants_buffer.size() >= 4)
+				{
+					obj_str += fmt::format("# xform matrix at 0:\n%s\n",
+					    print_mat4(d.vertex_constants_buffer[0], d.vertex_constants_buffer[1], d.vertex_constants_buffer[2], d.vertex_constants_buffer[3]));
+				}
+				if (d.vertex_constants_buffer.size() >= 17)
+				{
+					obj_str += fmt::format("# xform matrix at 13:\n%s\n",
+					    print_mat4(d.vertex_constants_buffer[13], d.vertex_constants_buffer[14], d.vertex_constants_buffer[15], d.vertex_constants_buffer[16]));
+				}
+				if (d.vertex_constants_buffer.size() >= 44)
+				{
+					obj_str += fmt::format("# xform matrices at 32:\n%s\n%s\n%s\n%s\n",
+					    print_mat43(d.vertex_constants_buffer[32], d.vertex_constants_buffer[33], d.vertex_constants_buffer[34]),
+					    print_mat43(d.vertex_constants_buffer[35], d.vertex_constants_buffer[36], d.vertex_constants_buffer[37]),
+					    print_mat43(d.vertex_constants_buffer[38], d.vertex_constants_buffer[39], d.vertex_constants_buffer[40]),
+					    print_mat43(d.vertex_constants_buffer[41], d.vertex_constants_buffer[42], d.vertex_constants_buffer[43]));
+				}
+				// and vc[18].xy is tex anim
+				obj_str += "# VertexConstantsBuffer:\n";
+				for (auto i = 0; i < 60; i++)
+				{
+					obj_str += fmt::format(" # %02d: %s\n", i, print_vec4(d.vertex_constants_buffer[i]));
+				}
+#endif
+
 				if (vertex_count > 0)
 				{
 #if MESHDUMP_DEBUG
 					obj_str += fmt::format("# base is %d\n", vertex_index_base);
-#endif
-					// TODO: move to structs
-
-					auto print_vec4 = [](vec4le v) {
-						return fmt::format("{ %5.2f, %5.2f, %5.2f, %5.2f }", v.x, v.y, v.z, v.w);
-					};
-
-					auto print_mat4 = [](vec4le _0, vec4le _1, vec4le _2, vec4le _3) {
-						return fmt::format("# { %5.2f, %5.2f, %5.2f, %5.2f\n#   %5.2f, %5.2f, %5.2f, %5.2f\n#   %5.2f, %5.2f, %5.2f, %5.2f\n#   %5.2f, %5.2f, %5.2f, %5.2f }",
-						    _0.x, _1.x, _2.x, _3.x,
-						    _0.y, _1.y, _2.y, _3.y,
-						    _0.z, _1.z, _2.z, _3.z,
-						    _0.w, _1.w, _2.w, _3.w);
-					};
-
-#if 0
-					if (d.vertex_constants_buffer.size() >= 17)
-						obj_str += fmt::format("# xform matrix:\n%s\n",
-							print_mat4(d.vertex_constants_buffer[13], d.vertex_constants_buffer[14], d.vertex_constants_buffer[15], d.vertex_constants_buffer[16]));
-#else
-#if MESHDUMP_DEBUG
-					obj_str += "# VertexConstantsBuffer:\n";
-					for (auto i = 0; i < 60; i++)
-					{
-						obj_str += fmt::format(" # %02d: %s\n", i, print_vec4(d.vertex_constants_buffer[i]));
-					}
-#endif
 #endif
 
 					u32 min_idx = *std::min_element(d.indices.begin(), d.indices.end());
@@ -2624,18 +2770,38 @@ namespace rsx
 						obj_str += fmt::format("# warning: min_idx is %d\n", min_idx);
 #endif
 
-					for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
+					if (vertex_format == vertex_format_t::_28)
 					{
-						const auto f0 = vertex_index_base + d.indices[tri_idx * 3 + 0] - min_idx;
-						const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx;
-						const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx;
-						obj_str += fmt::format("f %d/%d/%d %d/%d/%d %d/%d/%d\n",
-							f0, f0, f0,
-						    f1, f1, f1,
-							f2, f2, f2);
+						for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
+						{
+							const auto f0 = vertex_index_base + d.indices[tri_idx * 3 + 0] - min_idx;
+							const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx;
+							const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx;
+							obj_str += fmt::format("f %d/%d %d/%d %d/%d\n",
+							    f0, f0,
+							    f1, f1,
+							    f2, f2);
+						}
+					}
+					else if (vertex_format == vertex_format_t::_36)
+					{
+						for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
+						{
+							const auto f0 = vertex_index_base + d.indices[tri_idx * 3 + 0] - min_idx;
+							const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx;
+							const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx;
+							obj_str += fmt::format("f %d/%d/%d %d/%d/%d %d/%d/%d\n",
+							    f0, f0, f0 - vertex_index_base_normal_offset,
+							    f1, f1, f1 - vertex_index_base_normal_offset,
+							    f2, f2, f2 - vertex_index_base_normal_offset);
+						}
 					}
 
 					g_dump_texture_info[(u64)d.texture_raw_data_ptr].is_used = true;
+				}
+				else
+				{
+					obj_str += fmt::format("# warning: unsupported, no vertices will be emitted\n");
 				}
 
 				vertex_index_base += vertex_count;
@@ -2661,7 +2827,7 @@ namespace rsx
 
 					const auto src = (const unsigned char*)((tex_raw_data_ptr_t)raw_data_ptr)->data();
 
-					if (src == 0 || src == (const unsigned char *const) 0xf) // hacky af
+					if (src == 0 || (u64)src == 0xf || ((u64)src & 0x8000000000000000)) // hacky af
 					{
 						mtl_str += fmt::format("# warning: skipped texture, src is 0");
 						continue;
@@ -2673,6 +2839,7 @@ namespace rsx
 					bool is_fully_opaque = true;
 					// argb -> rgba
 					// also a sly specific thing, it's PS2 port, and GS's RGBA reg alpha is weird like that
+#if 1
 					for (auto i = 0; i < decompressed_data.size() / 4; ++i)
 					{
 						u32* ptr = &((u32*)decompressed_data.data())[i];
@@ -2693,13 +2860,16 @@ namespace rsx
 							is_fully_opaque = false;
 						}
 					}
+#endif
 
 					mtl_str += fmt::format("newmtl 0x%X\n", raw_data_ptr);
 					mtl_str += fmt::format("map_Kd %s\n", tex_file_name.c_str());
+					mtl_str += fmt::format("Ns 10\n"); // TODO: check
 					if (!is_fully_opaque)
 						mtl_str += fmt::format("map_D %s\n", tex_file_name.c_str());
 
 					work_buf.resize(decompressed_data.size());
+					// copy flipped on Y
 					const auto stride = info_.width * 4;
 					for (auto i = 0; i < info_.height; i++)
 					{
