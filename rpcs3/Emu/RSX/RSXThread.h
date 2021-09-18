@@ -44,6 +44,10 @@ struct vec3
 {
 	be_t<float> x, y, z;
 };
+struct vec3u
+{
+	u32 x_u, y_u, z_u;
+};
 struct vec4
 {
 	be_t<float> x, y, z, w;
@@ -52,6 +56,7 @@ struct vec4le
 {
 	float x, y, z, w;
 };
+using mat4 = std::array<vec4le, 4>;
 struct mesh_draw_vertex
 {
 	vec3 pos;
@@ -60,6 +65,15 @@ struct mesh_draw_vertex
 	u32 unk0;
 };
 static_assert(sizeof(mesh_draw_vertex) == 36);
+
+struct mesh_draw_vertex_28
+{
+	vec3 pos;
+	u32 vertex_color_maybe;
+	u32 unk0;
+	vec2 uv;
+};
+static_assert(sizeof(mesh_draw_vertex_28) == 0x1C);
 
 namespace rsx
 {
