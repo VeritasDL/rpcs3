@@ -3263,6 +3263,11 @@ bool ppu_interpreter::CROR(ppu_thread& ppu, ppu_opcode_t op)
 
 bool ppu_interpreter::BCCTR(ppu_thread& ppu, ppu_opcode_t op)
 {
+	//if (ppu.cia == 0x12bf6c)
+	//{
+	//	ppu_log.error(">> BCCTR %X CIA: %X, LR %X", static_cast<u32>(ppu.ctr) & ~3, ppu.cia, ppu.lr);
+	//}
+
 	if (op.lk) ppu.lr = ppu.cia + 4;
 
 	if (op.bo & 0x10 || ppu.cr[op.bi] == ((op.bo & 0x8) != 0))
@@ -4612,6 +4617,12 @@ bool ppu_interpreter::STW(ppu_thread& ppu, ppu_opcode_t op)
 	{
 		vm::reservation_update(vm::cast(addr));
 	}
+
+	//static u32 addr_to_check = 0;//0x788f70 + 0x4654;
+	//if (addr == addr_to_check)
+	//{
+	//	ppu_log.error(">> CIA: %X, LR %X", ppu.cia, ppu.lr);
+	//}
 
 	return true;
 }
