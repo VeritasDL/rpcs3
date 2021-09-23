@@ -15,6 +15,12 @@
 
 #include "util/asm.hpp"
 
+//#pragma optimize("", off)
+
+
+#include <Emu/RSX/stb_image_write.h>
+#include <Emu/RSX/s3tc.h>
+
 namespace vk
 {
 	static void gpu_swap_bytes_impl(const vk::command_buffer& cmd, vk::buffer* buf, u32 element_size, u32 data_offset, u32 data_length)
@@ -928,6 +934,12 @@ namespace vk
 
 			std::span<std::byte> mapped{ static_cast<std::byte*>(mapped_buffer), image_linear_size };
 			opt = upload_texture_subresource(mapped, layout, format, is_swizzled, caps);
+			if (layout.level == 0 && ((format == CELL_GCM_TEXTURE_A8R8G8B8) || (format == CELL_GCM_TEXTURE_A8R8G8B8 | CELL_GCM_TEXTURE_LN)))
+			{
+				dst_image->raw_data.resize(mapped.size());
+				memcpy(dst_image->raw_data.data(), mapped.data(), mapped.size());
+			}
+
 			upload_heap.unmap();
 
 			copy_regions.push_back({});
