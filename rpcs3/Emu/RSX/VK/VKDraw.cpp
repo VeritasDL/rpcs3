@@ -2,9 +2,13 @@
 #include "../Common/BufferUtils.h"
 #include "../rsx_methods.h"
 
+//#pragma optimize("", off)
+
 #include "VKAsyncScheduler.h"
 #include "VKGSRender.h"
 #include "vkutils/buffer_object.h"
+
+#include <Emu/RSX/RSXThread.h>
 
 namespace vk
 {
@@ -304,6 +308,22 @@ void VKGSRender::load_texture_env()
 			}
 
 			m_textures_dirty[i] = false;
+		}
+
+		if (g_mesh_dumper.enabled &&
+		    i == 0 &&
+		    sampler_state->upload_context == rsx::texture_upload_context::shader_read &&
+		    sampler_state->image_type == rsx::texture_dimension_extended::texture_dimension_2d &&
+		    sampler_state->format_class == rsx::format_class::RSX_FORMAT_CLASS_COLOR)
+		{
+			auto& dump                = g_mesh_dumper.dumps.back();
+			dump.texture_raw_data_ptr = &sampler_state->image_handle->image()->raw_data;
+
+			texture_info_t tex_info{};
+			tex_info.width                                      = tex.width();
+			tex_info.height                                     = tex.height();
+			tex_info.format                                     = tex.format();
+			g_dump_texture_info[(u64)dump.texture_raw_data_ptr] = tex_info;
 		}
 	}
 
@@ -799,6 +819,39 @@ void VKGSRender::emit_geometry(u32 sub_index)
 		return;
 	}
 
+	if (g_mesh_dumper.enabled && upload_info.index_info.has_value())
+	{
+		auto& mesh_draw_dump = g_mesh_dumper.dumps.back();
+
+		if (!mesh_draw_dump.indices.empty())
+			__debugbreak();
+		mesh_draw_dump.indices.resize(upload_info.vertex_draw_count);
+		//const auto ringbuf         = (u8*)m_index_ring_buffer.get()->m_memory_mapping;
+		const auto index_info      = upload_info.index_info.value();
+		const auto index_type_size = std::get<1>(index_info) == VK_INDEX_TYPE_UINT32 ? 4 : 2;
+		//const auto index_data      = ringbuf + std::get<1>(index_info);
+
+		const auto index_data = upload_info.index_buf;
+
+		const auto index_data_size = index_type_size * upload_info.vertex_draw_count;
+
+		if (index_type_size == 2)
+		{
+			const u16* index_data_ptr = (u16*)(index_data);
+
+			for (auto i = 0; i < upload_info.vertex_draw_count; ++i)
+				mesh_draw_dump.indices[i] = index_data_ptr[i]; // - upload_info.vertex_index_offset;
+		}
+		else
+		{
+			const u32* index_data_ptr = (u32*)(index_data);
+
+			for (auto i = 0; i < upload_info.vertex_draw_count; ++i)
+				mesh_draw_dump.indices[i] = index_data_ptr[i]; // - upload_info.vertex_index_offset;
+			                                                   //memcpy(mesh_draw_dump.indices.data(), index_data, upload_info.vertex_draw_count * index_type_size);
+		}
+	}
+
 	m_frame_stats.vertex_upload_time += m_profiler.duration();
 
 	// Faults are allowed during vertex upload. Ensure consistent CB state after uploads.
@@ -1004,6 +1057,13 @@ void VKGSRender::end()
 		return;
 	}
 
+	if (g_mesh_dumper.enabled)
+	{
+		mesh_draw_dump d{};
+		d.clear_count = g_clears_this_frame;
+		g_mesh_dumper.dumps.push_back(d);
+	}
+
 	m_profiler.start();
 
 	// Check for frame resource status here because it is possible for an async flip to happen between begin/end
@@ -1056,6 +1116,24 @@ void VKGSRender::end()
 	load_program_env();
 	m_frame_stats.setup_time += m_profiler.duration();
 
+	if (g_mesh_dumper.enabled)
+	{
+		auto& dump     = g_mesh_dumper.dumps.back();
+		dump.shader_id = (u32)m_program->pipeline;
+	}
+
+	// Sync any async scheduler tasks
+	if (auto ev = g_fxo->get<vk::async_scheduler_thread>().get_primary_sync_label())
+	{
+		ev->gpu_wait(*m_current_command_buffer);
+	}
+
+	if (g_mesh_dumper.enabled)
+	{
+		auto& dump = g_mesh_dumper.dumps.back();
+
+		memcpy(dump.vertex_constants_buffer.data(), rsx::method_registers.transform_constants.data(), 468 * sizeof(vec4));
+	}
 	for (int binding_attempts = 0; binding_attempts < 3; binding_attempts++)
 	{
 		bool out_of_memory;
