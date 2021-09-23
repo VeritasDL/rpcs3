@@ -31,46 +31,48 @@
 #include <map>
 #include <mutex>
 
+#include <Emu/RSX/linalg.h>
+using namespace linalg::aliases;
+
 extern atomic_t<bool> g_user_asked_for_frame_capture;
 extern rsx::frame_trace_data frame_debug;
 extern rsx::frame_capture_data frame_capture;
 
-struct vec2
+struct vec2be
 {
 	be_t<float> u, v;
 };
-struct vec3
+struct vec3be
 {
 	be_t<float> x, y, z;
 };
-struct vec3u
+struct uvec3
 {
 	u32 x_u, y_u, z_u;
 };
-struct vec4
+struct vec4be
 {
 	be_t<float> x, y, z, w;
 };
-struct vec4le
-{
-	float x, y, z, w;
-};
-using mat4 = std::array<vec4le, 4>;
+using vec3 = float3;
+using vec4 = float4;
+using mat4 = float4x4;
+using mat4 = float4x4;
 struct mesh_draw_vertex
 {
-	vec3 pos;
-	vec3 normal;
-	vec2 uv;
+	vec3be pos;
+	vec3be normal;
+	vec2be uv;
 	u32 unk0;
 };
 static_assert(sizeof(mesh_draw_vertex) == 36);
 
 struct mesh_draw_vertex_28
 {
-	vec3 pos;
+	vec3be pos;
 	u32 vertex_color_maybe;
 	u32 unk0;
-	vec2 uv;
+	vec2be uv;
 };
 static_assert(sizeof(mesh_draw_vertex_28) == 0x1C);
 
@@ -116,7 +118,7 @@ struct mesh_draw_dump
 	std::vector<u8> volatile_data;
 	std::vector<mesh_draw_dump_block> blocks;
 	std::vector<u32> indices;
-	std::array<vec4le, 468> vertex_constants_buffer;
+	std::array<float4, 468> vertex_constants_buffer;
 	u32 shader_id;
 };
 struct mesh_dumper
