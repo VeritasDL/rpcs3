@@ -637,14 +637,23 @@ namespace gl
 				}
 				case texture::target::texture2D:
 				{
-					if (layout.level == 0 && format == CELL_GCM_TEXTURE_COMPRESSED_DXT45 /* && !dumped.contains((u64)dst->raw_data.data()) */)
+					if (layout.level == 0)
 					{
+						if (format == CELL_GCM_TEXTURE_COMPRESSED_DXT45)
+						{
+							const auto compr_size = (u64)layout.width_in_block * layout.height_in_block * 16;
+							dst->raw_data.resize(compr_size);
+							memcpy(dst->raw_data.data(), staging_buffer.data(), compr_size);
+						}
+						else
+						{
+							__debugbreak();
+						}
+
+						// && !dumped.contains((u64)dst->raw_data.data()) */)
+
 						//todo: hacky
 						//static std::set<u64> dumped;
-
-						const auto compr_size = (u64)layout.width_in_block * layout.height_in_block * 16;
-						dst->raw_data.resize(compr_size);
-						memcpy(dst->raw_data.data(), staging_buffer.data(), compr_size);
 
 						//if (!stbi_write_png(fmt::format("src_textest_0x%X.png", (u64)dst->raw_data.data()).c_str(), layout.width_in_texel, layout.height_in_texel, 4, decompressed_data.data(), (u32)layout.width_in_texel * 4))
 							//__debugbreak();
@@ -767,6 +776,13 @@ namespace gl
 					}
 
 					dst->copy_from(out_pointer, static_cast<texture::format>(gl_format), static_cast<texture::type>(gl_type), layout.level, region, unpack_settings);
+				}
+
+				if (layout.level == 0 && ((format == CELL_GCM_TEXTURE_A8R8G8B8) || (format == CELL_GCM_TEXTURE_A8R8G8B8 | CELL_GCM_TEXTURE_LN)))
+				{
+					const auto size = (u64)layout.width_in_texel * layout.height_in_texel * 4;
+					dst->raw_data.resize(size);
+					memcpy(dst->raw_data.data(), staging_buffer.data(), size);
 				}
 			}
 
