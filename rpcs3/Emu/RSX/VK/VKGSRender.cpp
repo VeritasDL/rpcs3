@@ -1236,6 +1236,8 @@ void VKGSRender::clear_surface(u32 mask)
 {
 	if (skip_current_frame || swapchain_unavailable) return;
 
+	g_clears_this_frame++;
+
 	// If stencil write mask is disabled, remove clear_stencil bit
 	if (!rsx::method_registers.stencil_mask()) mask &= ~RSX_GCM_CLEAR_STENCIL_BIT;
 

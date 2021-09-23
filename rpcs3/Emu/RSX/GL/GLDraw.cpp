@@ -1,8 +1,6 @@
 #include "stdafx.h"
 
-#pragma optimize("", off)
-
-#include <fstream>
+//#pragma optimize("", off)
 
 #include "GLGSRender.h"
 #include "../rsx_methods.h"
@@ -694,13 +692,6 @@ void GLGSRender::begin()
 
 void GLGSRender::end()
 {
-	if (g_mesh_dumper.enabled)
-	{
-		mesh_draw_dump d{};
-		d.clear_count = g_clears_this_frame;
-		g_mesh_dumper.dumps.push_back(d);
-	}
-
 	m_profiler.start();
 
 	if (skip_current_frame || !framebuffer_status_valid || cond_render_ctrl.disable_rendering())
@@ -715,6 +706,14 @@ void GLGSRender::end()
 		analyse_current_rsx_pipeline();
 	}
 
+	if (g_mesh_dumper.enabled)
+	{
+		mesh_draw_dump d{};
+		d.clear_count = g_clears_this_frame;
+		g_mesh_dumper.dumps.push_back(d);
+	}
+
+	analyse_current_rsx_pipeline();
 	m_frame_stats.setup_time += m_profiler.duration();
 
 	// Active texture environment is used to decode shaders

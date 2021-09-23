@@ -28,7 +28,6 @@ namespace gl
 
 	struct vertex_upload_info
 	{
-		std::byte* index_buf;
 		u32 vertex_draw_count;
 		u32 allocated_vertex_count;
 		u32 first_vertex;
@@ -36,7 +35,8 @@ namespace gl
 		u32 vertex_index_offset;
 		u32 persistent_mapping_offset;
 		u32 volatile_mapping_offset;
-		std::optional<std::tuple<GLenum, u32> > index_info;
+		std::optional<std::tuple<GLenum, u32>> index_info;
+		std::byte* index_buf;
 	};
 
 	struct work_item
