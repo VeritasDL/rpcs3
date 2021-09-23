@@ -43,6 +43,7 @@ namespace vk
 		u32 persistent_window_offset;
 		u32 volatile_window_offset;
 		std::optional<std::tuple<VkDeviceSize, VkIndexType>> index_info;
+		std::byte* index_buf;
 	};
 }
 
