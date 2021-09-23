@@ -34,6 +34,7 @@
 #include <thread>
 #include <unordered_set>
 #include <cfenv>
+#include <cmath>
 
 class GSRender;
 
@@ -2539,7 +2540,8 @@ namespace rsx
 		}
 	}
 
-	#define MESHDUMP_DEBUG true
+#define MESHDUMP_DEBUG true
+#define MESHDUMP_POSED true
 
 	void thread::flip(const display_flip_info_t& info)
 	{
@@ -2559,7 +2561,7 @@ namespace rsx
 			std::ofstream file_obj(fmt::format("%s/rpcs3_objtest_%X_%d.obj", dump_dir.c_str(), dump_id, frame_idx));
 			std::string obj_str;
 
-			obj_str += fmt::format("mtllib %s", mtl_file_name);
+			obj_str += fmt::format("mtllib rpcs3_objtest_%X_%d.mtl\n", dump_id, frame_idx);
 
 			u32 vertex_index_base{ 1 };
 			u32 vertex_index_base_normal_offset{};
@@ -2623,11 +2625,11 @@ namespace rsx
 
 				// TODO: move to structs
 
-				auto dot = [](const vec4le& v0, const vec4le& v1) -> float {
-					return v0.x * v1.x + v0.y * v1.y + v0.z * v1.z + v0.w * v1.w;
-				};
+				//auto dot = [](const float4& v0, const float4& v1) -> float {
+				//	return v0.x * v1.x + v0.y * v1.y + v0.z * v1.z + v0.w * v1.w;
+				//};
 
-				auto mult = [&](const vec4le& v0, const mat4& v1) -> vec4le {
+				auto mul = [&](const float4& v0, const mat4& v1) -> float4 {
 					return {
 					    dot(v0, v1[0]),
 					    dot(v0, v1[1]),
@@ -2635,11 +2637,27 @@ namespace rsx
 					    dot(v0, v1[3])};
 				};
 
-				auto print_vec4 = [](vec4le v) {
-					return fmt::format("{ %5.2f, %5.2f, %5.2f, %5.2f }", v.x, v.y, v.z, v.w);
+				auto mul43 = [&](const float4& v0, const mat4& v1) -> float4 {
+					return {
+					    dot(v0, v1[0]),
+					    dot(v0, v1[1]),
+					    dot(v0, v1[2]),
+					    1};
 				};
 
-				auto print_mat43 = [](vec4le _0, vec4le _1, vec4le _2) {
+				auto mul_scalar_mat4 = [&](float f, const mat4& m) -> mat4 {
+					return {
+					    {m[0].x * f, m[0].y * f, m[0].y * f, m[0].z * f},
+					    {m[1].x * f, m[1].y * f, m[1].y * f, m[1].z * f},
+					    {m[2].x * f, m[2].y * f, m[2].y * f, m[2].z * f},
+					    {m[3].x * f, m[3].y * f, m[3].y * f, m[3].z * f}};
+				};				
+
+				auto print_vec4 = [](float4 v) {
+					return fmt::format("# { %5.2f, %5.2f, %5.2f, %5.2f }", v.x, v.y, v.z, v.w);
+				};
+
+				auto print_mat43 = [](float4 _0, float4 _1, float4 _2) {
 					return fmt::format("# ((( %5.2f, %5.2f, %5.2f, %5.2f ),\n#   ( %5.2f, %5.2f, %5.2f, %5.2f ),\n#   ( %5.2f, %5.2f, %5.2f, %5.2f ),\n#   ( %5.2f, %5.2f, %5.2f, %5.2f )))",
 					    _0.x, _1.x, _2.x, 0.0,
 					    _0.y, _1.y, _2.y, 0.0,
@@ -2647,7 +2665,7 @@ namespace rsx
 					    _0.w, _1.w, _2.w, 1.0);
 				};
 
-				auto print_mat4 = [](vec4le _0, vec4le _1, vec4le _2, vec4le _3) {
+				auto print_mat4 = [](float4 _0, float4 _1, float4 _2, float4 _3) {
 					return fmt::format("# ((( %5.2f, %5.2f, %5.2f, %5.2f ),\n#   ( %5.2f, %5.2f, %5.2f, %5.2f ),\n#   ( %5.2f, %5.2f, %5.2f, %5.2f ),\n#   ( %5.2f, %5.2f, %5.2f, %5.2f )))",
 					    _0.x, _1.x, _2.x, _3.x,
 					    _0.y, _1.y, _2.y, _3.y,
@@ -2655,54 +2673,88 @@ namespace rsx
 					    _0.w, _1.w, _2.w, _3.w);
 				};
 
-				mat4 xform_mat = {1, 0, 0, 0,
-				    0, 1, 0, 0,
-				    0, 0, 1, 0,
-				    0, 0, 0, 1};				
-				mat4 xform_mat2 = {1, 0, 0, 0,
-				    0, 1, 0, 0,
-				    0, 0, 1, 0,
-				    0, 0, 0, 1};
-				mat4 xform_mat3 = {1, 0, 0, 0,
-				    0, 1, 0, 0,
-				    0, 0, 1, 0,
-				    0, 0, 0, 1};
+				auto print_mat4_ = [&](mat4 m) {
+					return print_mat4(m[0], m[1], m[2], m[3]);
+				};
+
+				mat4 xform_mat = linalg::identity;
+				mat4 bone_mats[4];
 
 				const bool has_bones = d.blocks.size() == 4;
 
-				if (d.vertex_constants_buffer.size() >= 17)
+				const auto& vcb = d.vertex_constants_buffer;
+
+				if (vcb.size() >= 17)
 				{
-					xform_mat = {d.vertex_constants_buffer[13],
-					    d.vertex_constants_buffer[14],
-					    d.vertex_constants_buffer[15],
-					    d.vertex_constants_buffer[16]};
-					if (has_bones && d.vertex_constants_buffer.size() >= 44)
+					xform_mat = {vcb[13], vcb[14], vcb[15], vcb[16]};
+					if (has_bones && vcb.size() >= 44)
 					{
-						xform_mat2 = {d.vertex_constants_buffer[32],
-						    d.vertex_constants_buffer[33],
-						    d.vertex_constants_buffer[34],
-                            {0, 0, 0, 1}};
-						xform_mat3 = {d.vertex_constants_buffer[0],
-						    d.vertex_constants_buffer[1],
-						    d.vertex_constants_buffer[2],
-						    d.vertex_constants_buffer[3]};
+						bone_mats[0] = {vcb[32], vcb[33], vcb[34], {0, 0, 0, 1}};
+						bone_mats[1] = {vcb[35], vcb[36], vcb[37], {0, 0, 0, 1}};
+						bone_mats[2] = {vcb[38], vcb[39], vcb[40], {0, 0, 0, 1}};
+						bone_mats[3] = {vcb[41], vcb[42], vcb[43], {0, 0, 0, 1}};
 					}
 				}
 
-				auto transform_pos = [&](const vec3& pos) -> vec3 {
-					vec4le out;
-					vec4le a = {pos.x, pos.y, pos.z, 1};
+				auto transform_pos = [&](u32 idx, const vec3be& pos, bool use_xform, const mesh_draw_dump_block* weights_block) -> vec3 {
+					vec4 out;
+					vec4 a = {pos.x, pos.y, pos.z, 1};
 					if (has_bones)
 					{
-						out = mult(a, xform_mat2);
-						out = mult(out, xform_mat);
-						out = mult(out, xform_mat3);
+#if MESHDUMP_POSED
+						const vec4be* weight_array = (vec4be*)weights_block->vertex_data.data();
+						if (idx * 16 < weights_block->vertex_data.size())
+						{
+							const vec4be weights_be = weight_array[idx];
+							const vec4 weights      = {weights_be.x, weights_be.y, weights_be.z, weights_be.w};
+
+							const vec4 r0 = weights.x * bone_mats[0][0] + weights.y * bone_mats[1][0] + weights.z * bone_mats[2][0] + weights.w * bone_mats[3][0];
+							const vec4 r1 = weights.x * bone_mats[0][1] + weights.y * bone_mats[1][1] + weights.z * bone_mats[2][1] + weights.w * bone_mats[3][1];
+							const vec4 r2 = weights.x * bone_mats[0][2] + weights.y * bone_mats[1][2] + weights.z * bone_mats[2][2] + weights.w * bone_mats[3][2];
+
+							out = {
+							    dot(a, r0),
+							    dot(a, r1),
+							    dot(a, r2),
+							    1};
+
+#if MESHDUMP_DEBUG
+							obj_str += fmt::format("# weights: %f %f %f %f, rvecs: %s\n%s\n%s\n# out: %s\n",
+							    weights[0], weights[1], weights[2], weights[3], print_vec4(r0), print_vec4(r1), print_vec4(r2), print_vec4(out));
+#endif
+
+							if (isnan(out.x) || isnan(out.y) || isnan(out.z) || isinf(out.x) || isinf(out.y) || isinf(out.z))
+							{
+								// TODO: don't emit these
+								obj_str += "# bad weights, defaulting to first bone\n";
+								out = {
+								    dot(a, bone_mats[0][0]),
+								    dot(a, bone_mats[0][1]),
+								    dot(a, bone_mats[0][2]),
+								    1};
+							}
+
+						}
+						else
+						{
+							obj_str += fmt::format("# warning: weights out of bounds\n");
+							//__debugbreak();
+						}
+						out = mul(out, xform_mat);
+#else
+						out = mul(a, xform_mat);
+#endif
+
+					}
+					else if (use_xform)
+					{
+						out = mul(a, xform_mat);
 					}
 					else
 					{
-						out = mult(a, xform_mat);
+						out = a;
 					}
-					return {out.x * 0.01f, -out.z * 0.01f, out.y * 0.01f};
+					return {out.x * 0.01f, out.z * 0.01f, out.y * 0.01f};
 				};
 
 				size_t vertex_count = 0;
@@ -2717,6 +2769,7 @@ namespace rsx
 				if (!d.blocks.empty())
 				{
 					const auto& block0 = d.blocks[0];
+					const auto* block1_weights = has_bones ? &d.blocks[1] : nullptr;
 					if (block0.interleaved_range_info.interleaved)
 					{
 						if (block0.interleaved_range_info.attribute_stride == 36)
@@ -2730,15 +2783,15 @@ namespace rsx
 								for (auto i = 0; i < vertex_count; ++i)
 								{
 									const auto& v = vertex_data[i];
-		#if false && MESHDUMP_DEBUG
-									const auto posu = *(vec3u*)(&v.pos);
+#if false && MESHDUMP_DEBUG
+									const auto posu = *(uvec3*)(&v.pos);
 									obj_str += fmt::format("v %f %f %f # %08X %08X %08X\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01,
 										posu.x_u, posu.y_u, posu.z_u);
-		#else
-									vec3 pos = transform_pos(v.pos);
+#else
+									vec3 pos = transform_pos(i, v.pos, true, block1_weights);
 									//obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
-									obj_str += fmt::format("v %f %f %f\n", pos.x,pos.z,pos.y);
-		#endif
+									obj_str += fmt::format("v %f %f %f\n", pos.x, pos.z, pos.y);
+#endif
 									obj_str += fmt::format("vn %f %f %f\n", (float)v.normal.x, (float)v.normal.y, (float)v.normal.z);
 									obj_str += fmt::format("vt %f %f\n", (float)v.uv.u, (float)v.uv.v);
 								}
@@ -2757,11 +2810,11 @@ namespace rsx
 								{
 									const auto& v = vertex_data[i];
 #if false && MESHDUMP_DEBUG
-									const auto posu = *(vec3u*)(&v.pos);
+									const auto posu = *(uvec3*)(&v.pos);
 									obj_str += fmt::format("v %f %f %f # %08X %08X %08X\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01,
 										posu.x_u, posu.y_u, posu.z_u);
 #else
-									vec3 pos = transform_pos(v.pos);
+									vec3 pos = transform_pos(i, v.pos, false, block1_weights);
 									//obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
 									obj_str += fmt::format("v %f %f %f\n", pos.x, pos.y, pos.z);
 #endif
@@ -2784,6 +2837,7 @@ namespace rsx
 #endif
 
 #if MESHDUMP_DEBUG
+				obj_str += fmt::format("# transform_branch_bits: 0x%08X\n", rsx::method_registers.transform_branch_bits());
 
 				if (d.vertex_constants_buffer.size() >= 4)
 				{
@@ -2866,10 +2920,10 @@ namespace rsx
 			std::string mtl_str;
 
 			std::vector<u8> work_buf;
-			std::vector<u8> decompressed_data;
+			std::vector<u8> final_data;
 			for (auto [raw_data_ptr, info_] : g_dump_texture_info)
 			{
-				if (info_.is_used && info_.format == CELL_GCM_TEXTURE_COMPRESSED_DXT45)
+				if (info_.is_used)
 				{
 					mtl_str += fmt::format("newmtl 0x%X\n", (u64)raw_data_ptr);
 
@@ -2882,38 +2936,71 @@ namespace rsx
 
 					if (src == 0 || (u64)src == 0xf || ((u64)src & 0x8000000000000000)) // hacky af
 					{
-						mtl_str += fmt::format("# warning: skipped texture, src is 0");
+						mtl_str += fmt::format("# warning: skipped texture, src is 0\n");
 						continue;
 					}
 
-					decompressed_data.resize(info_.width * info_.height * 4);
-					BlockDecompressImageDXT5(info_.width, info_.height, src, (unsigned long*)decompressed_data.data());
+					final_data.resize(info_.width * info_.height * 4);
 
 					bool is_fully_opaque = true;
-					// argb -> rgba
-					// also a sly specific thing, it's PS2 port, and GS's RGBA reg alpha is weird like that
-#if 1
-					for (auto i = 0; i < decompressed_data.size() / 4; ++i)
+
+					if (info_.format == CELL_GCM_TEXTURE_COMPRESSED_DXT45)
 					{
-						u32* ptr = &((u32*)decompressed_data.data())[i];
-						const u32 v = *ptr;
-						if ((v & 0x000000FF) == 0x00000080)
+						BlockDecompressImageDXT5(info_.width, info_.height, src, (unsigned long*)final_data.data());
+						for (auto i = 0; i < final_data.size() / 4; ++i)
 						{
-							*ptr = (((v & 0xFF000000) >> 24) |
-							       ((v & 0x00FF0000) >> 8) |
-							       ((v & 0x0000FF00) << 8) |
-							       0xFF000000);
-						}
-						else
-						{
-							*ptr = (((v & 0xFF000000) >> 24) |
-							       ((v & 0x00FF0000) >> 8) |
-							       ((v & 0x0000FF00) << 8) |
-							       (((v & 0x000000FF) * 2) << 24));
-							is_fully_opaque = false;
+							u32* ptr    = &((u32*)final_data.data())[i];
+							const u32 v = *ptr;
+							if ((v & 0x000000FF) == 0x00000080)
+							{
+								*ptr = (((v & 0xFF000000) >> 24) |
+								        ((v & 0x00FF0000) >> 8) |
+								        ((v & 0x0000FF00) << 8) |
+								        0xFF000000);
+							}
+							else
+							{
+								*ptr = (((v & 0xFF000000) >> 24) |
+                                        ((v & 0x00FF0000) >> 8) |
+                                        ((v & 0x0000FF00) << 8) |
+                                        (((v & 0x000000FF) * 2) << 24));
+								is_fully_opaque = false;
+							}
 						}
 					}
-#endif
+					else if ((info_.format & CELL_GCM_TEXTURE_A8R8G8B8) == CELL_GCM_TEXTURE_A8R8G8B8)
+					{
+						memcpy(final_data.data(), src, info_.width * info_.height * 4);
+						for (auto i = 0; i < final_data.size() / 4; ++i)
+						{
+							u32* ptr    = &((u32*)final_data.data())[i];
+							*ptr     = _byteswap_ulong(*ptr);
+							const u32 v = *ptr;
+							//is_fully_opaque &= ((v & 0xFF000000) == 0x80000000);
+							if ((v & 0x000000FF) == 0x00000080)
+							{
+								*ptr = (((v & 0xFF000000) >> 8) |
+								        ((v & 0x00FF0000) >> 8) |
+								        ((v & 0x0000FF00) >> 8) |
+								        0xFF000000);
+							}
+							else
+							{
+								*ptr = (((v & 0xFF000000) >> 8) |
+                                        ((v & 0x00FF0000) >> 8) |
+                                        ((v & 0x0000FF00) >> 8) |
+                                        (((v & 0x000000FF) * 2) << 24));
+								is_fully_opaque = false;
+							}
+						}
+					}
+					//else
+					//{
+					//	mtl_str += fmt::format("# warning: skipped texture, format is 0x%X\n", info_.format);
+					//}
+
+					// argb -> rgba
+					// also a sly specific thing, it's PS2 port, and GS's RGBA reg alpha is weird like that
 
 					mtl_str += fmt::format("newmtl 0x%X\n", raw_data_ptr);
 					mtl_str += fmt::format("map_Kd %s\n", tex_file_name.c_str());
@@ -2921,12 +3008,12 @@ namespace rsx
 					if (!is_fully_opaque)
 						mtl_str += fmt::format("map_D %s\n", tex_file_name.c_str());
 
-					work_buf.resize(decompressed_data.size());
+					work_buf.resize(final_data.size());
 					// copy flipped on Y
 					const auto stride = info_.width * 4;
 					for (auto i = 0; i < info_.height; i++)
 					{
-						memcpy(work_buf.data() + i * stride, decompressed_data.data() + (decompressed_data.size() - ((i+1) * stride)), stride);
+						memcpy(work_buf.data() + i * stride, final_data.data() + (final_data.size() - ((i+1) * stride)), stride);
 					}
 
 					if (!stbi_write_png(tex_file_name.c_str(), info_.width, info_.height, 4, work_buf.data(), info_.width * 4))
@@ -2938,9 +3025,10 @@ namespace rsx
 
 			frame_idx++;
 
-			g_mesh_dumper.enabled = false;
-			g_mesh_dumper.enable_this_frame = false;
-			g_mesh_dumper.enable_this_frame2 = false;
+			g_dump_texture_info.clear();
+			g_mesh_dumper.enabled            = false;
+			//g_mesh_dumper.enable_this_frame = false;
+			//g_mesh_dumper.enable_this_frame2 = false;
 			g_mesh_dumper.dumps.clear();
 						
 			Emu.Resume();
