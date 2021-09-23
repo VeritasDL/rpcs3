@@ -24,7 +24,8 @@
 #include "util/serialization.hpp"
 #include "util/asm.hpp"
 
-#pragma optimize("", off)
+//#pragma optimize("", off)
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -2884,14 +2885,18 @@ namespace rsx
 				};
 
 				mat4 xform_mat = linalg::identity;
+				mat4 xform_mat_first = linalg::identity;
 				mat4 bone_mats[4];
 
-				const bool has_bones = d.blocks.size() == 4;
+				const auto block_count = d.blocks.size();
+				const bool use_xform_first = (block_count == 1);
+				const bool has_bones   = (block_count == 4);
 
 				const auto& vcb = d.vertex_constants_buffer;
 
 				if (vcb.size() >= 17)
 				{
+					xform_mat_first = {vcb[0], vcb[1], vcb[2], vcb[3]};
 					xform_mat = {vcb[13], vcb[14], vcb[15], vcb[16]};
 					if (has_bones && vcb.size() >= 44)
 					{
@@ -2902,7 +2907,7 @@ namespace rsx
 					}
 				}
 
-				auto transform_pos = [&](u32 idx, const vec3be& pos, bool use_xform, const mesh_draw_dump_block* weights_block) -> vec3 {
+				auto transform_pos = [&](u32 idx, const vec3be& pos, const mesh_draw_dump_block* weights_block) -> vec3 {
 					vec4 out;
 					vec4 a = {pos.x, pos.y, pos.z, 1};
 					if (has_bones)
@@ -2952,13 +2957,13 @@ namespace rsx
 #endif
 
 					}
-					else if (use_xform)
+					else if (use_xform_first)
 					{
-						out = mul(a, xform_mat);
+						out = mul(a, xform_mat_first);
 					}
 					else
 					{
-						out = a;
+						out = mul(a, xform_mat);
 					}
 					return {out.x * 0.01f, out.z * 0.01f, out.y * 0.01f};
 				};
@@ -2972,7 +2977,7 @@ namespace rsx
 					_28
 				} vertex_format{};
 
-				if (!d.blocks.empty())
+				if (block_count > 0)
 				{
 					const auto& block0 = d.blocks[0];
 					const auto* block1_weights = has_bones ? &d.blocks[1] : nullptr;
@@ -2994,7 +2999,7 @@ namespace rsx
 									obj_str += fmt::format("v %f %f %f # %08X %08X %08X\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01,
 										posu.x_u, posu.y_u, posu.z_u);
 #else
-									vec3 pos = transform_pos(i, v.pos, true, block1_weights);
+									vec3 pos             = transform_pos(i, v.pos, block1_weights);
 									//obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
 									obj_str += fmt::format("v %f %f %f\n", pos.x, pos.z, pos.y);
 #endif
@@ -3020,7 +3025,7 @@ namespace rsx
 									obj_str += fmt::format("v %f %f %f # %08X %08X %08X\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01,
 										posu.x_u, posu.y_u, posu.z_u);
 #else
-									vec3 pos = transform_pos(i, v.pos, false, block1_weights);
+									vec3 pos             = transform_pos(i, v.pos, block1_weights);
 									//obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
 									obj_str += fmt::format("v %f %f %f\n", pos.x, pos.y, pos.z);
 #endif
