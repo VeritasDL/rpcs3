@@ -87,6 +87,7 @@ namespace
 		u32 vertex_draw_count;
 		u32 vertex_index_offset;
 		std::optional<std::tuple<VkDeviceSize, VkIndexType>> index_info;
+		std::byte* index_buf;
 	};
 
 	struct draw_command_visitor
@@ -116,10 +117,10 @@ namespace
 					generate_emulating_index_buffer(rsx::method_registers.current_draw_clause,
 						vertex_count, m_index_buffer_ring_info);
 
-				return{ prims, false, min_index, max_index, index_count, 0, index_info };
+				return {prims, false, min_index, max_index, index_count, 0, index_info, nullptr};
 			}
 
-			return{ prims, false, min_index, max_index, vertex_count, 0, {} };
+			return {prims, false, min_index, max_index, vertex_count, 0, {}, nullptr};
 		}
 
 		vertex_input_state operator()(const rsx::draw_indexed_array_command& command)
@@ -173,7 +174,7 @@ namespace
 			{
 				//empty set, do not draw
 				m_index_buffer_ring_info.unmap();
-				return{ prims, false, 0, 0, 0, 0, {} };
+				return{ prims, false, 0, 0, 0, 0, {}, nullptr };
 			}
 
 			if (emulate_restart)
@@ -194,7 +195,7 @@ namespace
 				std::make_tuple(offset_in_index_buffer, vk::get_index_type(index_type));
 
 			const auto index_offset = rsx::method_registers.vertex_data_base_index();
-			return {prims, true, min_index, max_index, index_count, index_offset, index_info};
+			return { prims, true, min_index, max_index, index_count, index_offset, index_info, reinterpret_cast<std::byte*>(dst.data()) };
 		}
 
 		vertex_input_state operator()(const rsx::draw_inlined_array& /*command*/)
@@ -208,13 +209,13 @@ namespace
 
 			if (!primitives_emulated)
 			{
-				return{ prims, false, 0, vertex_count - 1, vertex_count, 0, {} };
+				return {prims, false, 0, vertex_count - 1, vertex_count, 0, {}, nullptr};
 			}
 
 			u32 index_count;
 			std::optional<std::tuple<VkDeviceSize, VkIndexType>> index_info;
 			std::tie(index_count, index_info) = generate_emulating_index_buffer(draw_clause, vertex_count, m_index_buffer_ring_info);
-			return{ prims, false, 0, vertex_count - 1, index_count, 0, index_info };
+			return {prims, false, 0, vertex_count - 1, index_count, 0, index_info, nullptr};
 		}
 
 	private:
@@ -375,5 +376,6 @@ vk::vertex_upload_info VKGSRender::upload_vertex_data()
 			index_base,                                   // Index of vertex at data location 0
 			result.vertex_index_offset,                   // Index offset
 			persistent_range_base, volatile_range_base,   // Binding range
-			result.index_info };                          // Index buffer info
+			result.index_info,                             // Index buffer info
+	        result.index_buf };
 }
