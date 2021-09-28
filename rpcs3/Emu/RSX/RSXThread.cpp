@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <cstdint>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <Emu/RSX/stb_image_write.h>
 #include <Emu/RSX/s3tc.h>
@@ -2782,7 +2783,7 @@ namespace rsx
 				mat4 bone_mats[4];
 
 				const auto block_count = d.blocks.size();
-				const bool use_xform_first = (block_count == 1);
+				const bool use_no_xform = (block_count == 1);
 				const bool has_bones   = (block_count == 4);
 
 				const auto& vcb = d.vertex_constants_buffer;
@@ -2827,7 +2828,16 @@ namespace rsx
 							    weights[0], weights[1], weights[2], weights[3], print_vec4(r0), print_vec4(r1), print_vec4(r2), print_vec4(out));
 #endif
 
-							if (isnan(out.x) || isnan(out.y) || isnan(out.z) || isinf(out.x) || isinf(out.y) || isinf(out.z))
+							//auto isbig = [](double x)
+							//{
+							//	return fabs(x) > FLT_MAX;
+							//};
+							//if (isnan(out.x) || isnan(out.y) || isnan(out.z) || isnan(out.w) ||
+							//	isinf(out.x) || isinf(out.y) || isinf(out.z) || isinf(out.w) ||
+							//    isbig(out.x) || isbig(out.y) || isbig(out.z) || isbig(out.w))
+							const double sum     = weights.x + weights.y + weights.z + weights.w;
+							const double epsilon             = 0.01;
+							if ((sum > 1. + epsilon) || (sum < 1. - epsilon) || isnan(sum))
 							{
 								// TODO: don't emit these
 								obj_str += "# bad weights, defaulting to first bone\n";
@@ -2850,15 +2860,18 @@ namespace rsx
 #endif
 
 					}
-					else if (use_xform_first)
+					else if (use_no_xform)
 					{
-						out = mul(a, xform_mat_first);
+						//out = mul(a, xform_mat_first);
+						//__debugbreak();
+						obj_str += "# using no xform\n";
+						out = a;
 					}
 					else
 					{
 						out = mul(a, xform_mat);
 					}
-					return {out.x * 0.01f, out.z * 0.01f, out.y * 0.01f};
+					return {out.x * 0.01f, out.y * 0.01f, out.z * 0.01f};
 				};
 
 				size_t vertex_count = 0;
@@ -2869,6 +2882,8 @@ namespace rsx
 					_36,
 					_28
 				} vertex_format{};
+
+				// TODO: vertex color support
 
 				if (block_count > 0)
 				{
@@ -2894,7 +2909,7 @@ namespace rsx
 #else
 									vec3 pos             = transform_pos(i, v.pos, block1_weights);
 									//obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
-									obj_str += fmt::format("v %f %f %f\n", pos.x, pos.z, pos.y);
+									obj_str += fmt::format("v %f %f %f\n", pos.x, pos.y, pos.z);
 #endif
 									obj_str += fmt::format("vn %f %f %f\n", (float)v.normal.x, (float)v.normal.y, (float)v.normal.z);
 									obj_str += fmt::format("vt %f %f\n", (float)v.uv.u, (float)v.uv.v);
@@ -2986,8 +3001,8 @@ namespace rsx
 						for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
 						{
 							const auto f0 = vertex_index_base + d.indices[tri_idx * 3 + 0] - min_idx;
-							const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx;
-							const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx;
+							const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx; // Y/Z swap
+							const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx; //
 							obj_str += fmt::format("f %d/%d %d/%d %d/%d\n",
 							    f0, f0,
 							    f1, f1,
@@ -2999,8 +3014,8 @@ namespace rsx
 						for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
 						{
 							const auto f0 = vertex_index_base + d.indices[tri_idx * 3 + 0] - min_idx;
-							const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx;
-							const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx;
+							const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx; // Y/Z swap
+							const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx; //
 							obj_str += fmt::format("f %d/%d/%d %d/%d/%d %d/%d/%d\n",
 							    f0, f0, f0 - vertex_index_base_normal_offset,
 							    f1, f1, f1 - vertex_index_base_normal_offset,
