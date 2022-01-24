@@ -123,3 +123,7 @@ yaml-cpp.pc
 cacert.pem
 
 _ReSharper.*/
+
+3rdparty/
+Vulkan/
+rpcs3/meshdump*

@@ -21,7 +21,7 @@
 #include "util/serialization.hpp"
 #include "util/asm.hpp"
 
-//#pragma optimize("", off)
+#pragma optimize("", off)
 
 #include <algorithm>
 #include <filesystem>
@@ -30,6 +30,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <Emu/RSX/stb_image_write.h>
 #include <Emu/RSX/s3tc.h>
+#include <Emu/RSX/umHalf.h>
 
 #include <span>
 #include <sstream>
@@ -130,8 +131,20 @@ namespace neolib
 			aStream.fill('0');
 			aStream << std::hex << line - start << " ";
 			std::size_t lineLength = std::min(aWidth, static_cast<std::size_t>(end - line));
-			for (std::size_t pass = 1; pass <= 2; ++pass)
+			for (std::size_t pass = 1; pass <= 3; ++pass)
 			{
+				if (pass == 3)
+				{
+					const auto word_count = aWidth / 4;
+					for (const char* next = line; next < line + word_count * 4; next += 4)
+					{
+						const auto v = _byteswap_ulong(*(const u32*)(next));
+						aStream << *(const float*)&v;
+						aStream << " ";
+					}
+					break;
+				}
+
 				for (const char* next = line; next != end && next != line + aWidth; ++next)
 				{
 					char ch = *next;
@@ -2642,7 +2655,9 @@ namespace rsx
 	}
 
 #define MESHDUMP_DEBUG true
+#define MESHDUMP_DEBUG_OLD false
 #define MESHDUMP_POSED true
+#define MESHDUMP_SLY_VERSION 3
 
 	void thread::flip(const display_flip_info_t& info)
 	{
@@ -2693,12 +2708,26 @@ namespace rsx
 				{
 					std::string hex_str;
 					const auto& block = d.blocks[i];
-					hex_str += fmt::format("# Block %d, %s\n", i, block.interleaved_range_info.to_str().c_str());
+					auto interleaved_attribute_array_str = [](rsx::simple_array<interleaved_attribute_t> locations) -> std::string {
+						std::string locs_str = "{ ";
+						for (const auto& l : locations)
+							locs_str += fmt::format("%d,", l.index);
+						locs_str.erase(locs_str.size() - 1, 1);
+						locs_str += " }";
+						return locs_str;
+					};
+					hex_str += fmt::format("# Block %d, %s, locs: %s, count: %d, size: %d\n",
+						i, block.interleaved_range_info.to_str().c_str(),
+						interleaved_attribute_array_str(block.interleaved_range_info.locations),
+						block.vertex_data.size() / block.interleaved_range_info.attribute_stride, block.vertex_data.size());
+
+#if MESHDUMP_SLY_VERSION != 4
 					if (i == 0 && (block.interleaved_range_info.attribute_stride == 36 || block.interleaved_range_info.attribute_stride == 28))
 					{
 						hex_str += " # skipping block data log\n";
 					}
 					else
+#endif
 					{
 						auto dst_ptr = block.vertex_data.data();
 						std::stringstream hex_ss;
@@ -2778,15 +2807,18 @@ namespace rsx
 					return print_mat4(m[0], m[1], m[2], m[3]);
 				};
 
-				mat4 xform_mat = linalg::identity;
-				mat4 xform_mat_first = linalg::identity;
-				mat4 bone_mats[4];
-
 				const auto block_count = d.blocks.size();
+				const auto index_count = d.indices.size();
+
+				const auto& vcb = d.vertex_constants_buffer;
+
+#if MESHDUMP_SLY_VERSION != 4
 				const bool use_no_xform = (block_count == 1);
 				const bool has_bones   = (block_count == 4);
 
-				const auto& vcb = d.vertex_constants_buffer;
+				mat4 xform_mat       = linalg::identity;
+				mat4 xform_mat_first = linalg::identity;
+				mat4 bone_mats[4];
 
 				if (vcb.size() >= 17)
 				{
@@ -2873,16 +2905,23 @@ namespace rsx
 					}
 					return {out.x * 0.01f, out.y * 0.01f, out.z * 0.01f};
 				};
+#endif
 
-				size_t vertex_count = 0;
+				size_t vertex_count      = 0;
 
 				enum class vertex_format_t
 				{
 					none,
+					_28,
+					_30,
 					_36,
-					_28
+					sly4_14,
+					sly4_18,
+					sly4_24,
 				} vertex_format{};
 
+				
+#if MESHDUMP_SLY_VERSION != 4
 				// TODO: vertex color support
 
 				if (block_count > 0)
@@ -2896,13 +2935,22 @@ namespace rsx
 							static bool b1{true};
 							if (b1)
 							{
-								const mesh_draw_vertex* vertex_data = (mesh_draw_vertex*)block0.vertex_data.data();
-								vertex_count                        = block0.vertex_data.size() / sizeof(mesh_draw_vertex);
+								struct mesh_draw_vertex_36
+								{
+									vec3be pos;
+									vec3be normal;
+									vec2be uv;
+									u32 unk0;
+								};
+								static_assert(sizeof(mesh_draw_vertex_36) == 36);
+
+								const mesh_draw_vertex_36* vertex_data = (mesh_draw_vertex_36*)block0.vertex_data.data();
+								vertex_count                        = block0.vertex_data.size() / sizeof(mesh_draw_vertex_36);
 
 								for (auto i = 0; i < vertex_count; ++i)
 								{
 									const auto& v = vertex_data[i];
-#if false && MESHDUMP_DEBUG
+#if MESHDUMP_DEBUG_OLD && MESHDUMP_DEBUG
 									const auto posu = *(uvec3*)(&v.pos);
 									obj_str += fmt::format("v %f %f %f # %08X %08X %08X\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01,
 										posu.x_u, posu.y_u, posu.z_u);
@@ -2922,13 +2970,22 @@ namespace rsx
 							static bool b2{true};
 							if (b2)
 							{
+								struct mesh_draw_vertex_28
+								{
+									vec3be pos;
+									u32 vertex_color_maybe;
+									u32 unk0;
+									vec2be uv;
+								};
+								static_assert(sizeof(mesh_draw_vertex_28) == 0x1C);
+
 								const mesh_draw_vertex_28* vertex_data = (mesh_draw_vertex_28*)block0.vertex_data.data();
 								vertex_count                           = block0.vertex_data.size() / sizeof(mesh_draw_vertex_28);
 
 								for (auto i = 0; i < vertex_count; ++i)
 								{
 									const auto& v = vertex_data[i];
-#if false && MESHDUMP_DEBUG
+#if MESHDUMP_DEBUG_OLD && MESHDUMP_DEBUG
 									const auto posu = *(uvec3*)(&v.pos);
 									obj_str += fmt::format("v %f %f %f # %08X %08X %08X\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01,
 										posu.x_u, posu.y_u, posu.z_u);
@@ -2946,6 +3003,7 @@ namespace rsx
 						}
 					}
 				}
+
 
 #if 0
 				for (auto& v : d.vertices)
@@ -2976,15 +3034,180 @@ namespace rsx
 					    print_mat43(d.vertex_constants_buffer[38], d.vertex_constants_buffer[39], d.vertex_constants_buffer[40]),
 					    print_mat43(d.vertex_constants_buffer[41], d.vertex_constants_buffer[42], d.vertex_constants_buffer[43]));
 				}
+
 				// and vc[18].xy is tex anim
-				obj_str += "# VertexConstantsBuffer:\n";
-				for (auto i = 0; i < 60; i++)
-				{
-					obj_str += fmt::format(" # %02d: %s\n", i, print_vec4(d.vertex_constants_buffer[i]));
-				}
+
+#endif
 #endif
 
-				if (vertex_count > 0)
+				obj_str += "# VertexConstantsBuffer:\n";
+				for (auto i = 0; i < 60; i++)
+					obj_str += fmt::format(" # %02d: %s\n", i, print_vec4(d.vertex_constants_buffer[i]));
+				
+#if 1
+#if MESHDUMP_SLY_VERSION == 4
+
+#if MESHDUMP_DEBUG
+				obj_str += fmt::format("# transform_branch_bits: 0x%08X\n", rsx::method_registers.transform_branch_bits());
+
+				if (d.vertex_constants_buffer.size() >= 4)
+					obj_str += fmt::format("# xform matrix at 0:\n%s\n",
+						print_mat4(d.vertex_constants_buffer[0], d.vertex_constants_buffer[1], d.vertex_constants_buffer[2], d.vertex_constants_buffer[3]));
+#endif
+
+
+				if (block_count > 0)
+				{
+					const auto& block0 = d.blocks[0];
+
+					if (block0.interleaved_range_info.interleaved)
+					{
+
+						mat4 xform_mat = linalg::identity;
+
+						if (vcb.size() >= 4)
+						{
+							xform_mat = {vcb[0], vcb[1], vcb[2], vcb[3]};
+						}
+
+						auto transform_pos = [&](u32 idx, const auto& pos /*, const mesh_draw_dump_block* weights_block*/) -> vec3 {
+							vec4 out;
+							vec4 a = {pos.x, pos.y, pos.z, 1};
+
+							static volatile bool s_posed = true;
+
+							if (s_posed)
+								out = mul(a, xform_mat);
+							else
+								out = a;
+
+							return {-out.x, out.y, out.z};
+						};
+
+						if (block0.interleaved_range_info.attribute_stride == 24 && block_count == 2)
+						{
+							const auto& block1 = d.blocks[1];
+							struct mesh_draw_vertex_24
+							{
+								vec3be pos;
+								u8 unk[12];
+							};
+							static_assert(sizeof(mesh_draw_vertex_24) == 24);
+
+							struct mesh_draw_vertex_24_block1
+							{
+								u32 unk_color;
+								u16 texcoord_u;
+								u16 texcoord_v;
+							};
+							static_assert(sizeof(mesh_draw_vertex_24_block1) == 8);
+
+							const mesh_draw_vertex_24* vertex_data_0        = (mesh_draw_vertex_24*)block0.vertex_data.data();
+							const mesh_draw_vertex_24_block1* vertex_data_1 = (mesh_draw_vertex_24_block1*)block1.vertex_data.data();
+							vertex_count                                    = block0.vertex_data.size() / sizeof(mesh_draw_vertex_24);
+
+							for (auto i = 0; i < vertex_count; ++i)
+							{
+								const auto& v = vertex_data_0[i];
+								const auto& v_block1 = vertex_data_1[i];
+
+								vec3 pos = transform_pos(i, v.pos);
+								//obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
+								obj_str += fmt::format("v %f %f %f\n", pos.x, pos.y, pos.z);
+								//obj_str += fmt::format("vn %f %f %f\n", (float)v.normal.x, (float)v.normal.y, (float)v.normal.z);
+								half texcoord_u;
+								texcoord_u.bits = _byteswap_ushort(v_block1.texcoord_u);
+								half texcoord_v;
+								texcoord_v.bits = _byteswap_ushort(v_block1.texcoord_v);
+								obj_str += fmt::format("vt %f %f\n", (float)texcoord_u, (float)texcoord_v);
+							}
+							vertex_format = vertex_format_t::sly4_24;
+						}
+						else if (block0.interleaved_range_info.attribute_stride == 14 && block_count == 1)
+						{
+							struct mesh_draw_vertex_14
+							{
+								u16 pos_x;
+								u16 pos_y;
+								u16 pos_z;
+								u8 color[4]; // weird format
+								u16 texcoord_u;
+								u16 texcoord_v;
+							};
+							static_assert(sizeof(mesh_draw_vertex_14) == 14);
+
+							const mesh_draw_vertex_14* vertex_data_0 = (mesh_draw_vertex_14*)block0.vertex_data.data();
+							vertex_count                             = block0.vertex_data.size() / sizeof(mesh_draw_vertex_14);
+
+							for (auto i = 0; i < vertex_count; ++i)
+							{
+								const auto& v = vertex_data_0[i];
+
+								half pos_x;
+								pos_x.bits = _byteswap_ushort(v.pos_x);
+								half pos_y;
+								pos_y.bits = _byteswap_ushort(v.pos_y);
+								half pos_z;
+								pos_z.bits = _byteswap_ushort(v.pos_z);
+								vec3 pos   = vec3{(float)pos_x, (float)pos_y, (float)pos_z};
+								pos   =  transform_pos(i, pos);
+								//obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
+								obj_str += fmt::format("v %f %f %f\n", (float)pos.x, (float)pos.y, (float)pos.z);
+								//obj_str += fmt::format("vn %f %f %f\n", (float)v.normal.x, (float)v.normal.y, (float)v.normal.z);
+								half texcoord_u;
+								texcoord_u.bits = _byteswap_ushort(v.texcoord_u);
+								half texcoord_v;
+								texcoord_v.bits = _byteswap_ushort(v.texcoord_v);
+								obj_str += fmt::format("vt %f %f\n", (float)texcoord_u, (float)texcoord_v);
+							}
+							vertex_format = vertex_format_t::sly4_14;
+						}
+						else if (block0.interleaved_range_info.attribute_stride == 18 && block_count == 1)
+						{
+							struct mesh_draw_vertex_18
+							{
+								u16 pos_x;
+								u16 pos_y;
+								u16 pos_z;
+								u8 unk0[4]; // weird format
+								u16 texcoord_u;
+								u16 texcoord_v;
+								u8 unk1[4]; // weird format
+							};
+							static_assert(sizeof(mesh_draw_vertex_18) == 18);
+
+							const mesh_draw_vertex_18* vertex_data_0 = (mesh_draw_vertex_18*)block0.vertex_data.data();
+							vertex_count                             = block0.vertex_data.size() / sizeof(mesh_draw_vertex_18);
+
+							for (auto i = 0; i < vertex_count; ++i)
+							{
+								const auto& v = vertex_data_0[i];
+
+								half pos_x;
+								pos_x.bits = _byteswap_ushort(v.pos_x);
+								half pos_y;
+								pos_y.bits = _byteswap_ushort(v.pos_y);
+								half pos_z;
+								pos_z.bits = _byteswap_ushort(v.pos_z);
+								vec3 pos   = vec3{(float)pos_x, (float)pos_y, (float)pos_z};
+								pos        = transform_pos(i, pos);
+								//obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
+								obj_str += fmt::format("v %f %f %f\n", (float)pos.x, (float)pos.y, (float)pos.z);
+								//obj_str += fmt::format("vn %f %f %f\n", (float)v.normal.x, (float)v.normal.y, (float)v.normal.z);
+								half texcoord_u;
+								texcoord_u.bits = _byteswap_ushort(v.texcoord_u);
+								half texcoord_v;
+								texcoord_v.bits = _byteswap_ushort(v.texcoord_v);
+								obj_str += fmt::format("vt %f %f\n", (float)texcoord_u, (float)texcoord_v);
+							}
+							vertex_format = vertex_format_t::sly4_18;
+						}
+					}
+				}
+#endif
+#endif
+
+				if (vertex_count > 0 && index_count > 0)
 				{
 #if MESHDUMP_DEBUG
 					obj_str += fmt::format("# base is %d\n", vertex_index_base);
@@ -3022,8 +3245,22 @@ namespace rsx
 							    f2, f2, f2 - vertex_index_base_normal_offset);
 						}
 					}
+					else if (vertex_format == vertex_format_t::sly4_14 || vertex_format == vertex_format_t::sly4_18 || vertex_format == vertex_format_t::sly4_24)
+					{
+						for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
+						{
+							const auto f0 = vertex_index_base + d.indices[tri_idx * 3 + 0] - min_idx;
+							const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx; // Y/Z swap
+							const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx; //
+							obj_str += fmt::format("f %d/%d %d/%d %d/%d\n",
+								f0, f0,
+								f1, f1,
+								f2, f2);
+						}
+					}
 
-					g_dump_texture_info[(u64)d.texture_raw_data_ptr].is_used = true;
+					if (d.texture_raw_data_ptr)
+						g_dump_texture_info[(u64)d.texture_raw_data_ptr].is_used = true;
 				}
 				else
 				{
@@ -3042,102 +3279,121 @@ namespace rsx
 			std::vector<u8> final_data;
 			for (auto [raw_data_ptr, info_] : g_dump_texture_info)
 			{
-				if (info_.is_used)
+				if (!info_.is_used)
+					continue;
+
+				mtl_str += fmt::format("newmtl 0x%X\n", (u64)raw_data_ptr);
+
+				const std::string tex_dir_name = fmt::format("%s/textures_%d", dump_dir.c_str(), frame_idx);
+				const std::string tex_dir_name_rel = fmt::format("textures_%d", frame_idx);
+				std::filesystem::create_directory(tex_dir_name);
+
+				const std::string tex_file_name = fmt::format("%s/0x%X.png", tex_dir_name, (u64)raw_data_ptr);
+				const std::string tex_file_name_rel = fmt::format("%s/0x%X.png", tex_dir_name_rel, (u64)raw_data_ptr);
+
+				const auto src = (const unsigned char*)((tex_raw_data_ptr_t)raw_data_ptr)->data();
+
+				if (src == 0 || (u64)src == 0xf || ((u64)src & 0x8000000000000000)) // hacky af
 				{
-					mtl_str += fmt::format("newmtl 0x%X\n", (u64)raw_data_ptr);
-
-					const std::string tex_dir_name = fmt::format("%s/textures_%d", dump_dir.c_str(), frame_idx);
-					std::filesystem::create_directory(tex_dir_name);
-
-					const std::string tex_file_name = fmt::format("%s/0x%X.png", tex_dir_name, (u64)raw_data_ptr);
-
-					const auto src = (const unsigned char*)((tex_raw_data_ptr_t)raw_data_ptr)->data();
-
-					if (src == 0 || (u64)src == 0xf || ((u64)src & 0x8000000000000000)) // hacky af
-					{
-						mtl_str += fmt::format("# warning: skipped texture, src is 0\n");
-						continue;
-					}
-
-					final_data.resize(info_.width * info_.height * 4);
-
-					bool is_fully_opaque = true;
-
-					if (info_.format == CELL_GCM_TEXTURE_COMPRESSED_DXT45)
-					{
-						BlockDecompressImageDXT5(info_.width, info_.height, src, (unsigned long*)final_data.data());
-						for (auto i = 0; i < final_data.size() / 4; ++i)
-						{
-							u32* ptr    = &((u32*)final_data.data())[i];
-							const u32 v = *ptr;
-							if ((v & 0x000000FF) == 0x00000080)
-							{
-								*ptr = (((v & 0xFF000000) >> 24) |
-								        ((v & 0x00FF0000) >> 8) |
-								        ((v & 0x0000FF00) << 8) |
-								        0xFF000000);
-							}
-							else
-							{
-								*ptr = (((v & 0xFF000000) >> 24) |
-                                        ((v & 0x00FF0000) >> 8) |
-                                        ((v & 0x0000FF00) << 8) |
-                                        (((v & 0x000000FF) * 2) << 24));
-								is_fully_opaque = false;
-							}
-						}
-					}
-					else if ((info_.format & CELL_GCM_TEXTURE_A8R8G8B8) == CELL_GCM_TEXTURE_A8R8G8B8)
-					{
-						memcpy(final_data.data(), src, info_.width * info_.height * 4);
-						for (auto i = 0; i < final_data.size() / 4; ++i)
-						{
-							u32* ptr    = &((u32*)final_data.data())[i];
-							*ptr     = _byteswap_ulong(*ptr);
-							const u32 v = *ptr;
-							//is_fully_opaque &= ((v & 0xFF000000) == 0x80000000);
-							if ((v & 0x000000FF) == 0x00000080)
-							{
-								*ptr = (((v & 0xFF000000) >> 8) |
-								        ((v & 0x00FF0000) >> 8) |
-								        ((v & 0x0000FF00) >> 8) |
-								        0xFF000000);
-							}
-							else
-							{
-								*ptr = (((v & 0xFF000000) >> 8) |
-                                        ((v & 0x00FF0000) >> 8) |
-                                        ((v & 0x0000FF00) >> 8) |
-                                        (((v & 0x000000FF) * 2) << 24));
-								is_fully_opaque = false;
-							}
-						}
-					}
-					//else
-					//{
-					//	mtl_str += fmt::format("# warning: skipped texture, format is 0x%X\n", info_.format);
-					//}
-
-					// argb -> rgba
-					// also a sly specific thing, it's PS2 port, and GS's RGBA reg alpha is weird like that
-
-					mtl_str += fmt::format("newmtl 0x%X\n", raw_data_ptr);
-					mtl_str += fmt::format("map_Kd %s\n", tex_file_name.c_str());
-					mtl_str += fmt::format("Ns 10\n"); // TODO: check
-					if (!is_fully_opaque)
-						mtl_str += fmt::format("map_D %s\n", tex_file_name.c_str());
-
-					work_buf.resize(final_data.size());
-					// copy flipped on Y
-					const auto stride = info_.width * 4;
-					for (auto i = 0; i < info_.height; i++)
-					{
-						memcpy(work_buf.data() + i * stride, final_data.data() + (final_data.size() - ((i+1) * stride)), stride);
-					}
-
-					if (!stbi_write_png(tex_file_name.c_str(), info_.width, info_.height, 4, work_buf.data(), info_.width * 4))
-						__debugbreak();
+					mtl_str += fmt::format("# warning: skipped texture, src is 0\n");
+					continue;
 				}
+
+				final_data.resize(info_.width * info_.height * 4);
+
+				bool is_fully_opaque = true;
+
+				if (info_.format == CELL_GCM_TEXTURE_COMPRESSED_DXT45)
+				{
+					BlockDecompressImageDXT5(info_.width, info_.height, src, (unsigned long*)final_data.data());
+					for (auto i = 0; i < final_data.size() / 4; ++i)
+					{
+						u32* ptr    = &((u32*)final_data.data())[i];
+						const u32 v = *ptr;
+						if ((v & 0x000000FF) == 0x00000080)
+						{
+							*ptr = (((v & 0xFF000000) >> 24) |
+								    ((v & 0x00FF0000) >> 8) |
+								    ((v & 0x0000FF00) << 8) |
+								    0xFF000000);
+						}
+						else
+						{
+							*ptr = (((v & 0xFF000000) >> 24) |
+                                    ((v & 0x00FF0000) >> 8) |
+                                    ((v & 0x0000FF00) << 8) |
+                                    (((v & 0x000000FF) * 2) << 24));
+							is_fully_opaque = false;
+						}
+					}
+				}
+				else if (info_.format == CELL_GCM_TEXTURE_COMPRESSED_DXT1) // Sly 4
+				{
+					BlockDecompressImageDXT1(info_.width, info_.height, src, (unsigned long*)final_data.data());
+					for (auto i = 0; i < final_data.size() / 4; ++i)
+					{
+						u32* ptr    = &((u32*)final_data.data())[i];
+						const u32 v = *ptr;
+						if ((v & 0x000000FF) != 0x000000FF)
+						{
+							is_fully_opaque = false;
+						}
+						*ptr = (((v & 0xFF000000) >> 24) |
+								((v & 0x00FF0000) >> 8) |
+								((v & 0x0000FF00) << 8) |
+								(((v & 0x000000FF) * 2) << 24));
+					}
+				}
+				else if ((info_.format & CELL_GCM_TEXTURE_A8R8G8B8) == CELL_GCM_TEXTURE_A8R8G8B8)
+				{
+					memcpy(final_data.data(), src, info_.width * info_.height * 4);
+					for (auto i = 0; i < final_data.size() / 4; ++i)
+					{
+						u32* ptr    = &((u32*)final_data.data())[i];
+						*ptr     = _byteswap_ulong(*ptr);
+						const u32 v = *ptr;
+						//is_fully_opaque &= ((v & 0xFF000000) == 0x80000000);
+						if ((v & 0x000000FF) == 0x00000080)
+						{
+							*ptr = (((v & 0xFF000000) >> 8) |
+								    ((v & 0x00FF0000) >> 8) |
+								    ((v & 0x0000FF00) >> 8) |
+								    0xFF000000);
+						}
+						else
+						{
+							*ptr = (((v & 0xFF000000) >> 8) |
+                                    ((v & 0x00FF0000) >> 8) |
+                                    ((v & 0x0000FF00) >> 8) |
+                                    (((v & 0x000000FF) * 2) << 24));
+							is_fully_opaque = false;
+						}
+					}
+				}
+				//else
+				//{
+				//	mtl_str += fmt::format("# warning: skipped texture, format is 0x%X\n", info_.format);
+				//}
+
+				// argb -> rgba
+				// also a sly specific thing, it's PS2 port, and GS's RGBA reg alpha is weird like that
+
+				mtl_str += fmt::format("newmtl 0x%X\n", raw_data_ptr);
+				mtl_str += fmt::format("map_Kd %s\n", tex_file_name_rel.c_str());
+				mtl_str += fmt::format("Ns 10\n"); // TODO: check
+				if (!is_fully_opaque)
+					mtl_str += fmt::format("map_D %s\n", tex_file_name_rel.c_str());
+
+				work_buf.resize(final_data.size());
+				// copy flipped on Y
+				const auto stride = info_.width * 4;
+				for (auto i = 0; i < info_.height; i++)
+				{
+					memcpy(work_buf.data() + i * stride, final_data.data() + (final_data.size() - ((i+1) * stride)), stride);
+				}
+
+				if (!stbi_write_png(tex_file_name.c_str(), info_.width, info_.height, 4, work_buf.data(), info_.width * 4))
+					__debugbreak();
 			}
 
 			file_mtl.write(mtl_str.c_str(), mtl_str.size());

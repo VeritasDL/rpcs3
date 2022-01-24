@@ -58,23 +58,7 @@ using vec3 = float3;
 using vec4 = float4;
 using mat4 = float4x4;
 using mat4 = float4x4;
-struct mesh_draw_vertex
-{
-	vec3be pos;
-	vec3be normal;
-	vec2be uv;
-	u32 unk0;
-};
-static_assert(sizeof(mesh_draw_vertex) == 36);
 
-struct mesh_draw_vertex_28
-{
-	vec3be pos;
-	u32 vertex_color_maybe;
-	u32 unk0;
-	vec2be uv;
-};
-static_assert(sizeof(mesh_draw_vertex_28) == 0x1C);
 
 namespace rsx
 {
@@ -94,9 +78,8 @@ namespace rsx
 		std::pair<u32, u32> calculate_required_range(u32 first, u32 count) const;
 
 		std::string to_str() const {
-			return fmt::format("{ interleaved: %d, single_vertex: %d, base_offset: 0x%X, real_offset_address: 0x%X, memory_location: 0x%X, attribute_stride: 0x%X, locations#: %d }",
-			                   interleaved, single_vertex, base_offset, real_offset_address, memory_location, attribute_stride, locations.size()
-				);
+			return fmt::format("{ interleaved: %d, single_vertex: %d, base_offset: 0x%X, real_offset_address: 0x%X, memory_loc: 0x%X, attribute_stride: 0x%X, locs#: %d }",
+				interleaved, single_vertex, base_offset, real_offset_address, memory_location, attribute_stride, locations.size());
 		}
 	};
 } // namespace rsx

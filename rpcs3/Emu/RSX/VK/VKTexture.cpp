@@ -934,7 +934,10 @@ namespace vk
 
 			std::span<std::byte> mapped{ static_cast<std::byte*>(mapped_buffer), image_linear_size };
 			opt = upload_texture_subresource(mapped, layout, format, is_swizzled, caps);
-			if (layout.level == 0 && ((format == CELL_GCM_TEXTURE_A8R8G8B8) || (format == CELL_GCM_TEXTURE_A8R8G8B8 | CELL_GCM_TEXTURE_LN)))
+			if (layout.level == 0 &&
+				((format == CELL_GCM_TEXTURE_A8R8G8B8) ||
+				 (format == (CELL_GCM_TEXTURE_A8R8G8B8 | CELL_GCM_TEXTURE_LN)) ||
+			     (format == CELL_GCM_TEXTURE_COMPRESSED_DXT1))) // Sly 4 ?
 			{
 				dst_image->raw_data.resize(mapped.size());
 				memcpy(dst_image->raw_data.data(), mapped.data(), mapped.size());

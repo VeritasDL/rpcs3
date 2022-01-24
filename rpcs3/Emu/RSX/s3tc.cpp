@@ -1,6 +1,6 @@
 #include "stdafx.h"
 
-#pragma optimize("", off)
+//#pragma optimize("", off)
 // unsigned long PackRGBA(): Helper method that packs RGBA channels into a single 4 byte pixel.
 //
 // unsigned char r:     red channel.
