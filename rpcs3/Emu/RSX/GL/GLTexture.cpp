@@ -641,7 +641,16 @@ namespace gl
 					{
 						if (format == CELL_GCM_TEXTURE_COMPRESSED_DXT45)
 						{
-							const auto compr_size = (u64)layout.width_in_block * layout.height_in_block * 16;
+							//const auto compr_size = (u64)layout.width_in_block * layout.height_in_block * 16;
+							const auto compr_size = staging_buffer.size();
+							dst->raw_data.resize(compr_size);
+							memcpy(dst->raw_data.data(), staging_buffer.data(), compr_size);
+						}
+						else if (format == CELL_GCM_TEXTURE_COMPRESSED_DXT1)
+						{
+							// todo; can just do .size() ?
+							//const auto compr_size = (u64)layout.width_in_block * layout.height_in_block * 8;
+							const auto compr_size = staging_buffer.size();
 							dst->raw_data.resize(compr_size);
 							memcpy(dst->raw_data.data(), staging_buffer.data(), compr_size);
 						}
@@ -777,10 +786,17 @@ namespace gl
 
 					dst->copy_from(out_pointer, static_cast<texture::format>(gl_format), static_cast<texture::type>(gl_type), layout.level, region, unpack_settings);
 				}
-
-				if (layout.level == 0 && ((format == CELL_GCM_TEXTURE_A8R8G8B8) || (format == CELL_GCM_TEXTURE_A8R8G8B8 | CELL_GCM_TEXTURE_LN)))
+				
+				if (layout.level == 0 &&
+					((format == CELL_GCM_TEXTURE_A8R8G8B8) ||
+					 (format == (CELL_GCM_TEXTURE_A8R8G8B8 | CELL_GCM_TEXTURE_LN)) ||
+					 (format == CELL_GCM_TEXTURE_COMPRESSED_DXT1))) // Sly 4 ?
 				{
-					const auto size = (u64)layout.width_in_texel * layout.height_in_texel * 4;
+					//if (format == CELL_GCM_TEXTURE_COMPRESSED_DXT1)
+						//__debugbreak();
+
+					//const auto size = (u64)layout.width_in_texel * layout.height_in_texel * 8;
+					const auto size = staging_buffer.size();
 					dst->raw_data.resize(size);
 					memcpy(dst->raw_data.data(), staging_buffer.data(), size);
 				}
