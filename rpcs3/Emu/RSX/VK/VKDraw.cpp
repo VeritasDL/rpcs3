@@ -381,6 +381,8 @@ void VKGSRender::load_texture_env()
 			tex_info.width                                      = tex.width();
 			tex_info.height                                     = tex.height();
 			tex_info.format                                     = tex.format();
+			if ((u64)dump.texture_raw_data_ptr == 0)
+				__debugbreak();
 			g_dump_texture_info[(u64)dump.texture_raw_data_ptr] = tex_info;
 		}
 	}
