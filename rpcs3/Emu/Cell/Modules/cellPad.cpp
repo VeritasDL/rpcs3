@@ -8,6 +8,7 @@
 #include "Input/product_info.h"
 #include "cellPad.h"
 
+#pragma optimize("", off)
 extern void libio_sys_config_init();
 extern void libio_sys_config_end();
 
@@ -716,6 +717,11 @@ error_code cellPadGetInfo2(vm::ptr<CellPadInfo2> info)
 	info->system_info = rinfo.system_info;
 
 	const auto& pads = handler->GetPads();
+	if (!pads[0])
+	{
+		//__debugbreak();
+		return CELL_OK; // lol
+	}
 
 	for (u32 i = 0; i < CELL_PAD_MAX_PORT_NUM; ++i)
 	{

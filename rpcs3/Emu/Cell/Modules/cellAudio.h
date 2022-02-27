@@ -3,6 +3,7 @@
 #include "Emu/Memory/vm_ptr.h"
 #include "Utilities/Thread.h"
 #include "Utilities/simple_ringbuf.h"
+#include "util/serialization.hpp"
 #include "Emu/Memory/vm.h"
 #include "Emu/Audio/AudioBackend.h"
 #include "Emu/Audio/AudioDumper.h"
@@ -217,6 +218,8 @@ struct cell_audio_config
 		audio_downmix downmix = audio_downmix::downmix_to_stereo;
 		audio_renderer renderer = audio_renderer::null;
 		audio_provider provider = audio_provider::none;
+
+		using enable_bitcopy          = std::true_type;
 	} raw;
 
 	std::shared_ptr<AudioBackend> backend = nullptr;
@@ -273,7 +276,23 @@ struct cell_audio_config
 	 * Config changes
 	 */
 	void reset(bool backend_changed = true);
+
+	//void save(utils::serial& ar) {
+	//	ar(raw, audio_channels, audio_channels, audio_sampling_rate, audio_block_period, audio_sample_size, audio_min_buffer_duration,
+	//		audio_buffer_length, audio_buffer_size, desired_buffer_duration, buffering_enabled, minimum_block_period, maximum_block_period,
+	//		desired_full_buffers, num_allocated_buffers, period_average_alpha, period_comparison_margin, fully_untouched_timeout, partially_untouched_timeout,
+	//		time_stretching_enabled, time_stretching_threshold, time_stretching_step, time_stretching_scale);
+	//}
+	//void load(utils::serial& ar) {
+	//	ar(raw, audio_channels, audio_channels, audio_sampling_rate, audio_block_period, audio_sample_size, audio_min_buffer_duration,
+	//		audio_buffer_length, audio_buffer_size, desired_buffer_duration, buffering_enabled, minimum_block_period, maximum_block_period,
+	//		desired_full_buffers, num_allocated_buffers, period_average_alpha, period_comparison_margin, fully_untouched_timeout, partially_untouched_timeout,
+	//		time_stretching_enabled, time_stretching_threshold, time_stretching_step, time_stretching_scale);
+	//}
 };
+
+template <>
+bool serialize<cell_audio_config>(utils::serial& ar, cell_audio_config& o);
 
 class audio_ringbuffer
 {

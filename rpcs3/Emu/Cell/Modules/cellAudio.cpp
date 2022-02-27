@@ -370,6 +370,7 @@ cell_audio_thread::cell_audio_thread(utils::serial& ar)
 	}
 
 	ar(ports);
+	ar(cfg);
 }
 
 void cell_audio_thread::save(utils::serial& ar)
@@ -391,12 +392,29 @@ void cell_audio_thread::save(utils::serial& ar)
 	}
 
 	ar(ports);
+	ar(cfg);
 }
 
 template <>
 void fxo_serialize<cell_audio>(utils::serial* ar)
 {
 	fxo_serialize_body<cell_audio>(ar);
+}
+
+
+
+template <>
+bool serialize<cell_audio_config>(utils::serial& ar, cell_audio_config& o)
+{
+	const bool a = ar(o.raw, o.audio_channels, o.audio_channels, o.audio_sampling_rate, o.audio_block_period, o.audio_sample_size, o.audio_min_buffer_duration,
+		o.audio_buffer_length, o.audio_buffer_size, o.desired_buffer_duration, o.buffering_enabled, o.minimum_block_period, o.maximum_block_period,
+		o.desired_full_buffers, o.num_allocated_buffers, o.period_average_alpha, o.period_comparison_margin, o.fully_untouched_timeout, o.partially_untouched_timeout,
+		o.time_stretching_enabled, o.time_stretching_threshold, o.time_stretching_step, o.time_stretching_scale);
+
+	if (!ar.is_writing())
+		o.reset(true);
+
+	return a;
 }
 
 std::tuple<u32, u32, u32, u32> cell_audio_thread::count_port_buffer_tags()
@@ -688,6 +706,11 @@ void cell_audio_thread::operator()()
 			cellAudio.warning("Updating cell_audio_thread configuration");
 			update_config(update_req == audio_backend_update::ALL);
 			m_update_configuration = audio_backend_update::NONE;
+		}
+
+		if (!ringbuffer) {
+			ringbuffer.reset(new audio_ringbuffer(cfg));
+			//return;
 		}
 
 		if (!ringbuffer->get_operational_status())
