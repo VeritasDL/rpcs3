@@ -2839,7 +2839,8 @@ namespace rsx
 						auto dst_ptr = block.vertex_data.data();
 						std::stringstream hex_ss;
 						auto hex_width = block.interleaved_range_info.attribute_stride;
-						if (block.interleaved_range_info.attribute_stride <= 4)
+						if (block.interleaved_range_info.attribute_stride <= 4 &&
+							((d.blocks[i].vertex_data.size() % 64) == 0))
 							hex_width = 64;
 						neolib::hex_dump((const void*)dst_ptr, d.blocks[i].vertex_data.size(), hex_ss, hex_width, " # ");
 						hex_str += hex_ss.str();
