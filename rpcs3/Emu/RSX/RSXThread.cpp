@@ -2687,7 +2687,7 @@ namespace rsx
 		}
 	}
 
-#define MESHDUMP_DEBUG true
+#define MESHDUMP_DEBUG false
 #define MESHDUMP_DEBUG_OLD false
 #define MESHDUMP_POSED true
 #define MESHDUMP_SLY_VERSION 3
@@ -4119,6 +4119,8 @@ namespace rsx
 				rsx_log.error("Frame skip is not compatible with this application");
 			}
 		}
+
+		rsx_log.warning("FRAME END (draws: %d)", m_frame_stats.draw_calls);
 
 		// Reset current stats
 		m_frame_stats = {};
