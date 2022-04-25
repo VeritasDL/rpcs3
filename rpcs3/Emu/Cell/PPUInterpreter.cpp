@@ -3291,6 +3291,12 @@ bool ppu_interpreter::RLWINM(ppu_thread& ppu, ppu_opcode_t op)
 {
 	ppu.gpr[op.ra] = dup32(utils::rol32(static_cast<u32>(ppu.gpr[op.rs]), op.sh32)) & ppu_rotate_mask(32 + op.mb32, 32 + op.me32);
 	if (op.rc) [[unlikely]] ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+
+	const auto& r = ppu.gpr;
+	//if (ppu.cia == 0x001ea314) {
+	//	ppu_log.warning("parses_vif_unpack_v4_32(%08X, %08X, %08X, %08X) %08X %08X LR:%08X",
+	//		r[3], r[4], r[5], r[6], r[9], r[10], ppu.lr);
+	//}
 	return true;
 }
 
@@ -4605,9 +4611,17 @@ bool ppu_interpreter::LBZU(ppu_thread& ppu, ppu_opcode_t op)
 	ppu.gpr[op.ra] = addr;
 	return true;
 }
+//#pragma optimize("", off)
 
 bool ppu_interpreter::STW(ppu_thread& ppu, ppu_opcode_t op)
 {
+	//if (0x001ea374 <= ppu.cia && ppu.cia <= 0x001ea390 &&
+	//	//0x007D6520 <= ppu.gpr[8] && ppu.gpr[8] <= 0x007D6550) {
+	//	0x007D6520 <= ppu.gpr[8] && ppu.gpr[8] <= 0x007D6590) {
+	//	ppu_log.warning("STW! %08X %08X", ppu.cia, ppu.gpr[8]);
+	//	return true;
+	//}
+
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
 	const u32 value = static_cast<u32>(ppu.gpr[op.rs]);
 	vm::write32(vm::cast(addr), value);
@@ -4626,6 +4640,7 @@ bool ppu_interpreter::STW(ppu_thread& ppu, ppu_opcode_t op)
 
 	return true;
 }
+//#pragma optimize("", on)
 
 bool ppu_interpreter::STWU(ppu_thread& ppu, ppu_opcode_t op)
 {

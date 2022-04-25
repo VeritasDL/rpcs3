@@ -1884,6 +1884,8 @@ void spu_thread::serialize_common(utils::serial& ar)
 	std::for_each_n(mfc_queue, mfc_size, [&](spu_mfc_cmd& cmd) { ar(cmd); });
 }
 
+//#pragma optimize("", off)
+
 spu_thread::spu_thread(utils::serial& ar, lv2_spu_group* group)
 	: cpu_thread(idm::last_id())
 	, group(group)
@@ -1896,6 +1898,9 @@ spu_thread::spu_thread(utils::serial& ar, lv2_spu_group* group)
 		{
 			utils::memory_commit(vm::g_stat_addr + vm_offset(), SPU_LS_SIZE);
 		}
+
+		//static volatile auto ayy = vm_offset();
+		//static volatile auto ayy2 = vm::g_stat_addr;
 
 		// Try to guess free area
 		const auto start = vm::g_free_addr + SPU_LS_SIZE * (cpu_thread::id & 0xffffff) * 12;

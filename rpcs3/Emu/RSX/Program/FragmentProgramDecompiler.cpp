@@ -1361,6 +1361,9 @@ std::string FragmentProgramDecompiler::Decompile()
 	// flush m_code_level
 	m_code_level = 1;
 	std::string m_shader = BuildCode();
+
+	m_shader += "\n// size:" + std::to_string(m_shader.size());
+
 	main.clear();
 	//	m_parr.params.clear();
 	return m_shader;
