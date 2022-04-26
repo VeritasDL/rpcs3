@@ -770,7 +770,8 @@ void GLGSRender::load_program_env()
 	if (g_mesh_dumper.enabled)
 	{
 		auto& dump     = g_mesh_dumper.dumps.back();
-		dump.shader_id = m_program->id();
+		//dump.shader_id = m_program->id();
+		dump.shader_id = (u32)program_hash_util::vertex_program_utils::get_vertex_program_ucode_hash(current_vertex_program);
 	}
 
 	if (manually_flush_ring_buffers)

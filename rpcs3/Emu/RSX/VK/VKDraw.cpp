@@ -312,7 +312,7 @@ void VKGSRender::load_texture_env()
 
 		if (g_mesh_dumper.enabled &&
 		    i == 0 &&
-		    sampler_state->upload_context == rsx::texture_upload_context::shader_read &&
+		    (sampler_state->upload_context & rsx::texture_upload_context::shader_read) &&
 		    sampler_state->image_type == rsx::texture_dimension_extended::texture_dimension_2d &&
 		    sampler_state->format_class == rsx::format_class::RSX_FORMAT_CLASS_COLOR)
 		{
@@ -1121,7 +1121,8 @@ void VKGSRender::end()
 	if (g_mesh_dumper.enabled)
 	{
 		auto& dump     = g_mesh_dumper.dumps.back();
-		dump.shader_id = (u32)m_program->pipeline;
+		//dump.shader_id = (u32)m_program->pipeline;
+		dump.shader_id = (u32)program_hash_util::vertex_program_utils::get_vertex_program_ucode_hash(current_vertex_program);
 	}
 
 	// Sync any async scheduler tasks
