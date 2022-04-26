@@ -596,17 +596,9 @@ namespace gl
 				{
 					if (layout.level == 0)
 					{
-						if (format == CELL_GCM_TEXTURE_COMPRESSED_DXT45)
-						{
-							//const auto compr_size = (u64)layout.width_in_block * layout.height_in_block * 16;
-							const auto compr_size = staging_buffer.size();
-							dst->raw_data.resize(compr_size);
-							memcpy(dst->raw_data.data(), staging_buffer.data(), compr_size);
-						}
-						else if (format == CELL_GCM_TEXTURE_COMPRESSED_DXT1)
+						if (format == CELL_GCM_TEXTURE_COMPRESSED_DXT45 || format == CELL_GCM_TEXTURE_COMPRESSED_DXT1)
 						{
 							// todo; can just do .size() ?
-							//const auto compr_size = (u64)layout.width_in_block * layout.height_in_block * 8;
 							const auto compr_size = staging_buffer.size();
 							dst->raw_data.resize(compr_size);
 							memcpy(dst->raw_data.data(), staging_buffer.data(), compr_size);
