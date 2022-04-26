@@ -8,7 +8,7 @@
 #include "Input/product_info.h"
 #include "cellPad.h"
 
-#pragma optimize("", off)
+//#pragma optimize("", off)
 extern void libio_sys_config_init();
 extern void libio_sys_config_end();
 

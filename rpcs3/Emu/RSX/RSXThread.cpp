@@ -21,7 +21,7 @@
 #include "util/serialization.hpp"
 #include "util/asm.hpp"
 
-#pragma optimize("", off)
+//#pragma optimize("", off)
 
 #include <algorithm>
 #include <filesystem>
@@ -2672,12 +2672,12 @@ namespace rsx
 			const std::string dump_dir = fmt::format("meshdump_%X", dump_id);
 			std::filesystem::create_directory(dump_dir);
 
-			const std::string mtl_file_name = fmt::format("%s/rpcs3_objtest_%X_%d.mtl", dump_dir.c_str(), dump_id, frame_idx);
+			const std::string mtl_file_name = fmt::format("%s/meshdump_%X_%d.mtl", dump_dir.c_str(), dump_id, frame_idx);
 
-			std::ofstream file_obj(fmt::format("%s/rpcs3_objtest_%X_%d.obj", dump_dir.c_str(), dump_id, frame_idx));
+			std::ofstream file_obj(fmt::format("%s/meshdump_%X_%d.obj", dump_dir.c_str(), dump_id, frame_idx));
 			std::string obj_str;
 
-			obj_str += fmt::format("mtllib rpcs3_objtest_%X_%d.mtl\n", dump_id, frame_idx);
+			obj_str += fmt::format("mtllib meshdump_%X_%d.mtl\n", dump_id, frame_idx);
 
 			u32 vertex_index_base{ 1 };
 			u32 vertex_index_base_normal_offset{};
@@ -2686,7 +2686,7 @@ namespace rsx
 			{
 				auto& d = g_mesh_dumper.dumps[dump_idx];
 
-				obj_str += fmt::format("g %d_%X_clr:%d_blk:%d_shd:%d\n", dump_idx, dump_id, d.clear_count, d.blocks.size(), d.shader_id);
+				obj_str += fmt::format("g %d_%X_clr:%d_blk:%d_shd:%08X\n", dump_idx, dump_id, d.clear_count, d.blocks.size(), d.shader_id);
 
 #if MESHDUMP_DEBUG
 				if (auto it = g_dump_texture_info.find((u64)d.texture_raw_data_ptr); it != g_dump_texture_info.end())
@@ -2908,7 +2908,7 @@ namespace rsx
 				};
 #endif
 
-				size_t vertex_count      = 0;
+				size_t vertex_count = 0;
 
 				enum class vertex_format_t
 				{
@@ -2946,20 +2946,14 @@ namespace rsx
 								static_assert(sizeof(mesh_draw_vertex_36) == 36);
 
 								const mesh_draw_vertex_36* vertex_data = (mesh_draw_vertex_36*)block0.vertex_data.data();
-								vertex_count                        = block0.vertex_data.size() / sizeof(mesh_draw_vertex_36);
+								vertex_count                           = block0.vertex_data.size() / sizeof(mesh_draw_vertex_36);
 
 								for (auto i = 0; i < vertex_count; ++i)
 								{
 									const auto& v = vertex_data[i];
-#if MESHDUMP_DEBUG_OLD && MESHDUMP_DEBUG
-									const auto posu = *(uvec3*)(&v.pos);
-									obj_str += fmt::format("v %f %f %f # %08X %08X %08X\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01,
-										posu.x_u, posu.y_u, posu.z_u);
-#else
-									vec3 pos             = transform_pos(i, v.pos, block1_weights);
-									//obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
+									const vec3 pos = transform_pos(i, v.pos, block1_weights);
+									// const auto posu = *(uvec3*)(&v.pos);
 									obj_str += fmt::format("v %f %f %f\n", pos.x, pos.y, pos.z);
-#endif
 									obj_str += fmt::format("vn %f %f %f\n", (float)v.normal.x, (float)v.normal.y, (float)v.normal.z);
 									obj_str += fmt::format("vt %f %f\n", (float)v.uv.u, (float)v.uv.v);
 								}
@@ -2978,7 +2972,7 @@ namespace rsx
 									u32 unk0;
 									vec2be uv;
 								};
-								static_assert(sizeof(mesh_draw_vertex_28) == 0x1C);
+								static_assert(sizeof(mesh_draw_vertex_28) == 28);
 
 								const mesh_draw_vertex_28* vertex_data = (mesh_draw_vertex_28*)block0.vertex_data.data();
 								vertex_count                           = block0.vertex_data.size() / sizeof(mesh_draw_vertex_28);
@@ -2986,15 +2980,9 @@ namespace rsx
 								for (auto i = 0; i < vertex_count; ++i)
 								{
 									const auto& v = vertex_data[i];
-#if MESHDUMP_DEBUG_OLD && MESHDUMP_DEBUG
-									const auto posu = *(uvec3*)(&v.pos);
-									obj_str += fmt::format("v %f %f %f # %08X %08X %08X\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01,
-										posu.x_u, posu.y_u, posu.z_u);
-#else
-									vec3 pos             = transform_pos(i, v.pos, block1_weights);
-									//obj_str += fmt::format("v %f %f %f\n", (float)v.pos.x * .01, (float)v.pos.z * .01, (float)v.pos.y * .01);
+									const vec3 pos             = transform_pos(i, v.pos, block1_weights);
+									// const auto posu = *(uvec3*)(&v.pos);
 									obj_str += fmt::format("v %f %f %f\n", pos.x, pos.y, pos.z);
-#endif
 									obj_str += fmt::format("vt %f %f\n", (float)v.uv.u, (float)v.uv.v);
 								}
 
@@ -3260,7 +3248,7 @@ namespace rsx
 						}
 					}
 
-					if (d.texture_raw_data_ptr)
+					if ((u64)d.texture_raw_data_ptr != 0)
 						g_dump_texture_info[(u64)d.texture_raw_data_ptr].is_used = true;
 				}
 				else
