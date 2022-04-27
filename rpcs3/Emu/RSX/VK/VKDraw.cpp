@@ -1122,7 +1122,8 @@ void VKGSRender::end()
 	{
 		auto& dump     = g_mesh_dumper.dumps.back();
 		//dump.shader_id = (u32)m_program->pipeline;
-		dump.shader_id = (u32)program_hash_util::vertex_program_utils::get_vertex_program_ucode_hash(current_vertex_program);
+		dump.vert_shader_hash = (u32)program_hash_util::vertex_program_utils::get_vertex_program_ucode_hash(current_vertex_program);
+		dump.frag_shader_hash = (u32)program_hash_util::fragment_program_utils::get_fragment_program_ucode_hash(current_fragment_program);
 	}
 
 	// Sync any async scheduler tasks
