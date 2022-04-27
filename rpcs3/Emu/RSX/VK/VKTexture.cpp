@@ -943,6 +943,10 @@ namespace vk
 				dst_image->raw_data.resize(mapped.size());
 				memcpy(dst_image->raw_data.data(), mapped.data(), mapped.size());
 			}
+			else
+			{
+				rsx_log.error("TEXFORMAT IS %X   [%d x %d]", format, layout.width_in_texel, layout.height_in_texel);
+			}
 
 			upload_heap.unmap();
 

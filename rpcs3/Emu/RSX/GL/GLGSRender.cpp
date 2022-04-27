@@ -764,7 +764,8 @@ void GLGSRender::load_program_env()
 	{
 		auto& dump     = g_mesh_dumper.dumps.back();
 		//dump.shader_id = m_program->id();
-		dump.shader_id = (u32)program_hash_util::vertex_program_utils::get_vertex_program_ucode_hash(current_vertex_program);
+		dump.vert_shader_hash = (u32)program_hash_util::vertex_program_utils::get_vertex_program_ucode_hash(current_vertex_program);
+		dump.frag_shader_hash = (u32)program_hash_util::fragment_program_utils::get_fragment_program_ucode_hash(current_fragment_program);
 	}
 
 	if (manually_flush_ring_buffers)

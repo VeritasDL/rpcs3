@@ -54,6 +54,7 @@ struct vec4be
 {
 	be_t<float> x, y, z, w;
 };
+using vec2 = float2;
 using vec3 = float3;
 using vec4 = float4;
 using mat4 = float4x4;
@@ -71,6 +72,9 @@ namespace rsx
 		u32 real_offset_address = 0;
 		u8 memory_location      = 0;
 		u8 attribute_stride     = 0;
+		vertex_base_type attribute_type = {};
+		u8 attribute_size= {};
+		u16 attribute_frequency          = {};
 
 		rsx::simple_array<interleaved_attribute_t> locations;
 
@@ -78,8 +82,11 @@ namespace rsx
 		std::pair<u32, u32> calculate_required_range(u32 first, u32 count) const;
 
 		std::string to_str() const {
-			return fmt::format("{ interleaved: %d, single_vertex: %d, base_offset: 0x%X, real_offset_address: 0x%X, memory_loc: 0x%X, attribute_stride: 0x%X, locs#: %d }",
-				interleaved, single_vertex, base_offset, real_offset_address, memory_location, attribute_stride, locations.size());
+			//return fmt::format("{ {attr: stride: %d type: %d size: %d freq: %d } interl: %d, single_vt: %d, base_offset: 0x%X, real_off_addr: 0x%X, memory_loc: 0x%X, locs#: %d }",
+				//attribute_stride, (u8)attribute_type, attribute_size, attribute_frequency, interleaved, single_vertex, base_offset, real_offset_address, memory_location, locations.size());
+
+			return fmt::format("{ {attr: stride: %d type: %d size: %d freq: %d } interl: %d, m_loc: 0x%X, locs#: %d }",
+				attribute_stride, (u8)attribute_type, attribute_size, attribute_frequency, interleaved, memory_location, locations.size());
 		}
 	};
 } // namespace rsx
@@ -102,7 +109,8 @@ struct mesh_draw_dump
 	std::vector<mesh_draw_dump_block> blocks;
 	std::vector<u32> indices;
 	std::array<float4, 468> vertex_constants_buffer;
-	u32 shader_id;
+	u32 vert_shader_hash;
+	u32 frag_shader_hash;
 };
 struct mesh_dumper
 {

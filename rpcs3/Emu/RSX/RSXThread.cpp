@@ -2061,7 +2061,10 @@ namespace rsx
 				{
 					interleaved_range_info block = {};
 					block.base_offset = base_address;
-					block.attribute_stride = info.stride();
+					block.attribute_stride       = info.stride();
+					block.attribute_type         = info.type();
+					block.attribute_frequency    = info.frequency();
+					block.attribute_size = info.size();
 					block.memory_location = info.offset() >> 31;
 					block.locations.reserve(16);
 					block.locations.push_back({ index, modulo, info.frequency() });
@@ -2654,10 +2657,11 @@ namespace rsx
 		}
 	}
 
-#define MESHDUMP_DEBUG false
+#define MESHDUMP_DEBUG true
 #define MESHDUMP_DEBUG_OLD false
 #define MESHDUMP_POSED true
 #define MESHDUMP_SLY_VERSION 3
+#define MESHDUMP_NOCLIP true
 
 	void thread::flip(const display_flip_info_t& info)
 	{
@@ -2665,28 +2669,33 @@ namespace rsx
 		{
 			Emu.Pause();
 
-			static u32 frame_idx{};
+			static int session_id = time(NULL) & 0xFFFFFF;
+			static u32 dump_index{};
 
-			static int dump_id = time(NULL) & 0xFFFFFF;
-
-			const std::string dump_dir = fmt::format("meshdump_%X", dump_id);
+			const std::string dump_dir = fmt::format("meshdump_%X", session_id);
 			std::filesystem::create_directory(dump_dir);
 
-			const std::string mtl_file_name = fmt::format("%s/meshdump_%X_%d.mtl", dump_dir.c_str(), dump_id, frame_idx);
+			const std::string mtl_file_name = fmt::format("%s/meshdump_%X_%d.mtl", dump_dir.c_str(), session_id, dump_index);
 
-			std::ofstream file_obj(fmt::format("%s/meshdump_%X_%d.obj", dump_dir.c_str(), dump_id, frame_idx));
+			std::ofstream file_obj(fmt::format("%s/meshdump_%X_%d.obj", dump_dir.c_str(), session_id, dump_index));
 			std::string obj_str;
 
-			obj_str += fmt::format("mtllib meshdump_%X_%d.mtl\n", dump_id, frame_idx);
+			obj_str += fmt::format("mtllib meshdump_%X_%d.mtl\n", session_id, dump_index);
 
-			u32 vertex_index_base{ 1 };
+			u32 vertex_index_base{1};
+#if MESHDUMP_NOCLIP
+			vertex_index_base = 0;
+#endif
 			u32 vertex_index_base_normal_offset{};
+
+			//g_mesh_dumper.dumps[4].vertex_constants_buffer
 
 			for (auto dump_idx = 0; dump_idx < g_mesh_dumper.dumps.size(); ++dump_idx)
 			{
 				auto& d = g_mesh_dumper.dumps[dump_idx];
 
-				obj_str += fmt::format("g %d_%X_clr:%d_blk:%d_shd:%08X\n", dump_idx, dump_id, d.clear_count, d.blocks.size(), d.shader_id);
+				obj_str += fmt::format("o %d_%X_vshd:%08X_fshd:%08X_tex:%X_clr:%d_blk:%d\n",
+					dump_idx, session_id, d.vert_shader_hash, d.frag_shader_hash, (u32)d.texture_raw_data_ptr, d.clear_count, d.blocks.size());
 
 #if MESHDUMP_DEBUG
 				if (auto it = g_dump_texture_info.find((u64)d.texture_raw_data_ptr); it != g_dump_texture_info.end())
@@ -2694,6 +2703,22 @@ namespace rsx
 					obj_str += fmt::format("# Texture %dx%d fmt 0x%X\n", it->second.width, it->second.height, it->second.format);
 				}
 #endif
+				//if (g_dump_texture_info.contains((u64)d.texture_raw_data_ptr))
+				//{
+				//	const auto src = (const unsigned char*)((tex_raw_data_ptr_t)d.texture_raw_data_ptr)->data();
+
+				//	if (src == 0 || (u64)src == 0xf || ((u64)src & 0x8000000000000000)) { // hacky af
+				//		obj_str += fmt::format("usemtl 0x0\n");
+				//	}
+				//	else
+				//	{
+				//		obj_str += fmt::format("usemtl 0x%X\n", d.texture_raw_data_ptr);
+				//	}
+				//}
+				//else
+				//{
+				//	obj_str += fmt::format("usemtl 0x0\n");
+				//}
 				obj_str += fmt::format("usemtl 0x%X\n", d.texture_raw_data_ptr);
 
 				//auto dst_ptr = d.vertex_data.data();
@@ -2711,7 +2736,12 @@ namespace rsx
 					auto interleaved_attribute_array_str = [](rsx::simple_array<interleaved_attribute_t> locations) -> std::string {
 						std::string locs_str = "{ ";
 						for (const auto& l : locations)
-							locs_str += fmt::format("%d,", l.index);
+						{
+							if (l.modulo==0&&l.frequency==0)
+								locs_str += fmt::format("%d,", l.index);
+							else
+								locs_str += fmt::format("%d(%d,%d),", l.index, l.modulo, l.frequency);
+						}
 						locs_str.erase(locs_str.size() - 1, 1);
 						locs_str += " }";
 						return locs_str;
@@ -2722,11 +2752,11 @@ namespace rsx
 						block.vertex_data.size() / block.interleaved_range_info.attribute_stride, block.vertex_data.size());
 
 #if MESHDUMP_SLY_VERSION != 4
-					if (i == 0 && (block.interleaved_range_info.attribute_stride == 36 || block.interleaved_range_info.attribute_stride == 28))
-					{
-						hex_str += " # skipping block data log\n";
-					}
-					else
+					//if (i == 0 && (block.interleaved_range_info.attribute_stride == 36 || block.interleaved_range_info.attribute_stride == 28))
+					//{
+						//hex_str += " # skipping block data log\n";
+					//}
+					//else
 #endif
 					{
 						auto dst_ptr = block.vertex_data.data();
@@ -2894,6 +2924,7 @@ namespace rsx
 
 					}
 					else if (use_no_xform)
+					//else 
 					{
 						//out = mul(a, xform_mat_first);
 						//__debugbreak();
@@ -2931,6 +2962,36 @@ namespace rsx
 					const auto* block1_weights = has_bones ? &d.blocks[1] : nullptr;
 					if (block0.interleaved_range_info.interleaved)
 					{
+#if MESHDUMP_NOCLIP
+						if (block0.interleaved_range_info.attribute_stride == 36 && block_count == 3) {
+							struct mesh_draw_vertex_36
+							{
+								vec3be pos;
+								vec3be normal;
+								vec2be uv;
+								u32 unk0;
+							};
+							static_assert(sizeof(mesh_draw_vertex_36) == 36);
+
+							const mesh_draw_vertex_36* vertex_data = (mesh_draw_vertex_36*)block0.vertex_data.data();
+							vertex_count                           = block0.vertex_data.size() / sizeof(mesh_draw_vertex_36);
+
+							for (auto i = 0; i < vertex_count; ++i)
+							{
+								const auto& v  = vertex_data[i];
+								const vec3 pos = transform_pos(i, v.pos, block1_weights);
+								u32 spec         = ((u32*)d.blocks[1].vertex_data.data())[i];
+								u32 diff = ((u32*)d.blocks[2].vertex_data.data())[i];
+
+								obj_str += fmt::format("v36 %f %f %f %f %f %f %f %f %X %X\n",
+									pos.x, pos.y, pos.z, (float)v.normal.x, (float)v.normal.y, (float)v.normal.z,
+									(float)v.uv.u, (float)v.uv.v,
+									spec, diff);
+							}
+
+							vertex_format = vertex_format_t::_36;
+						}
+#else
 						if (block0.interleaved_range_info.attribute_stride == 36)
 						{
 							static bool b1{true};
@@ -2986,13 +3047,15 @@ namespace rsx
 									obj_str += fmt::format("vt %f %f\n", (float)v.uv.u, (float)v.uv.v);
 								}
 
+#if !MESHDUMP_NOCLIP
 								vertex_index_base_normal_offset += vertex_count;
+#endif
 								vertex_format = vertex_format_t::_28;
 							}
 						}
+#endif
 					}
 				}
-
 
 #if 0
 				for (auto& v : d.vertices)
@@ -3213,8 +3276,8 @@ namespace rsx
 						for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
 						{
 							const auto f0 = vertex_index_base + d.indices[tri_idx * 3 + 0] - min_idx;
-							const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx; // Y/Z swap
-							const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx; //
+							const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx;
+							const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx;
 							obj_str += fmt::format("f %d/%d %d/%d %d/%d\n",
 							    f0, f0,
 							    f1, f1,
@@ -3226,8 +3289,8 @@ namespace rsx
 						for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
 						{
 							const auto f0 = vertex_index_base + d.indices[tri_idx * 3 + 0] - min_idx;
-							const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx; // Y/Z swap
-							const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx; //
+							const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx;
+							const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx;
 							obj_str += fmt::format("f %d/%d/%d %d/%d/%d %d/%d/%d\n",
 							    f0, f0, f0 - vertex_index_base_normal_offset,
 							    f1, f1, f1 - vertex_index_base_normal_offset,
@@ -3239,8 +3302,8 @@ namespace rsx
 						for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
 						{
 							const auto f0 = vertex_index_base + d.indices[tri_idx * 3 + 0] - min_idx;
-							const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx; // Y/Z swap
-							const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx; //
+							const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx;
+							const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx;
 							obj_str += fmt::format("f %d/%d %d/%d %d/%d\n",
 								f0, f0,
 								f1, f1,
@@ -3256,11 +3319,15 @@ namespace rsx
 					obj_str += fmt::format("# warning: unsupported, no vertices will be emitted\n");
 				}
 
+#if !MESHDUMP_NOCLIP
 				vertex_index_base += vertex_count;
+#endif
 			}
 
 			file_obj.write(obj_str.c_str(), obj_str.size());
-					
+
+			// TODO(?): hash-based texture storage/indexing
+
 			std::ofstream file_mtl(mtl_file_name);
 			std::string mtl_str;
 
@@ -3271,10 +3338,8 @@ namespace rsx
 				if (!info_.is_used)
 					continue;
 
-				mtl_str += fmt::format("newmtl 0x%X\n", (u64)raw_data_ptr);
-
-				const std::string tex_dir_name = fmt::format("%s/textures_%d", dump_dir.c_str(), frame_idx);
-				const std::string tex_dir_name_rel = fmt::format("textures_%d", frame_idx);
+				const std::string tex_dir_name = fmt::format("%s/textures_%d", dump_dir.c_str(), dump_index);
+				const std::string tex_dir_name_rel = fmt::format("textures_%d", dump_index);
 				std::filesystem::create_directory(tex_dir_name);
 
 				const std::string tex_file_name = fmt::format("%s/0x%X.png", tex_dir_name, (u64)raw_data_ptr);
@@ -3367,7 +3432,7 @@ namespace rsx
 				// argb -> rgba
 				// also a sly specific thing, it's PS2 port, and GS's RGBA reg alpha is weird like that
 
-				mtl_str += fmt::format("newmtl 0x%X\n", raw_data_ptr);
+				mtl_str += fmt::format("newmtl 0x%X\n", (u64)raw_data_ptr);
 				mtl_str += fmt::format("map_Kd %s\n", tex_file_name_rel.c_str());
 				mtl_str += fmt::format("Ns 10\n"); // TODO: check
 				if (!is_fully_opaque)
@@ -3385,9 +3450,26 @@ namespace rsx
 					__debugbreak();
 			}
 
+#if MESHDUMP_NOCLIP
+			work_buf.resize(4);
+			work_buf[0] = 0x00;
+			work_buf[1] = 0x00;
+			work_buf[2] = 0x00;
+			work_buf[3] = 0x00;
+			for (auto& d : g_mesh_dumper.dumps)
+			{
+				const std::string tex_dir_name     = fmt::format("%s/textures_%d", dump_dir.c_str(), dump_index);
+				const std::string tex_file_name = fmt::format("%s/0x%X.png", tex_dir_name, (u64)d.texture_raw_data_ptr);
+
+				if (!std::filesystem::exists(tex_file_name))
+					if (!stbi_write_png(tex_file_name.c_str(), 1, 1, 4, work_buf.data(), 1 * 4))
+						__debugbreak();
+			}
+#endif
+
 			file_mtl.write(mtl_str.c_str(), mtl_str.size());
 
-			frame_idx++;
+			dump_index++;
 
 			g_dump_texture_info.clear();
 			g_mesh_dumper.enabled            = false;
