@@ -2935,7 +2935,8 @@ namespace rsx
 					{
 						out = mul(a, xform_mat);
 					}
-					return {out.x * 0.01f, out.y * 0.01f, out.z * 0.01f};
+					//return {out.x * 0.01f, out.y * 0.01f, out.z * 0.01f};
+					return {out.x, out.y, out.z};
 				};
 #endif
 
@@ -2956,6 +2957,19 @@ namespace rsx
 #if MESHDUMP_SLY_VERSION != 4
 				// TODO: vertex color support
 
+				auto emit_vc_data = [&]() {
+					obj_str += fmt::format("vc %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
+						vcb[17].x, vcb[17].y, vcb[17].z, vcb[17].w,
+						vcb[18].x, vcb[18].y, vcb[18].z, vcb[18].w,
+						vcb[19].x, vcb[19].y, vcb[19].z, vcb[19].w,
+						vcb[29].x, vcb[29].y, vcb[29].z, vcb[29].w,
+						vcb[0].x, vcb[0].y, vcb[0].z, vcb[0].w,
+						vcb[1].x, vcb[1].y, vcb[1].z, vcb[1].w,
+						vcb[2].x, vcb[2].y, vcb[2].z, vcb[2].w,
+						vcb[3].x, vcb[3].y, vcb[3].z, vcb[3].w);
+				};
+
+
 				if (block_count > 0)
 				{
 					const auto& block0 = d.blocks[0];
@@ -2964,6 +2978,8 @@ namespace rsx
 					{
 #if MESHDUMP_NOCLIP
 						if (block0.interleaved_range_info.attribute_stride == 36 && block_count == 3) {
+							emit_vc_data();
+
 							struct mesh_draw_vertex_36
 							{
 								vec3be pos;
