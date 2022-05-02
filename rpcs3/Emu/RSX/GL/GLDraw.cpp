@@ -7,6 +7,7 @@
 #include "../Common/BufferUtils.h"
 
 #include <Emu/RSX/RSXThread.h>
+#include <Emu/RSX/meshdump.h>
 
 namespace gl
 {
@@ -340,7 +341,7 @@ void GLGSRender::load_texture_env()
 		    sampler_state->image_type == rsx::texture_dimension_extended::texture_dimension_2d &&
 		    sampler_state->format_class == rsx::format_class::RSX_FORMAT_CLASS_COLOR)
 		{
-			auto& dump = g_mesh_dumper.dumps.back();
+			auto& dump = g_mesh_dumper.get_dump();
 			dump.texture_raw_data_ptr = &sampler_state->image_handle->image()->raw_data;
 
 			texture_info_t tex_info{};
@@ -529,7 +530,7 @@ void GLGSRender::emit_geometry(u32 sub_index)
 
 	if (g_mesh_dumper.enabled && upload_info.index_info.has_value())
 	{
-		auto& mesh_draw_dump = g_mesh_dumper.dumps.back();
+		auto& mesh_draw_dump = g_mesh_dumper.get_dump();
 
 		if (!mesh_draw_dump.indices.empty())
 			__debugbreak();
@@ -710,7 +711,7 @@ void GLGSRender::end()
 	{
 		mesh_draw_dump d{};
 		d.clear_count = g_clears_this_frame;
-		g_mesh_dumper.dumps.push_back(d);
+		g_mesh_dumper.push_dump(d);
 	}
 
 	analyse_current_rsx_pipeline();

@@ -9,6 +9,7 @@
 #include "vkutils/buffer_object.h"
 
 #include <Emu/RSX/RSXThread.h>
+#include <Emu/RSX/meshdump.h>
 
 namespace vk
 {
@@ -374,7 +375,7 @@ void VKGSRender::load_texture_env()
 		    sampler_state->image_type == rsx::texture_dimension_extended::texture_dimension_2d &&
 		    sampler_state->format_class == rsx::format_class::RSX_FORMAT_CLASS_COLOR)
 		{
-			auto& dump                = g_mesh_dumper.dumps.back();
+			auto& dump                = g_mesh_dumper.get_dump();
 			dump.texture_raw_data_ptr = &sampler_state->image_handle->image()->raw_data;
 
 			texture_info_t tex_info{};

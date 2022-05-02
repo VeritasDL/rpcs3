@@ -13,6 +13,7 @@
 #include "Emu/Cell/Modules/cellVideoOut.h"
 #include "Emu/RSX/rsx_utils.h"
 #include "Emu/RSX/Overlays/overlay_message.h"
+#include <Emu/RSX/meshdump.h>
 
 #include <QApplication>
 #include <QDateTime>

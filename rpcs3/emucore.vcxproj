@@ -438,6 +438,7 @@
     <ClCompile Include="Emu\RSX\GSRender.cpp" />
     <ClCompile Include="Emu\RSX\RSXTexture.cpp" />
     <ClCompile Include="Emu\RSX\RSXThread.cpp" />
+    <ClCompile Include="Emu\RSX\meshdump.cpp" />
     <ClCompile Include="Emu\Memory\vm.cpp" />
     <ClCompile Include="Emu\System.cpp" />
     <ClCompile Include="Emu\GDB.cpp" />
@@ -800,7 +801,7 @@
     <ClInclude Include="Emu\RSX\Null\NullGSRender.h" />
     <ClInclude Include="Emu\RSX\Program\RSXFragmentProgram.h" />
     <ClInclude Include="Emu\RSX\RSXTexture.h" />
-    <ClInclude Include="Emu\RSX\RSXThread.h" />
+    <ClInclude Include="Emu\RSX\meshdump.h" />
     <ClInclude Include="Emu\RSX\Program\RSXVertexProgram.h" />
     <ClInclude Include="Emu\Memory\vm.h" />
     <ClInclude Include="Emu\Memory\vm_ptr.h" />

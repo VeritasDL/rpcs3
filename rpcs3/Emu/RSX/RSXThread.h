@@ -32,109 +32,41 @@
 #include <map>
 #include <mutex>
 
-#include <Emu/RSX/linalg.h>
-using namespace linalg::aliases;
-
 extern atomic_t<bool> g_user_asked_for_frame_capture;
 extern atomic_t<bool> g_disable_frame_limit; 
 extern rsx::frame_trace_data frame_debug;
 extern rsx::frame_capture_data frame_capture;
-
-struct vec2be
-{
-	be_t<float> u, v;
-};
-struct vec3be
-{
-	be_t<float> x, y, z;
-};
-struct uvec3
-{
-	u32 x_u, y_u, z_u;
-};
-struct vec4be
-{
-	be_t<float> x, y, z, w;
-};
-using vec2 = float2;
-using vec3 = float3;
-using vec4 = float4;
-using mat4 = float4x4;
-using mat4 = float4x4;
-
 
 namespace rsx
 {
 	struct interleaved_attribute_t;
 	struct interleaved_range_info
 	{
-		bool interleaved        = false;
-		bool single_vertex      = false;
-		u32 base_offset         = 0;
-		u32 real_offset_address = 0;
-		u8 memory_location      = 0;
-		u8 attribute_stride     = 0;
+		bool interleaved                = false;
+		bool single_vertex              = false;
+		u32 base_offset                 = 0;
+		u32 real_offset_address         = 0;
+		u8 memory_location              = 0;
+		u8 attribute_stride             = 0;
 		vertex_base_type attribute_type = {};
-		u8 attribute_size= {};
-		u16 attribute_frequency          = {};
+		u8 attribute_size               = {};
+		u16 attribute_frequency         = {};
 
 		rsx::simple_array<interleaved_attribute_t> locations;
 
 		// Check if we need to upload a full unoptimized range, i.e [0-max_index]
 		std::pair<u32, u32> calculate_required_range(u32 first, u32 count) const;
 
-		std::string to_str() const {
+		std::string to_str() const
+		{
 			//return fmt::format("{ {attr: stride: %d type: %d size: %d freq: %d } interl: %d, single_vt: %d, base_offset: 0x%X, real_off_addr: 0x%X, memory_loc: 0x%X, locs#: %d }",
-				//attribute_stride, (u8)attribute_type, attribute_size, attribute_frequency, interleaved, single_vertex, base_offset, real_offset_address, memory_location, locations.size());
+			//attribute_stride, (u8)attribute_type, attribute_size, attribute_frequency, interleaved, single_vertex, base_offset, real_offset_address, memory_location, locations.size());
 
 			return fmt::format("{ {attr: stride: %d type: %d size: %d freq: %d } interl: %d, m_loc: 0x%X, locs#: %d }",
 				attribute_stride, (u8)attribute_type, attribute_size, attribute_frequency, interleaved, memory_location, locations.size());
 		}
 	};
 } // namespace rsx
-
-struct mesh_draw_dump_block
-{
-	std::vector<u8> vertex_data;
-	rsx::interleaved_range_info interleaved_range_info;
-};
-
-using tex_raw_data_ptr_t = std::vector<std::byte>*;
-
-struct mesh_draw_dump
-{
-	u32 clear_count;
-	//std::vector<mesh_draw_vertex> vertices;
-	//std::vector<u8> vertex_data;
-	tex_raw_data_ptr_t texture_raw_data_ptr;
-	std::vector<u8> volatile_data;
-	std::vector<mesh_draw_dump_block> blocks;
-	std::vector<u32> indices;
-	std::array<float4, 468> vertex_constants_buffer;
-	u32 vert_shader_hash;
-	u32 frag_shader_hash;
-};
-struct mesh_dumper
-{
-	std::vector<mesh_draw_dump> dumps;
-
-	bool enabled{};
-	bool enable_this_frame{};
-	bool enable_this_frame2{};
-};
-extern mesh_dumper g_mesh_dumper;
-extern std::mutex g_mesh_dumper_mtx;
-extern u32 g_clears_this_frame;
-
-struct texture_info_t
-{
-	u32 width;
-	u32 height;
-	u8 format; // CELL_GCM_TEXTURE_*
-	bool is_used;
-};
-// key is tex_raw_data_ptr_t (can't actually use it)
-extern std::map<u64, texture_info_t> g_dump_texture_info;
 
 namespace rsx
 {

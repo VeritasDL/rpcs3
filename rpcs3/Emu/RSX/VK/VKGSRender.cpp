@@ -15,6 +15,7 @@
 #include "vkutils/scratch.h"
 
 #include "Emu/RSX/rsx_methods.h"
+#include <Emu/RSX/meshdump.h>
 #include "Emu/Memory/vm_locking.h"
 
 #include "../Program/program_state_cache2.hpp"
