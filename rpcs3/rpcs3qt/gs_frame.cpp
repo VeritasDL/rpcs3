@@ -12,6 +12,7 @@
 #include "Emu/Cell/Modules/cellScreenshot.h"
 #include "Emu/Cell/Modules/cellVideoOut.h"
 #include "Emu/RSX/rsx_utils.h"
+#include <Emu/RSX/meshdump.h>
 
 #include <QApplication>
 #include <QDateTime>
