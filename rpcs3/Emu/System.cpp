@@ -228,7 +228,7 @@ void init_fxo_for_exec(utils::serial* ar, bool full = false)
 
 	fxo_serialize<struct lv2_memory_container>(ar); // Must be first!
 
-	fxo_serialize<struct loaded_npdrm_keys>(ar);
+	//fxo_serialize<struct loaded_npdrm_keys>(ar);
 	fxo_serialize_body<id_manager::id_map<named_thread<ppu_thread>>>(ar);
 	fxo_serialize_body<id_manager::id_map<lv2_obj>>(ar); // Dependancy on PPUs
 	fxo_serialize_body<id_manager::id_map<named_thread<spu_thread>>>(ar);
