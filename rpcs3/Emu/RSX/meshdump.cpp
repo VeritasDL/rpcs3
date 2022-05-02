@@ -17,6 +17,10 @@
 #define MESHDUMP_POSED true
 #define MESHDUMP_SLY_VERSION 3
 #define MESHDUMP_NOCLIP true
+#define MESHDUMP_BATCH_DUMPS true
+
+//#pragma optimize("", off)
+
 using namespace rsx;
 
 // todo move
@@ -76,6 +80,12 @@ namespace neolib
 	}
 } // namespace neolib
 
+// key is tex_raw_data_ptr_t (can't actually use it)
+std::map<u64, texture_info_t> g_dump_texture_info;
+mesh_dumper g_mesh_dumper{};
+std::mutex g_mesh_dumper_mtx{};
+u32 g_clears_this_frame{};
+
 void mesh_dumper::push_block(const mesh_draw_dump_block& block)
 {
 	auto& mesh_draw_dump = dumps.back();
@@ -128,13 +138,31 @@ void mesh_dumper::dump()
 	v[3][0] = m[i++]; v[3][1] = m[i++]; v[3][2] = m[i++]; v[3][3] = m[i++];
 	inv_view_mat = linalg::inverse(inv_view_mat);
 #endif
+	std::map<u32, u32> hmm;
+	for (auto dump_idx = 0; dump_idx < g_mesh_dumper.dumps.size(); ++dump_idx)
+	{
+		auto& d = g_mesh_dumper.dumps[dump_idx];
+		hmm[(u32)d.texture_raw_data_ptr]++;
+	}
+
+#if MESHDUMP_BATCH_DUMPS
+	std::sort(g_mesh_dumper.dumps.begin(), g_mesh_dumper.dumps.end(), [](const mesh_draw_dump& d0, const mesh_draw_dump& d1) {
+		return (u64)d0.texture_raw_data_ptr < (u64)d1.texture_raw_data_ptr;
+	});
+#endif
+	bool new_dump = true;
 
 	for (auto dump_idx = 0; dump_idx < g_mesh_dumper.dumps.size(); ++dump_idx)
 	{
 		auto& d = g_mesh_dumper.dumps[dump_idx];
 
-		obj_str += fmt::format("o %d_%X_vshd:%08X_fshd:%08X_tex:%X_clr:%d_blk:%d\n",
-			dump_idx, session_id, d.vert_shader_hash, d.frag_shader_hash, (u32)d.texture_raw_data_ptr, d.clear_count, d.blocks.size());
+#if MESHDUMP_BATCH_DUMPS
+		if (dump_idx > 0)
+			new_dump = ((u64)d.texture_raw_data_ptr != (u64)g_mesh_dumper.dumps[dump_idx - 1].texture_raw_data_ptr);
+#endif
+
+		obj_str += fmt::format("%s %d_%X_vshd:%08X_fshd:%08X_tex:%X_clr:%d_blk:%d\n",
+			new_dump ? "o" : "g", dump_idx, session_id, d.vert_shader_hash, d.frag_shader_hash, (u32)d.texture_raw_data_ptr, d.clear_count, d.blocks.size());
 
 #if MESHDUMP_DEBUG
 		if (auto it = g_dump_texture_info.find((u64)d.texture_raw_data_ptr); it != g_dump_texture_info.end())
@@ -158,7 +186,8 @@ void mesh_dumper::dump()
 		//{
 		//	obj_str += fmt::format("usemtl 0x0\n");
 		//}
-		obj_str += fmt::format("usemtl 0x%X\n", d.texture_raw_data_ptr);
+		if (new_dump)
+			obj_str += fmt::format("usemtl 0x%X\n", d.texture_raw_data_ptr);
 
 		//auto dst_ptr = d.vertex_data.data();
 		//std::stringstream hex_ss;
@@ -235,22 +264,6 @@ void mesh_dumper::dump()
 				dot(v0, v1[1]),
 				dot(v0, v1[2]),
 				dot(v0, v1[3])};
-		};
-
-		auto mul43 = [&](const float4& v0, const mat4& v1) -> float4 {
-			return {
-				dot(v0, v1[0]),
-				dot(v0, v1[1]),
-				dot(v0, v1[2]),
-				1};
-		};
-
-		auto mul_scalar_mat4 = [&](float f, const mat4& m) -> mat4 {
-			return {
-				{m[0].x * f, m[0].y * f, m[0].y * f, m[0].z * f},
-				{m[1].x * f, m[1].y * f, m[1].y * f, m[1].z * f},
-				{m[2].x * f, m[2].y * f, m[2].y * f, m[2].z * f},
-				{m[3].x * f, m[3].y * f, m[3].y * f, m[3].z * f}};
 		};
 
 		auto print_vec4 = [](float4 v) {
@@ -457,13 +470,13 @@ void mesh_dumper::dump()
 					{
 						const auto& v  = vertex_data[i];
 						const vec3 pos = transform_pos(i, v.pos, block1_weights);
-						u32 diff       = ((u32*)d.blocks[1].vertex_data.data())[i];
+						const u32 diff       = ((u32*)d.blocks[1].vertex_data.data())[i];
 
 						const bool has_spec = (draw_type == sly3_normal);
 
 						if (has_spec)
 						{
-							u32 spec = ((u32*)d.blocks[2].vertex_data.data())[i];
+							const u32 spec = ((u32*)d.blocks[2].vertex_data.data())[i];
 
 							obj_str += fmt::format("v36s %f %f %f %f %f %f %f %f %X %X\n",
 								pos.x, pos.y, pos.z, (float)v.normal.x, (float)v.normal.y, (float)v.normal.z,
@@ -583,9 +596,11 @@ void mesh_dumper::dump()
 #endif
 #endif
 
+#if MESHDUMP_DEBUG
 		obj_str += "# VertexConstantsBuffer:\n";
 		for (auto i = 0; i < 60; i++)
 			obj_str += fmt::format(" # %02d: %s\n", i, print_vec4(d.vertex_constants_buffer[i]));
+#endif
 
 #if 1
 #if MESHDUMP_SLY_VERSION == 4
@@ -751,6 +766,11 @@ void mesh_dumper::dump()
 
 		if (vertex_count > 0 && index_count > 0)
 		{
+#if MESHDUMP_NOCLIP && MESHDUMP_BATCH_DUMPS
+			if (new_dump)
+				vertex_index_base = 0;
+#endif
+
 #if MESHDUMP_DEBUG
 			obj_str += fmt::format("# base is %d\n", vertex_index_base);
 #endif
@@ -809,7 +829,7 @@ void mesh_dumper::dump()
 			obj_str += fmt::format("# warning: unsupported, no vertices will be emitted\n");
 		}
 
-#if !MESHDUMP_NOCLIP
+#if !MESHDUMP_NOCLIP || MESHDUMP_BATCH_DUMPS
 		vertex_index_base += vertex_count;
 #endif
 	}
