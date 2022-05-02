@@ -112,7 +112,159 @@ void mesh_dumper::dump()
 	const std::string dump_dir = fmt::format("meshdump_%X", session_id);
 	std::filesystem::create_directory(dump_dir);
 
+	//
+	// DUMP MATERIALS
+	//
+
+	// TODO(?): hash-based texture storage/indexing
+
 	const std::string mtl_file_name = fmt::format("%s/meshdump_%X_%d.mtl", dump_dir.c_str(), session_id, dump_index);
+
+	std::ofstream file_mtl(mtl_file_name);
+	std::string mtl_str;
+
+	std::vector<u8> work_buf;
+	std::vector<u8> final_data;
+	for (auto [raw_data_ptr, info_] : g_dump_texture_info)
+	{
+		if (!info_.is_used)
+			continue;
+
+		const std::string tex_dir_name     = fmt::format("%s/textures_%d", dump_dir.c_str(), dump_index);
+		const std::string tex_dir_name_rel = fmt::format("textures_%d", dump_index);
+		std::filesystem::create_directory(tex_dir_name);
+
+		const std::string tex_file_name     = fmt::format("%s/0x%X.png", tex_dir_name, (u64)raw_data_ptr);
+		const std::string tex_file_name_rel = fmt::format("%s/0x%X.png", tex_dir_name_rel, (u64)raw_data_ptr);
+
+		const auto src = (const unsigned char*)((tex_raw_data_ptr_t)raw_data_ptr)->data();
+
+		if (src == 0 || (u64)src == 0xf || ((u64)src & 0x8000000000000000)) // hacky af
+		{
+			mtl_str += fmt::format("# warning: skipped texture, src is 0\n");
+			continue;
+		}
+
+		final_data.resize(info_.width * info_.height * 4);
+
+		bool is_fully_opaque = true;
+
+		if (info_.format == CELL_GCM_TEXTURE_COMPRESSED_DXT45)
+		{
+			BlockDecompressImageDXT5(info_.width, info_.height, src, (unsigned long*)final_data.data());
+			for (auto i = 0; i < final_data.size() / 4; ++i)
+			{
+				u32* ptr    = &((u32*)final_data.data())[i];
+				const u32 v = *ptr;
+				if ((v & 0x000000FF) == 0x00000080)
+				{
+					*ptr = (((v & 0xFF000000) >> 24) |
+							((v & 0x00FF0000) >> 8) |
+							((v & 0x0000FF00) << 8) |
+							0xFF000000);
+				}
+				else
+				{
+					*ptr            = (((v & 0xFF000000) >> 24) |
+                            ((v & 0x00FF0000) >> 8) |
+                            ((v & 0x0000FF00) << 8) |
+                            (((v & 0x000000FF) * 2) << 24));
+					is_fully_opaque = false;
+				}
+			}
+		}
+		else if (info_.format == CELL_GCM_TEXTURE_COMPRESSED_DXT1) // Sly 4
+		{
+			BlockDecompressImageDXT1(info_.width, info_.height, src, (unsigned long*)final_data.data());
+			for (auto i = 0; i < final_data.size() / 4; ++i)
+			{
+				u32* ptr    = &((u32*)final_data.data())[i];
+				const u32 v = *ptr;
+				if ((v & 0x000000FF) != 0x000000FF)
+				{
+					is_fully_opaque = false;
+				}
+				*ptr = (((v & 0xFF000000) >> 24) |
+						((v & 0x00FF0000) >> 8) |
+						((v & 0x0000FF00) << 8) |
+						(((v & 0x000000FF) * 2) << 24));
+			}
+		}
+		else if ((info_.format & CELL_GCM_TEXTURE_A8R8G8B8) == CELL_GCM_TEXTURE_A8R8G8B8)
+		{
+			memcpy(final_data.data(), src, info_.width * info_.height * 4);
+			for (auto i = 0; i < final_data.size() / 4; ++i)
+			{
+				u32* ptr    = &((u32*)final_data.data())[i];
+				*ptr        = _byteswap_ulong(*ptr);
+				const u32 v = *ptr;
+				//is_fully_opaque &= ((v & 0xFF000000) == 0x80000000);
+				if ((v & 0x000000FF) == 0x00000080)
+				{
+					*ptr = (((v & 0xFF000000) >> 8) |
+							((v & 0x00FF0000) >> 8) |
+							((v & 0x0000FF00) >> 8) |
+							0xFF000000);
+				}
+				else
+				{
+					*ptr            = (((v & 0xFF000000) >> 8) |
+                            ((v & 0x00FF0000) >> 8) |
+                            ((v & 0x0000FF00) >> 8) |
+                            (((v & 0x000000FF) * 2) << 24));
+					is_fully_opaque = false;
+				}
+			}
+		}
+		//else
+		//{
+		//	mtl_str += fmt::format("# warning: skipped texture, format is 0x%X\n", info_.format);
+		//}
+
+		// argb -> rgba
+		// also a sly specific thing, it's PS2 port, and GS's RGBA reg alpha is weird like that
+
+		mtl_str += fmt::format("newmtl 0x%X\n", (u64)raw_data_ptr);
+		mtl_str += fmt::format("map_Kd %s\n", tex_file_name_rel.c_str());
+		mtl_str += fmt::format("Ns 10\n"); // TODO: check
+		if (!is_fully_opaque)
+			mtl_str += fmt::format("map_D %s\n", tex_file_name_rel.c_str());
+
+		work_buf.resize(final_data.size());
+		// copy flipped on Y
+		const auto stride = info_.width * 4;
+		for (auto i = 0; i < info_.height; i++)
+		{
+			memcpy(work_buf.data() + i * stride, final_data.data() + (final_data.size() - ((i + 1) * stride)), stride);
+		}
+
+		if (!stbi_write_png(tex_file_name.c_str(), info_.width, info_.height, 4, work_buf.data(), info_.width * 4))
+			__debugbreak();
+	}
+
+#if MESHDUMP_NOCLIP
+	work_buf.resize(4);
+	work_buf[0] = 0x00;
+	work_buf[1] = 0x00;
+	work_buf[2] = 0x00;
+	work_buf[3] = 0x00;
+	for (auto& d : g_mesh_dumper.dumps)
+	{
+		const std::string tex_dir_name  = fmt::format("%s/textures_%d", dump_dir.c_str(), dump_index);
+		const std::string tex_file_name = fmt::format("%s/0x%X.png", tex_dir_name, (u64)d.texture_raw_data_ptr);
+
+		if (!std::filesystem::exists(tex_file_name))
+			if (!stbi_write_png(tex_file_name.c_str(), 1, 1, 4, work_buf.data(), 1 * 4))
+				__debugbreak();
+	}
+#endif
+
+	file_mtl.write(mtl_str.c_str(), mtl_str.size());
+
+	
+	//
+	// DUMP MESHES
+	//
 
 	std::ofstream file_obj(fmt::format("%s/meshdump_%X_%d.obj", dump_dir.c_str(), session_id, dump_index));
 	std::string obj_str;
@@ -835,149 +987,6 @@ void mesh_dumper::dump()
 	}
 
 	file_obj.write(obj_str.c_str(), obj_str.size());
-
-	// TODO(?): hash-based texture storage/indexing
-
-	std::ofstream file_mtl(mtl_file_name);
-	std::string mtl_str;
-
-	std::vector<u8> work_buf;
-	std::vector<u8> final_data;
-	for (auto [raw_data_ptr, info_] : g_dump_texture_info)
-	{
-		if (!info_.is_used)
-			continue;
-
-		const std::string tex_dir_name     = fmt::format("%s/textures_%d", dump_dir.c_str(), dump_index);
-		const std::string tex_dir_name_rel = fmt::format("textures_%d", dump_index);
-		std::filesystem::create_directory(tex_dir_name);
-
-		const std::string tex_file_name     = fmt::format("%s/0x%X.png", tex_dir_name, (u64)raw_data_ptr);
-		const std::string tex_file_name_rel = fmt::format("%s/0x%X.png", tex_dir_name_rel, (u64)raw_data_ptr);
-
-		const auto src = (const unsigned char*)((tex_raw_data_ptr_t)raw_data_ptr)->data();
-
-		if (src == 0 || (u64)src == 0xf || ((u64)src & 0x8000000000000000)) // hacky af
-		{
-			mtl_str += fmt::format("# warning: skipped texture, src is 0\n");
-			continue;
-		}
-
-		final_data.resize(info_.width * info_.height * 4);
-
-		bool is_fully_opaque = true;
-
-		if (info_.format == CELL_GCM_TEXTURE_COMPRESSED_DXT45)
-		{
-			BlockDecompressImageDXT5(info_.width, info_.height, src, (unsigned long*)final_data.data());
-			for (auto i = 0; i < final_data.size() / 4; ++i)
-			{
-				u32* ptr    = &((u32*)final_data.data())[i];
-				const u32 v = *ptr;
-				if ((v & 0x000000FF) == 0x00000080)
-				{
-					*ptr = (((v & 0xFF000000) >> 24) |
-							((v & 0x00FF0000) >> 8) |
-							((v & 0x0000FF00) << 8) |
-							0xFF000000);
-				}
-				else
-				{
-					*ptr            = (((v & 0xFF000000) >> 24) |
-                            ((v & 0x00FF0000) >> 8) |
-                            ((v & 0x0000FF00) << 8) |
-                            (((v & 0x000000FF) * 2) << 24));
-					is_fully_opaque = false;
-				}
-			}
-		}
-		else if (info_.format == CELL_GCM_TEXTURE_COMPRESSED_DXT1) // Sly 4
-		{
-			BlockDecompressImageDXT1(info_.width, info_.height, src, (unsigned long*)final_data.data());
-			for (auto i = 0; i < final_data.size() / 4; ++i)
-			{
-				u32* ptr    = &((u32*)final_data.data())[i];
-				const u32 v = *ptr;
-				if ((v & 0x000000FF) != 0x000000FF)
-				{
-					is_fully_opaque = false;
-				}
-				*ptr = (((v & 0xFF000000) >> 24) |
-						((v & 0x00FF0000) >> 8) |
-						((v & 0x0000FF00) << 8) |
-						(((v & 0x000000FF) * 2) << 24));
-			}
-		}
-		else if ((info_.format & CELL_GCM_TEXTURE_A8R8G8B8) == CELL_GCM_TEXTURE_A8R8G8B8)
-		{
-			memcpy(final_data.data(), src, info_.width * info_.height * 4);
-			for (auto i = 0; i < final_data.size() / 4; ++i)
-			{
-				u32* ptr    = &((u32*)final_data.data())[i];
-				*ptr        = _byteswap_ulong(*ptr);
-				const u32 v = *ptr;
-				//is_fully_opaque &= ((v & 0xFF000000) == 0x80000000);
-				if ((v & 0x000000FF) == 0x00000080)
-				{
-					*ptr = (((v & 0xFF000000) >> 8) |
-							((v & 0x00FF0000) >> 8) |
-							((v & 0x0000FF00) >> 8) |
-							0xFF000000);
-				}
-				else
-				{
-					*ptr            = (((v & 0xFF000000) >> 8) |
-                            ((v & 0x00FF0000) >> 8) |
-                            ((v & 0x0000FF00) >> 8) |
-                            (((v & 0x000000FF) * 2) << 24));
-					is_fully_opaque = false;
-				}
-			}
-		}
-		//else
-		//{
-		//	mtl_str += fmt::format("# warning: skipped texture, format is 0x%X\n", info_.format);
-		//}
-
-		// argb -> rgba
-		// also a sly specific thing, it's PS2 port, and GS's RGBA reg alpha is weird like that
-
-		mtl_str += fmt::format("newmtl 0x%X\n", (u64)raw_data_ptr);
-		mtl_str += fmt::format("map_Kd %s\n", tex_file_name_rel.c_str());
-		mtl_str += fmt::format("Ns 10\n"); // TODO: check
-		if (!is_fully_opaque)
-			mtl_str += fmt::format("map_D %s\n", tex_file_name_rel.c_str());
-
-		work_buf.resize(final_data.size());
-		// copy flipped on Y
-		const auto stride = info_.width * 4;
-		for (auto i = 0; i < info_.height; i++)
-		{
-			memcpy(work_buf.data() + i * stride, final_data.data() + (final_data.size() - ((i + 1) * stride)), stride);
-		}
-
-		if (!stbi_write_png(tex_file_name.c_str(), info_.width, info_.height, 4, work_buf.data(), info_.width * 4))
-			__debugbreak();
-	}
-
-#if MESHDUMP_NOCLIP
-	work_buf.resize(4);
-	work_buf[0] = 0x00;
-	work_buf[1] = 0x00;
-	work_buf[2] = 0x00;
-	work_buf[3] = 0x00;
-	for (auto& d : g_mesh_dumper.dumps)
-	{
-		const std::string tex_dir_name  = fmt::format("%s/textures_%d", dump_dir.c_str(), dump_index);
-		const std::string tex_file_name = fmt::format("%s/0x%X.png", tex_dir_name, (u64)d.texture_raw_data_ptr);
-
-		if (!std::filesystem::exists(tex_file_name))
-			if (!stbi_write_png(tex_file_name.c_str(), 1, 1, 4, work_buf.data(), 1 * 4))
-				__debugbreak();
-	}
-#endif
-
-	file_mtl.write(mtl_str.c_str(), mtl_str.size());
 
 	dump_index++;
 
