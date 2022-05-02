@@ -75,6 +75,7 @@ struct texture_info_t
 	u32 height;
 	u8 format; // CELL_GCM_TEXTURE_*
 	bool is_used;
+	bool is_opaque;
 };
 
 // key is tex_raw_data_ptr_t (can't actually use it)

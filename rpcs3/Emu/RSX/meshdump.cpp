@@ -19,7 +19,7 @@
 #define MESHDUMP_NOCLIP true
 #define MESHDUMP_BATCH_DUMPS true
 
-//#pragma optimize("", off)
+#pragma optimize("", off)
 
 using namespace rsx;
 
@@ -112,11 +112,23 @@ void mesh_dumper::dump()
 	const std::string dump_dir = fmt::format("meshdump_%X", session_id);
 	std::filesystem::create_directory(dump_dir);
 
+	const std::string tex_dir_name = fmt::format("%s/textures_%d", dump_dir.c_str(), dump_index);
+	std::filesystem::create_directory(tex_dir_name);
+
 	//
 	// DUMP MATERIALS
 	//
 
 	// TODO(?): hash-based texture storage/indexing
+
+	
+	for (auto dump_idx = 0; dump_idx < g_mesh_dumper.dumps.size(); ++dump_idx)
+	{
+		auto& d = g_mesh_dumper.dumps[dump_idx];
+
+		if ((u64)d.texture_raw_data_ptr != 0)
+			g_dump_texture_info[(u64)d.texture_raw_data_ptr].is_used = true;
+	}
 
 	const std::string mtl_file_name = fmt::format("%s/meshdump_%X_%d.mtl", dump_dir.c_str(), session_id, dump_index);
 
@@ -125,15 +137,12 @@ void mesh_dumper::dump()
 
 	std::vector<u8> work_buf;
 	std::vector<u8> final_data;
-	for (auto [raw_data_ptr, info_] : g_dump_texture_info)
+	for (auto& [raw_data_ptr, info_] : g_dump_texture_info)
 	{
 		if (!info_.is_used)
 			continue;
 
-		const std::string tex_dir_name     = fmt::format("%s/textures_%d", dump_dir.c_str(), dump_index);
 		const std::string tex_dir_name_rel = fmt::format("textures_%d", dump_index);
-		std::filesystem::create_directory(tex_dir_name);
-
 		const std::string tex_file_name     = fmt::format("%s/0x%X.png", tex_dir_name, (u64)raw_data_ptr);
 		const std::string tex_file_name_rel = fmt::format("%s/0x%X.png", tex_dir_name_rel, (u64)raw_data_ptr);
 
@@ -165,10 +174,10 @@ void mesh_dumper::dump()
 				}
 				else
 				{
-					*ptr            = (((v & 0xFF000000) >> 24) |
+					*ptr = (((v & 0xFF000000) >> 24) |
                             ((v & 0x00FF0000) >> 8) |
                             ((v & 0x0000FF00) << 8) |
-                            (((v & 0x000000FF) * 2) << 24));
+                           (((v & 0x000000FF) * 2) << 24));
 					is_fully_opaque = false;
 				}
 			}
@@ -187,7 +196,7 @@ void mesh_dumper::dump()
 				*ptr = (((v & 0xFF000000) >> 24) |
 						((v & 0x00FF0000) >> 8) |
 						((v & 0x0000FF00) << 8) |
-						(((v & 0x000000FF) * 2) << 24));
+				       (((v & 0x000000FF) * 2) << 24));
 			}
 		}
 		else if ((info_.format & CELL_GCM_TEXTURE_A8R8G8B8) == CELL_GCM_TEXTURE_A8R8G8B8)
@@ -208,18 +217,18 @@ void mesh_dumper::dump()
 				}
 				else
 				{
-					*ptr            = (((v & 0xFF000000) >> 8) |
+					*ptr = (((v & 0xFF000000) >> 8) |
                             ((v & 0x00FF0000) >> 8) |
                             ((v & 0x0000FF00) >> 8) |
-                            (((v & 0x000000FF) * 2) << 24));
+                           (((v & 0x000000FF) * 2) << 24));
 					is_fully_opaque = false;
 				}
 			}
 		}
-		//else
-		//{
-		//	mtl_str += fmt::format("# warning: skipped texture, format is 0x%X\n", info_.format);
-		//}
+		else
+		{
+			mtl_str += fmt::format("# warning: skipped texture, format is 0x%X\n", info_.format);
+		}
 
 		// argb -> rgba
 		// also a sly specific thing, it's PS2 port, and GS's RGBA reg alpha is weird like that
@@ -231,36 +240,41 @@ void mesh_dumper::dump()
 			mtl_str += fmt::format("map_D %s\n", tex_file_name_rel.c_str());
 
 		work_buf.resize(final_data.size());
-		// copy flipped on Y
-		const auto stride = info_.width * 4;
-		for (auto i = 0; i < info_.height; i++)
+		if (g_cfg.video.renderer == video_renderer::vulkan)
 		{
-			memcpy(work_buf.data() + i * stride, final_data.data() + (final_data.size() - ((i + 1) * stride)), stride);
+			// copy flipped on Y
+			const auto stride = info_.width * 4;
+			for (auto i = 0; i < info_.height; i++)
+			{
+				memcpy(work_buf.data() + i * stride, final_data.data() + (final_data.size() - ((i + 1) * stride)), stride);
+			}
 		}
+		else
+		{
+			memcpy(work_buf.data(), final_data.data(), final_data.size());
+		}
+
+		info_.is_opaque = is_fully_opaque;
 
 		if (!stbi_write_png(tex_file_name.c_str(), info_.width, info_.height, 4, work_buf.data(), info_.width * 4))
 			__debugbreak();
 	}
 
 #if MESHDUMP_NOCLIP
+	// Dummy texture
 	work_buf.resize(4);
 	work_buf[0] = 0x00;
 	work_buf[1] = 0x00;
 	work_buf[2] = 0x00;
 	work_buf[3] = 0x00;
-	for (auto& d : g_mesh_dumper.dumps)
-	{
-		const std::string tex_dir_name  = fmt::format("%s/textures_%d", dump_dir.c_str(), dump_index);
-		const std::string tex_file_name = fmt::format("%s/0x%X.png", tex_dir_name, (u64)d.texture_raw_data_ptr);
-
-		if (!std::filesystem::exists(tex_file_name))
-			if (!stbi_write_png(tex_file_name.c_str(), 1, 1, 4, work_buf.data(), 1 * 4))
-				__debugbreak();
-	}
+	const std::string tex_file_name = fmt::format("%s/0x0.png", tex_dir_name);
+	if (!stbi_write_png(tex_file_name.c_str(), 1, 1, 4, work_buf.data(), 1 * 4))
+		__debugbreak();
 #endif
 
+#if !MESHDUMP_NOCLIP
 	file_mtl.write(mtl_str.c_str(), mtl_str.size());
-
+#endif
 	
 	//
 	// DUMP MESHES
@@ -307,6 +321,12 @@ void mesh_dumper::dump()
 	for (auto dump_idx = 0; dump_idx < g_mesh_dumper.dumps.size(); ++dump_idx)
 	{
 		auto& d = g_mesh_dumper.dumps[dump_idx];
+		
+		const auto block_count = d.blocks.size();
+		const auto index_count = d.indices.size();
+
+		if (block_count == 0 || index_count == 0)
+			continue;
 
 #if MESHDUMP_BATCH_DUMPS
 		if (dump_idx > 0)
@@ -338,8 +358,13 @@ void mesh_dumper::dump()
 		//{
 		//	obj_str += fmt::format("usemtl 0x0\n");
 		//}
+#if MESHDUMP_NOCLIP
 		if (new_dump)
-			obj_str += fmt::format("usemtl 0x%X\n", d.texture_raw_data_ptr);
+			obj_str += fmt::format("usemtl 0x%X %d\n",
+				d.texture_raw_data_ptr, g_dump_texture_info[(u64)d.texture_raw_data_ptr].is_opaque);
+#else
+		obj_str += fmt::format("usemtl 0x%X\n", d.texture_raw_data_ptr);
+#endif
 
 		//auto dst_ptr = d.vertex_data.data();
 		//std::stringstream hex_ss;
@@ -442,14 +467,32 @@ void mesh_dumper::dump()
 			return print_mat4(m[0], m[1], m[2], m[3]);
 		};
 
-		const auto block_count = d.blocks.size();
-		const auto index_count = d.indices.size();
-
 		const auto& vcb = d.vertex_constants_buffer;
 
 #if MESHDUMP_SLY_VERSION != 4
+		enum draw_type_t
+		{
+			sly3_normal,
+			sly3_skydome,//todo remove?
+			sly3_nospec,
+			sly3_skeletal,
+			sly3_normal2,
+
+			invalid = -1,
+		} draw_type = invalid;
+		if (d.vert_shader_hash == 0x47DA8B28 && d.frag_shader_hash == 0x0BBE0FF4)
+			draw_type = sly3_normal;
+		else if (d.vert_shader_hash == 0x73783E15 && d.frag_shader_hash == 0xFFA26447)
+			draw_type = sly3_nospec;
+		else if (d.vert_shader_hash == 0xAB2CD1A9 && d.frag_shader_hash == 0x0BBE0FF4)
+			draw_type = sly3_skeletal;
+		else if (d.vert_shader_hash == 0xF34D3512 && d.frag_shader_hash == 0x08956CEB)
+			draw_type = sly3_normal2;
+
+
 		const bool use_no_xform = (block_count == 1);
 		const bool has_bones    = (block_count == 4);
+		//const bool has_bones = sly3_skeletal;
 
 		mat4 xform_mat       = linalg::identity;
 		mat4 xform_mat_first = linalg::identity;
@@ -563,15 +606,6 @@ void mesh_dumper::dump()
 		} vertex_format{};
 
 #if MESHDUMP_SLY_VERSION != 4
-		// TODO: vertex color support
-
-		enum draw_type_t
-		{
-			sly3_normal,
-			sly3_skydome,
-
-			invalid = -1,
-		} draw_type = invalid;
 
 		auto emit_vc_data = [&](int draw_type) {
 			// todo: emit binary
@@ -594,15 +628,9 @@ void mesh_dumper::dump()
 
 			if (block0.interleaved_range_info.interleaved)
 			{
-
-				if (d.vert_shader_hash == 0x47DA8B28 && d.frag_shader_hash == 0x0BBE0FF4)
-					draw_type = sly3_normal;
-				else if (d.vert_shader_hash == 0x73783E15 && d.frag_shader_hash == 0xFFA26447)
-					draw_type = sly3_skydome;
-
 #if MESHDUMP_NOCLIP
 				//if (block0.interleaved_range_info.attribute_stride == 36 && block_count == 3) {
-				if (draw_type == sly3_normal || draw_type == sly3_skydome)
+				if (draw_type == sly3_normal || draw_type == sly3_nospec || draw_type == sly3_skeletal)
 				{
 					emit_vc_data((int)draw_type);
 
@@ -622,29 +650,52 @@ void mesh_dumper::dump()
 					{
 						const auto& v  = vertex_data[i];
 						const vec3 pos = transform_pos(i, v.pos, block1_weights);
-						const u32 diff       = ((u32*)d.blocks[1].vertex_data.data())[i];
 
-						const bool has_spec = (draw_type == sly3_normal);
+						const u32 diff = ((u32*)d.blocks[1 + has_bones].vertex_data.data())[i];
+
+						const bool has_spec = (draw_type != sly3_nospec);
 
 						if (has_spec)
 						{
-							const u32 spec = ((u32*)d.blocks[2].vertex_data.data())[i];
+							const u32 spec = ((u32*)d.blocks[2 + has_bones].vertex_data.data())[i];
 
-							obj_str += fmt::format("v36s %f %f %f %f %f %f %f %f %X %X\n",
-								pos.x, pos.y, pos.z, (float)v.normal.x, (float)v.normal.y, (float)v.normal.z,
-								(float)v.uv.u, (float)v.uv.v,
-								diff, spec);
+							obj_str += fmt::format("v36s %f %f %f %f %f %X %X\n",
+								pos.x, pos.y, pos.z, (float)v.uv.u, (float)v.uv.v, diff, spec);
 						}
 						else
 						{
-							obj_str += fmt::format("v36 %f %f %f %f %f %f %f %f %X\n",
-								pos.x, pos.y, pos.z, (float)v.normal.x, (float)v.normal.y, (float)v.normal.z,
-								(float)v.uv.u, (float)v.uv.v,
-								diff);
+							obj_str += fmt::format("v36 %f %f %f %f %f %X\n",
+								pos.x, pos.y, pos.z, (float)v.uv.u, (float)v.uv.v, diff);
 						}
 					}
 
 					vertex_format = vertex_format_t::_36;
+				}
+				else if (draw_type == sly3_normal2)
+				{
+					emit_vc_data((int)draw_type);
+
+					struct mesh_draw_vertex_28
+					{
+						vec3be pos;
+						u32 diff;
+						u32 spec;
+						vec2be uv;
+					};
+					static_assert(sizeof(mesh_draw_vertex_28) == 28);
+
+					const mesh_draw_vertex_28* vertex_data = (mesh_draw_vertex_28*)block0.vertex_data.data();
+					vertex_count                           = block0.vertex_data.size() / sizeof(mesh_draw_vertex_28);
+
+					for (auto i = 0; i < vertex_count; ++i)
+					{
+						const auto& v  = vertex_data[i];
+						const vec3 pos = transform_pos(i, v.pos, block1_weights);
+						obj_str += fmt::format("v36s %f %f %f %f %f %X %X\n",
+							pos.x, pos.y, pos.z, (float)v.uv.u, (float)v.uv.v, v.diff, v.spec);
+					}
+
+					vertex_format = vertex_format_t::_28;
 				}
 
 #else
@@ -972,18 +1023,14 @@ void mesh_dumper::dump()
 						f2, f2);
 				}
 			}
-
-			if ((u64)d.texture_raw_data_ptr != 0)
-				g_dump_texture_info[(u64)d.texture_raw_data_ptr].is_used = true;
+#if !MESHDUMP_NOCLIP || MESHDUMP_BATCH_DUMPS
+			vertex_index_base += vertex_count;
+#endif
 		}
 		else
 		{
 			obj_str += fmt::format("# warning: unsupported, no vertices will be emitted\n");
 		}
-
-#if !MESHDUMP_NOCLIP || MESHDUMP_BATCH_DUMPS
-		vertex_index_base += vertex_count;
-#endif
 	}
 
 	file_obj.write(obj_str.c_str(), obj_str.size());
