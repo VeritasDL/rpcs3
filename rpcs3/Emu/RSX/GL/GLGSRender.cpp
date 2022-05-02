@@ -5,6 +5,8 @@
 #include "GLCompute.h"
 #include "Emu/Memory/vm_locking.h"
 #include "Emu/RSX/rsx_methods.h"
+#include <Emu/RSX/meshdump.h>
+#include <Emu/RSX/meshdump.h>
 
 #include "../Program/program_state_cache2.hpp"
 
@@ -762,7 +764,7 @@ void GLGSRender::load_program_env()
 
 	if (g_mesh_dumper.enabled)
 	{
-		auto& dump     = g_mesh_dumper.dumps.back();
+		auto& dump     = g_mesh_dumper.get_dump();
 		//dump.shader_id = m_program->id();
 		dump.vert_shader_hash = (u32)program_hash_util::vertex_program_utils::get_vertex_program_ucode_hash(current_vertex_program);
 		dump.frag_shader_hash = (u32)program_hash_util::fragment_program_utils::get_fragment_program_ucode_hash(current_fragment_program);
