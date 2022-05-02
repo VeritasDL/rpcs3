@@ -2797,6 +2797,19 @@ namespace rsx
 
 			//g_mesh_dumper.dumps[4].vertex_constants_buffer
 
+			
+			mat4 inv_view_mat = linalg::identity;
+#if MESHDUMP_SLY_VERSION == 3
+			auto& v = inv_view_mat;
+			auto m  = (be_t<float>*)vm::base(0x007DA920);
+			int i = 0;
+			v[0][0] = m[i++]; v[0][1] = m[i++]; v[0][2] = m[i++]; v[0][3] = m[i++];
+			v[1][0] = m[i++]; v[1][1] = m[i++]; v[1][2] = m[i++]; v[1][3] = m[i++];
+			v[2][0] = m[i++]; v[2][1] = m[i++]; v[2][2] = m[i++]; v[2][3] = m[i++];
+			v[3][0] = m[i++]; v[3][1] = m[i++]; v[3][2] = m[i++]; v[3][3] = m[i++];
+			inv_view_mat                                = linalg::inverse(inv_view_mat);
+#endif
+
 			for (auto dump_idx = 0; dump_idx < g_mesh_dumper.dumps.size(); ++dump_idx)
 			{
 				auto& d = g_mesh_dumper.dumps[dump_idx];
@@ -2962,6 +2975,7 @@ namespace rsx
 				{
 					xform_mat_first = {vcb[0], vcb[1], vcb[2], vcb[3]};
 					xform_mat = {vcb[13], vcb[14], vcb[15], vcb[16]};
+
 					if (has_bones && vcb.size() >= 44)
 					{
 						bone_mats[0] = {vcb[32], vcb[33], vcb[34], {0, 0, 0, 1}};
@@ -3043,6 +3057,13 @@ namespace rsx
 						out = mul(a, xform_mat);
 					}
 					//return {out.x * 0.01f, out.y * 0.01f, out.z * 0.01f};
+
+					
+#if MESHDUMP_SLY_VERSION == 3
+					out = mul(out, inv_view_mat);
+					// xform_mat = linalg::mul(xform_mat, inv_view_mat);
+#endif
+		
 					return {out.x, out.y, out.z};
 				};
 #endif
@@ -3064,8 +3085,17 @@ namespace rsx
 #if MESHDUMP_SLY_VERSION != 4
 				// TODO: vertex color support
 
-				auto emit_vc_data = [&]() {
-					obj_str += fmt::format("vc %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
+				enum draw_type_t
+				{
+					sly3_normal,
+					sly3_skydome,
+
+					invalid = -1,
+				} draw_type = invalid;
+
+				auto emit_vc_data = [&](int draw_type) {
+					obj_str += fmt::format("vc %d %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
+						draw_type,
 						vcb[17].x, vcb[17].y, vcb[17].z, vcb[17].w,
 						vcb[18].x, vcb[18].y, vcb[18].z, vcb[18].w,
 						vcb[19].x, vcb[19].y, vcb[19].z, vcb[19].w,
@@ -3076,16 +3106,24 @@ namespace rsx
 						vcb[3].x, vcb[3].y, vcb[3].z, vcb[3].w);
 				};
 
-
 				if (block_count > 0)
 				{
 					const auto& block0 = d.blocks[0];
 					const auto* block1_weights = has_bones ? &d.blocks[1] : nullptr;
+
 					if (block0.interleaved_range_info.interleaved)
 					{
+
+						if (d.vert_shader_hash == 0x47DA8B28 && d.frag_shader_hash == 0x0BBE0FF4)
+							draw_type = sly3_normal;
+						else if (d.vert_shader_hash == 0x73783E15 && d.frag_shader_hash == 0xFFA26447)
+							draw_type = sly3_skydome;
+
 #if MESHDUMP_NOCLIP
-						if (block0.interleaved_range_info.attribute_stride == 36 && block_count == 3) {
-							emit_vc_data();
+						//if (block0.interleaved_range_info.attribute_stride == 36 && block_count == 3) {
+						if (draw_type == sly3_normal || draw_type == sly3_skydome)
+						{
+							emit_vc_data((int)draw_type);
 
 							struct mesh_draw_vertex_36
 							{
@@ -3103,17 +3141,33 @@ namespace rsx
 							{
 								const auto& v  = vertex_data[i];
 								const vec3 pos = transform_pos(i, v.pos, block1_weights);
-								u32 spec         = ((u32*)d.blocks[1].vertex_data.data())[i];
-								u32 diff = ((u32*)d.blocks[2].vertex_data.data())[i];
+								u32 diff            = ((u32*)d.blocks[1].vertex_data.data())[i];
 
-								obj_str += fmt::format("v36 %f %f %f %f %f %f %f %f %X %X\n",
-									pos.x, pos.y, pos.z, (float)v.normal.x, (float)v.normal.y, (float)v.normal.z,
-									(float)v.uv.u, (float)v.uv.v,
-									spec, diff);
+								const bool has_spec = (draw_type == sly3_normal);
+
+								if (has_spec)
+								{
+									u32 spec = ((u32*)d.blocks[2].vertex_data.data())[i];
+
+									obj_str += fmt::format("v36s %f %f %f %f %f %f %f %f %X %X\n",
+										pos.x, pos.y, pos.z, (float)v.normal.x, (float)v.normal.y, (float)v.normal.z,
+										(float)v.uv.u, (float)v.uv.v,
+										diff, spec);
+								}
+								else
+								{
+									obj_str += fmt::format("v36 %f %f %f %f %f %f %f %f %X\n",
+										pos.x, pos.y, pos.z, (float)v.normal.x, (float)v.normal.y, (float)v.normal.z,
+										(float)v.uv.u, (float)v.uv.v,
+										diff);
+								}
+
 							}
 
 							vertex_format = vertex_format_t::_36;
 						}
+
+
 #else
 						if (block0.interleaved_range_info.attribute_stride == 36)
 						{
@@ -3134,7 +3188,7 @@ namespace rsx
 
 								for (auto i = 0; i < vertex_count; ++i)
 								{
-									const auto& v = vertex_data[i];
+									const auto& v  = vertex_data[i];
 									const vec3 pos = transform_pos(i, v.pos, block1_weights);
 									// const auto posu = *(uvec3*)(&v.pos);
 									obj_str += fmt::format("v %f %f %f\n", pos.x, pos.y, pos.z);
