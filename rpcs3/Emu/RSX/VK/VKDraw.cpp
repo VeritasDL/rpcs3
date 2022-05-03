@@ -311,6 +311,12 @@ void VKGSRender::load_texture_env()
 			m_textures_dirty[i] = false;
 		}
 
+		//if (g_mesh_dumper.enabled)
+		//{
+		//	if (tex.width() == 512 && tex.height() == 512 && tex.format() == 0xA5)
+		//		__debugbreak();
+		//}
+
 		if (g_mesh_dumper.enabled &&
 		    i == 0 &&
 		    (sampler_state->upload_context & rsx::texture_upload_context::shader_read) &&
@@ -326,6 +332,10 @@ void VKGSRender::load_texture_env()
 			tex_info.format                                     = tex.format();
 			if ((u64)dump.texture_raw_data_ptr == 0)
 				__debugbreak();
+
+			//if (tex.width()==512&&tex.height()==512&&tex.format()==0xA5)
+			//	__debugbreak();
+
 			g_dump_texture_info[(u64)dump.texture_raw_data_ptr] = tex_info;
 		}
 	}
