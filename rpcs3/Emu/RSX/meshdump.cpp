@@ -12,14 +12,14 @@
 #include <Emu/RSX/RSXThread.h>
 #include <Emu/System.h>
 
-#define MESHDUMP_DEBUG false
+#define MESHDUMP_DEBUG true
 #define MESHDUMP_DEBUG_OLD false
 #define MESHDUMP_POSED true
 #define MESHDUMP_SLY_VERSION 3
-#define MESHDUMP_NOCLIP true
-#define MESHDUMP_BATCH_DUMPS true
+#define MESHDUMP_NOCLIP false
+#define MESHDUMP_BATCH_DUMPS false
 
-#pragma optimize("", off)
+//#pragma optimize("", off)
 
 using namespace rsx;
 

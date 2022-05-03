@@ -368,6 +368,7 @@
     <ClCompile Include="Emu\Io\usb_device.cpp" />
     <ClCompile Include="Emu\RSX\Capture\rsx_capture.cpp" />
     <ClCompile Include="Emu\RSX\Capture\rsx_replay.cpp" />
+    <ClCompile Include="Emu\RSX\s3tc.cpp" />
     <ClCompile Include="Emu\RSX\Program\CgBinaryFragmentProgram.cpp" />
     <ClCompile Include="Emu\RSX\Program\CgBinaryVertexProgram.cpp" />
     <ClCompile Include="Emu\RSX\Common\BufferUtils.cpp" />
