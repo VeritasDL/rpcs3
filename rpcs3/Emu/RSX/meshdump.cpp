@@ -12,14 +12,14 @@
 #include <Emu/RSX/RSXThread.h>
 #include <Emu/System.h>
 
-#define MESHDUMP_DEBUG true
+#define MESHDUMP_DEBUG false
 #define MESHDUMP_DEBUG_OLD false
 #define MESHDUMP_POSED true
 #define MESHDUMP_SLY_VERSION 3
-#define MESHDUMP_NOCLIP false
+#define MESHDUMP_NOCLIP true
 #define MESHDUMP_BATCH_DUMPS false
 
-#pragma optimize("", off)
+//#pragma optimize("", off)
 
 using namespace rsx;
 
@@ -91,8 +91,10 @@ void mesh_dumper::push_block(const mesh_draw_dump_block& block)
 	get_dump().blocks.push_back(block);
 }
 
-void mesh_dumper::push_dump(const mesh_draw_dump& dump)
+void mesh_dumper::push_dump(mesh_draw_dump& dump)
 {
+	dump.index = dumps.size() + 1;
+	dump.clear_count = g_clears_this_frame;
 	dumps.push_back(dump);
 }
 
@@ -242,7 +244,8 @@ void mesh_dumper::dump()
 			mtl_str += fmt::format("map_D %s\n", tex_file_name_rel.c_str());
 
 		work_buf.resize(final_data.size());
-		if (g_cfg.video.renderer == video_renderer::vulkan)
+		// if (g_cfg.video.renderer == video_renderer::vulkan)
+		if (false)
 		{
 			// copy flipped on Y
 			const auto stride = info_.width * 4;
@@ -336,7 +339,7 @@ void mesh_dumper::dump()
 #endif
 
 		obj_str += fmt::format("%s %d_%X_vshd:%08X_fshd:%08X_tex:%X_clr:%d_blk:%d\n",
-			new_dump ? "o" : "g", dump_idx, session_id, d.vert_shader_hash, d.frag_shader_hash, (u32)d.texture_raw_data_ptr, d.clear_count, d.blocks.size());
+			new_dump ? "o" : "g", d.index, session_id, d.vert_shader_hash, d.frag_shader_hash, (u32)d.texture_raw_data_ptr, d.clear_count, d.blocks.size());
 
 #if MESHDUMP_DEBUG
 		if (auto it = g_dump_texture_info.find((u64)d.texture_raw_data_ptr); it != g_dump_texture_info.end())
@@ -492,9 +495,14 @@ void mesh_dumper::dump()
 			draw_type = sly3_normal2;
 
 
-		const bool use_no_xform = (block_count == 1);
+		bool use_no_xform = (block_count == 1);
 		const bool has_bones    = (block_count == 4);
 		//const bool has_bones = sly3_skeletal;
+
+		bool is_skydome = false;
+#if MESHDUMP_SLY_VERSION == 3
+		is_skydome = (d.clear_count == 1);
+#endif
 
 		mat4 xform_mat       = linalg::identity;
 		mat4 xform_mat_first = linalg::identity;
@@ -513,6 +521,9 @@ void mesh_dumper::dump()
 				bone_mats[3] = {vcb[41], vcb[42], vcb[43], {0, 0, 0, 1}};
 			}
 		}
+
+		if (is_skydome)
+			xform_mat = linalg::scaling_matrix(vec3(5, 5, 5));
 
 		auto transform_pos = [&](u32 idx, const vec3be& pos, const mesh_draw_dump_block* weights_block) -> vec3 {
 			vec4 out;
@@ -586,7 +597,8 @@ void mesh_dumper::dump()
 			//return {out.x * 0.01f, out.y * 0.01f, out.z * 0.01f};
 
 #if MESHDUMP_SLY_VERSION == 3
-			out = mul(out, inv_view_mat);
+			if (!is_skydome)
+				out = mul(out, inv_view_mat);
 			// xform_mat = linalg::mul(xform_mat, inv_view_mat);
 #endif
 
