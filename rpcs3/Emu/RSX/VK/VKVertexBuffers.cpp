@@ -378,6 +378,6 @@ vk::vertex_upload_info VKGSRender::upload_vertex_data()
 			index_base,                                   // Index of vertex at data location 0
 			result.vertex_index_offset,                   // Index offset
 			persistent_range_base, volatile_range_base,   // Binding range
-			result.index_info,                             // Index buffer info
+			result.index_info,                            // Index buffer info
 	        result.index_buf };
 }

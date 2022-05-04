@@ -5806,7 +5806,7 @@ auto STW()
 	//	return true;
 	//}
 
-	const u64 addr = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	//const u64 addr = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
 	const u32 value = static_cast<u32>(ppu.gpr[op.rs]);
 	vm::write32(vm::cast(addr), value);
 

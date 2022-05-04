@@ -1038,21 +1038,11 @@ void VKGSRender::end()
 
 	if (g_mesh_dumper.enabled)
 	{
-		auto& dump     = g_mesh_dumper.dumps.back();
-		//dump.shader_id = (u32)m_program->pipeline;
+		auto& dump = g_mesh_dumper.get_dump();
+
+		// dump.shader_id = (u32)m_program->pipeline;
 		dump.vert_shader_hash = (u32)program_hash_util::vertex_program_utils::get_vertex_program_ucode_hash(current_vertex_program);
 		dump.frag_shader_hash = (u32)program_hash_util::fragment_program_utils::get_fragment_program_ucode_hash(current_fragment_program);
-	}
-
-	// Sync any async scheduler tasks
-	if (auto ev = g_fxo->get<vk::async_scheduler_thread>().get_primary_sync_label())
-	{
-		ev->gpu_wait(*m_current_command_buffer);
-	}
-
-	if (g_mesh_dumper.enabled)
-	{
-		auto& dump = g_mesh_dumper.dumps.back();
 
 		memcpy(dump.vertex_constants_buffer.data(), rsx::method_registers.transform_constants.data(), 468 * sizeof(vec4));
 	}
