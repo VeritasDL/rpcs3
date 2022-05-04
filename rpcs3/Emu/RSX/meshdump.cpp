@@ -19,7 +19,7 @@
 #define MESHDUMP_NOCLIP false
 #define MESHDUMP_BATCH_DUMPS false
 
-//#pragma optimize("", off)
+#pragma optimize("", off)
 
 using namespace rsx;
 
@@ -88,8 +88,7 @@ u32 g_clears_this_frame{};
 
 void mesh_dumper::push_block(const mesh_draw_dump_block& block)
 {
-	auto& mesh_draw_dump = dumps.back();
-	mesh_draw_dump.blocks.push_back(block);
+	get_dump().blocks.push_back(block);
 }
 
 void mesh_dumper::push_dump(const mesh_draw_dump& dump)
@@ -253,6 +252,19 @@ void mesh_dumper::dump()
 		{
 			memcpy(work_buf.data(), final_data.data(), final_data.size());
 		}
+
+		// for debugging
+		auto check_memory_zeroed_by_char = [](void* ptr, size_t size) -> int
+		{
+			if (ptr == NULL)
+				return -1;
+			for (char* p = (char*)ptr; p < ((char*)ptr) + size; p++)
+				if (*p)
+					return 0;
+			return 1;
+		};
+		if (check_memory_zeroed_by_char(work_buf.data(), work_buf.size()))
+			__debugbreak();
 
 		info_.is_opaque = is_fully_opaque;
 
