@@ -720,7 +720,7 @@ void GLGSRender::end()
 
 	if (g_mesh_dumper.enabled)
 	{
-		auto& dump = g_mesh_dumper.dumps.back();
+		auto& dump = g_mesh_dumper.get_dump();
 
 		memcpy(dump.vertex_constants_buffer.data(), rsx::method_registers.transform_constants.data(), 468 * sizeof(vec4));
 	}
