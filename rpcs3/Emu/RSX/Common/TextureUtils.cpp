@@ -999,13 +999,11 @@ namespace rsx
 				// We need to compress the 2D-planar DXT input into a VTC output
 				copy_linear_block_to_vtc::copy_mipmap_level(utils::bless<u128>(dst_buffer), utils::bless<const u128>(src_layout.data), w, h, depth, get_row_pitch_in_block<u128>(w, caps.alignment), src_layout.pitch_in_block);
 			}
-#if 0
 			else if (caps.supports_zero_copy)
 			{
 				result.require_upload = true;
 				result.deferred_cmds = build_transfer_cmds(src_layout.data.data(), 16, w, h, depth, 0, get_row_pitch_in_block<u128>(w, caps.alignment), src_layout.pitch_in_block);
 			}
-#endif
 			else
 			{
 				copy_unmodified_block::copy_mipmap_level(utils::bless<u128>(dst_buffer), utils::bless<const u128>(src_layout.data), 1, w, h, depth, 0, get_row_pitch_in_block<u128>(w, caps.alignment), src_layout.pitch_in_block);

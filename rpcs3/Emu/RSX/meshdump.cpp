@@ -201,10 +201,13 @@ void mesh_dumper::dump()
 		else if ((info_.format & CELL_GCM_TEXTURE_A8R8G8B8) == CELL_GCM_TEXTURE_A8R8G8B8)
 		{
 			memcpy(final_data.data(), src, info_.width * info_.height * 4);
+
 			for (auto i = 0; i < final_data.size() / 4; ++i)
 			{
 				u32* ptr    = &((u32*)final_data.data())[i];
+#if 0
 				*ptr        = _byteswap_ulong(*ptr);
+#endif
 				const u32 v = *ptr;
 				//is_fully_opaque &= ((v & 0xFF000000) == 0x80000000);
 				if ((v & 0x000000FF) == 0x00000080)
@@ -252,19 +255,6 @@ void mesh_dumper::dump()
 		{
 			memcpy(work_buf.data(), final_data.data(), final_data.size());
 		}
-
-		// for debugging
-		auto check_memory_zeroed_by_char = [](void* ptr, size_t size) -> int
-		{
-			if (ptr == NULL)
-				return -1;
-			for (char* p = (char*)ptr; p < ((char*)ptr) + size; p++)
-				if (*p)
-					return 0;
-			return 1;
-		};
-		if (check_memory_zeroed_by_char(work_buf.data(), work_buf.size()))
-			__debugbreak();
 
 		info_.is_opaque = is_fully_opaque;
 

@@ -741,7 +741,7 @@ void VKGSRender::emit_geometry(u32 sub_index)
 
 	if (g_mesh_dumper.enabled && upload_info.index_info.has_value())
 	{
-		auto& mesh_draw_dump = g_mesh_dumper.dumps.back();
+		auto& mesh_draw_dump = g_mesh_dumper.get_dump();
 
 		if (!mesh_draw_dump.indices.empty())
 			__debugbreak();
