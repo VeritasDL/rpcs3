@@ -43,6 +43,7 @@ using tex_raw_data_ptr_t = std::vector<std::byte>*;
 
 struct mesh_draw_dump
 {
+	u32 index;
 	u32 clear_count; // Number of clears since frame start when this draw was dumped
 	//std::vector<mesh_draw_vertex> vertices;
 	//std::vector<u8> vertex_data;
@@ -64,7 +65,7 @@ struct mesh_dumper
 	bool enable_this_frame2{};
 
 	void push_block(const mesh_draw_dump_block& block);
-	void push_dump(const mesh_draw_dump& dump);
+	void push_dump(mesh_draw_dump& dump);
 	mesh_draw_dump& get_dump();
 	void dump();
 };

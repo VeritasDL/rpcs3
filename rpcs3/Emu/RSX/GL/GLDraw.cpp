@@ -710,7 +710,6 @@ void GLGSRender::end()
 	if (g_mesh_dumper.enabled)
 	{
 		mesh_draw_dump d{};
-		d.clear_count = g_clears_this_frame;
 		g_mesh_dumper.push_dump(d);
 	}
 
