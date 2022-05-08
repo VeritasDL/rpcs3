@@ -394,7 +394,7 @@ std::string VertexProgramDecompiler::BuildCode()
 		m_parr.AddParam(PF_PARAM_OUT, float4_type, "dst_reg0", float4_type + "(0., 0., 0., 1.)");
 	}
 
-	if (!properties.has_indexed_constants && !m_constant_ids.empty())
+	if (false && !properties.has_indexed_constants && !m_constant_ids.empty())
 	{
 		// Relocate transform constants
 		std::vector<std::pair<std::string, std::string>> reloc_table;

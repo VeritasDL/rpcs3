@@ -1983,7 +1983,7 @@ void VKGSRender::load_program_env()
 	if (update_transform_constants)
 	{
 		// Transform constants
-		const usz transform_constants_size = (!m_vertex_prog || m_vertex_prog->has_indexed_constants) ? 8192 : m_vertex_prog->constant_ids.size() * 16;
+		const usz transform_constants_size = (true || !m_vertex_prog || m_vertex_prog->has_indexed_constants) ? 8192 : m_vertex_prog->constant_ids.size() * 16;
 		if (transform_constants_size)
 		{
 			check_heap_status(VK_HEAP_CHECK_TRANSFORM_CONSTANTS_STORAGE);
