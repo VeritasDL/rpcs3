@@ -2592,6 +2592,7 @@ namespace rsx
 					memcpy((u8*)mesh_draw_dump.vertex_data.data() + prev_size, vertex_data_start, data_size);
 #else
 
+					mesh_draw_dump.transform_branch_bits = rsx::method_registers.transform_branch_bits();
 					mesh_draw_dump_block dump_block;
 
 					dump_block.vertex_data.resize(data_size);
