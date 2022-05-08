@@ -811,7 +811,7 @@ void GLGSRender::load_program_env()
 	if (update_transform_constants)
 	{
 		// Vertex constants
-		const usz transform_constants_size = (!m_vertex_prog || m_vertex_prog->has_indexed_constants) ? 8192 : m_vertex_prog->constant_ids.size() * 16;
+		const usz transform_constants_size = (true || !m_vertex_prog || m_vertex_prog->has_indexed_constants) ? 8192 : m_vertex_prog->constant_ids.size() * 16;
 		if (transform_constants_size)
 		{
 			auto mapping = m_transform_constants_buffer->alloc_from_heap(transform_constants_size, m_uniform_buffer_offset_align);
