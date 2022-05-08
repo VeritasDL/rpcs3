@@ -174,6 +174,12 @@ error_code cellPadGetData(u32 port_no, vm::ptr<CellPadData> data)
 
 	const auto& pads = handler->GetPads();
 
+	if (!pads[port_no])
+	{
+		pad_get_data(port_no, data.get_ptr());
+		return CELL_OK;
+	}
+
 	if (port_no >= config.max_connect)
 		return CELL_PAD_ERROR_NO_DEVICE;
 
@@ -190,7 +196,10 @@ void pad_get_data(u32 port_no, CellPadData* data)
 {
 	auto& config = g_fxo->get<pad_info>();
 	const auto handler = pad::get_current_handler();
-	const auto& pad = handler->GetPads()[port_no];
+	const auto& pad    = handler->GetPads()[port_no];
+	if (!pad)
+		return;
+
 	const PadInfo& rinfo = handler->GetInfo();
 
 	if (rinfo.system_info & CELL_PAD_INFO_INTERCEPTED)
@@ -601,6 +610,9 @@ error_code cellPadSetActDirect(u32 port_no, vm::ptr<CellPadActParam> param)
 	}
 
 	const auto& pads = handler->GetPads();
+
+	if (!pads[port_no])
+		return CELL_OK;
 
 	if (port_no >= config.max_connect)
 		return CELL_PAD_ERROR_NO_DEVICE;
