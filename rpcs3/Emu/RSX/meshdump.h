@@ -54,6 +54,7 @@ struct mesh_draw_dump
 	std::array<float4, 468> vertex_constants_buffer;
 	u32 vert_shader_hash;
 	u32 frag_shader_hash;
+	u32 transform_branch_bits;
 };
 
 struct mesh_dumper

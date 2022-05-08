@@ -12,14 +12,14 @@
 #include <Emu/RSX/RSXThread.h>
 #include <Emu/System.h>
 
-#define MESHDUMP_DEBUG false
+#define MESHDUMP_DEBUG true
 #define MESHDUMP_DEBUG_OLD false
 #define MESHDUMP_POSED true
 #define MESHDUMP_SLY_VERSION 3
 #define MESHDUMP_NOCLIP true
 #define MESHDUMP_BATCH_DUMPS false
 
-//#pragma optimize("", off)
+#pragma optimize("", off)
 
 using namespace rsx;
 
@@ -245,20 +245,17 @@ void mesh_dumper::dump()
 
 		work_buf.resize(final_data.size());
 		// if (g_cfg.video.renderer == video_renderer::vulkan)
-		if (false)
+#if MESHDUMP_NOCLIP
+		memcpy(work_buf.data(), final_data.data(), final_data.size());
+#else
+		// copy flipped on Y
+		const auto stride = info_.width * 4;
+		for (auto i = 0; i < info_.height; i++)
 		{
-			// copy flipped on Y
-			const auto stride = info_.width * 4;
-			for (auto i = 0; i < info_.height; i++)
-			{
-				memcpy(work_buf.data() + i * stride, final_data.data() + (final_data.size() - ((i + 1) * stride)), stride);
-			}
+			memcpy(work_buf.data() + i * stride, final_data.data() + (final_data.size() - ((i + 1) * stride)), stride);
 		}
-		else
-		{
-			memcpy(work_buf.data(), final_data.data(), final_data.size());
-		}
-
+#endif
+	
 		info_.is_opaque = is_fully_opaque;
 
 		if (!stbi_write_png(tex_file_name.c_str(), info_.width, info_.height, 4, work_buf.data(), info_.width * 4))
@@ -338,8 +335,9 @@ void mesh_dumper::dump()
 			new_dump = ((u64)d.texture_raw_data_ptr != (u64)g_mesh_dumper.dumps[dump_idx - 1].texture_raw_data_ptr);
 #endif
 
-		obj_str += fmt::format("%s %d_%X_vshd:%08X_fshd:%08X_tex:%X_clr:%d_blk:%d\n",
-			new_dump ? "o" : "g", d.index, session_id, d.vert_shader_hash, d.frag_shader_hash, (u32)d.texture_raw_data_ptr, d.clear_count, d.blocks.size());
+		const auto dump_name = fmt::format("%d_%X_vshd:%08X_fshd:%08X_tex:%X_clr:%d_blk:%d",
+			d.index, session_id, d.vert_shader_hash, d.frag_shader_hash, (u32)d.texture_raw_data_ptr, d.clear_count, d.blocks.size());
+		obj_str += fmt::format("%s %s\n", new_dump ? "o" : "g", dump_name);
 
 #if MESHDUMP_DEBUG
 		if (auto it = g_dump_texture_info.find((u64)d.texture_raw_data_ptr); it != g_dump_texture_info.end())
@@ -475,55 +473,75 @@ void mesh_dumper::dump()
 		const auto& vcb = d.vertex_constants_buffer;
 
 #if MESHDUMP_SLY_VERSION != 4
-		enum draw_type_t
+		enum class draw_type_e
 		{
 			sly3_normal,
-			sly3_skydome,//todo remove?
+			sly3_skydome, // todo remove?
 			sly3_nospec,
+			sly3_water,
 			sly3_skeletal,
 			sly3_normal2,
+			sly3_particle,  // fire?
+			sly3_particle2, // embers?
+			sly3_particle3, // bubbles?
 
 			invalid = -1,
-		} draw_type = invalid;
-		if (d.vert_shader_hash == 0x47DA8B28 && d.frag_shader_hash == 0x0BBE0FF4)
-			draw_type = sly3_normal;
-		else if (d.vert_shader_hash == 0x73783E15 && d.frag_shader_hash == 0xFFA26447)
-			draw_type = sly3_nospec;
-		else if (d.vert_shader_hash == 0xAB2CD1A9 && d.frag_shader_hash == 0x0BBE0FF4)
-			draw_type = sly3_skeletal;
-		else if (d.vert_shader_hash == 0xF34D3512 && d.frag_shader_hash == 0x08956CEB)
-			draw_type = sly3_normal2;
+		} draw_type = draw_type_e::invalid;
+		     if (d.clear_count == 1)  draw_type = draw_type_e::sly3_skydome;
+		else if (d.vert_shader_hash == 0x47DA8B28 && d.frag_shader_hash == 0x0BBE0FF4) draw_type = draw_type_e::sly3_normal;
+		else if (d.vert_shader_hash == 0x73783E15 && d.frag_shader_hash == 0xFFA26447) draw_type = draw_type_e::sly3_nospec;
+		else if (d.vert_shader_hash == 0xAB2CD1A9 && d.frag_shader_hash == 0x0BBE0FF4 && block_count == 3) draw_type = draw_type_e::sly3_water;
+		else if (d.vert_shader_hash == 0xAB2CD1A9 && d.frag_shader_hash == 0x0BBE0FF4 && block_count == 4) draw_type = draw_type_e::sly3_skeletal;
+		else if (d.vert_shader_hash == 0xF34D3512 && d.frag_shader_hash == 0x08956CEB) draw_type = draw_type_e::sly3_normal2;
+		else if (d.vert_shader_hash == 0xE2310449 && d.frag_shader_hash == 0x76A79373) draw_type = draw_type_e::sly3_particle;
+		else if (d.vert_shader_hash == 0x31C70E3B && d.frag_shader_hash == 0x76A79373) draw_type = draw_type_e::sly3_particle2;
+		else if (d.vert_shader_hash == 0xE2310449 && d.frag_shader_hash == 0x76A79373) draw_type = draw_type_e::sly3_particle3;
 
+		const bool use_no_xform = (
+			draw_type == draw_type_e::sly3_normal2 ||
+			draw_type == draw_type_e::sly3_particle ||
+			draw_type == draw_type_e::sly3_particle2 ||
+			draw_type == draw_type_e::sly3_particle3);
 
-		bool use_no_xform = (block_count == 1);
-		const bool has_bones    = (block_count == 4);
-		//const bool has_bones = sly3_skeletal;
+		const bool has_bones = (
+			draw_type == draw_type_e::sly3_skeletal &&
+			d.transform_branch_bits & 0x100);
 
-		bool is_skydome = false;
-#if MESHDUMP_SLY_VERSION == 3
-		is_skydome = (d.clear_count == 1);
-#endif
+		const bool use_inv_view = (
+			draw_type != draw_type_e::sly3_skydome);
+
+		const bool has_spec = (
+			draw_type != draw_type_e::sly3_nospec &&
+			draw_type != draw_type_e::sly3_skydome);
 
 		mat4 xform_mat       = linalg::identity;
-		mat4 xform_mat_first = linalg::identity;
+		mat4 xform_mat0 = linalg::identity;
 		mat4 bone_mats[4];
 
 		if (vcb.size() >= 17)
 		{
-			xform_mat_first = {vcb[0], vcb[1], vcb[2], vcb[3]};
-			xform_mat       = {vcb[13], vcb[14], vcb[15], vcb[16]};
+			xform_mat0 = {vcb[0], vcb[1], vcb[2], vcb[3]};
+			xform_mat  = {vcb[13], vcb[14], vcb[15], vcb[16]};
 
-			if (has_bones && vcb.size() >= 44)
+			if (has_bones)
 			{
-				bone_mats[0] = {vcb[32], vcb[33], vcb[34], {0, 0, 0, 1}};
-				bone_mats[1] = {vcb[35], vcb[36], vcb[37], {0, 0, 0, 1}};
-				bone_mats[2] = {vcb[38], vcb[39], vcb[40], {0, 0, 0, 1}};
-				bone_mats[3] = {vcb[41], vcb[42], vcb[43], {0, 0, 0, 1}};
+				//bone_mats[0] = {vcb[32], vcb[33], vcb[34], {0, 0, 0, 1}};
+				//bone_mats[1] = {vcb[35], vcb[36], vcb[37], {0, 0, 0, 1}};
+				//bone_mats[2] = {vcb[38], vcb[39], vcb[40], {0, 0, 0, 1}};
+				//bone_mats[3] = {vcb[41], vcb[42], vcb[43], {0, 0, 0, 1}};
+				u32 j = 32;
+				bone_mats[0] = {vcb[j++], vcb[j++], vcb[j++], {0, 0, 0, 1}};
+				bone_mats[1] = {vcb[j++], vcb[j++], vcb[j++], {0, 0, 0, 1}};
+				bone_mats[2] = {vcb[j++], vcb[j++], vcb[j++], {0, 0, 0, 1}};
+				bone_mats[3] = {vcb[j++], vcb[j++], vcb[j++], {0, 0, 0, 1}};
 			}
 		}
 
-		if (is_skydome)
+		
+#if MESHDUMP_SLY_VERSION == 3
+		if (draw_type == draw_type_e::sly3_skydome)
 			xform_mat = linalg::scaling_matrix(vec3(5, 5, 5));
+#endif
 
 		auto transform_pos = [&](u32 idx, const vec3be& pos, const mesh_draw_dump_block* weights_block) -> vec3 {
 			vec4 out;
@@ -532,50 +550,44 @@ void mesh_dumper::dump()
 			{
 #if MESHDUMP_POSED
 				const vec4be* weight_array = (vec4be*)weights_block->vertex_data.data();
-				if (idx * 16 < weights_block->vertex_data.size())
-				{
-					const vec4be weights_be = weight_array[idx];
-					const vec4 weights      = {weights_be.x, weights_be.y, weights_be.z, weights_be.w};
+				ensure(idx * 16 < weights_block->vertex_data.size());
 
-					const vec4 r0 = weights.x * bone_mats[0][0] + weights.y * bone_mats[1][0] + weights.z * bone_mats[2][0] + weights.w * bone_mats[3][0];
-					const vec4 r1 = weights.x * bone_mats[0][1] + weights.y * bone_mats[1][1] + weights.z * bone_mats[2][1] + weights.w * bone_mats[3][1];
-					const vec4 r2 = weights.x * bone_mats[0][2] + weights.y * bone_mats[1][2] + weights.z * bone_mats[2][2] + weights.w * bone_mats[3][2];
+				const vec4be weights_be = weight_array[idx];
+				const vec4 weights      = {weights_be.x, weights_be.y, weights_be.z, weights_be.w};
 
-					out = {
-						dot(a, r0),
-						dot(a, r1),
-						dot(a, r2),
-						1};
+				const vec4 r0 = weights.x * bone_mats[0][0] + weights.y * bone_mats[1][0] + weights.z * bone_mats[2][0] + weights.w * bone_mats[3][0];
+				const vec4 r1 = weights.x * bone_mats[0][1] + weights.y * bone_mats[1][1] + weights.z * bone_mats[2][1] + weights.w * bone_mats[3][1];
+				const vec4 r2 = weights.x * bone_mats[0][2] + weights.y * bone_mats[1][2] + weights.z * bone_mats[2][2] + weights.w * bone_mats[3][2];
+
+				out = {
+					dot(a, r0),
+					dot(a, r1),
+					dot(r2, a),
+					1};
 
 #if MESHDUMP_DEBUG
-					obj_str += fmt::format("# weights: %f %f %f %f, rvecs: %s\n%s\n%s\n# out: %s\n",
-						weights[0], weights[1], weights[2], weights[3], print_vec4(r0), print_vec4(r1), print_vec4(r2), print_vec4(out));
+				obj_str += fmt::format("# weights: %f %f %f %f, rvecs:\n%s\n%s\n%s\n# out: %s\n",
+					weights[0], weights[1], weights[2], weights[3], print_vec4(r0), print_vec4(r1), print_vec4(r2), print_vec4(out));
 #endif
 
-					//auto isbig = [](double x)
-					//{
-					//	return fabs(x) > FLT_MAX;
-					//};
-					//if (isnan(out.x) || isnan(out.y) || isnan(out.z) || isnan(out.w) ||
-					//	isinf(out.x) || isinf(out.y) || isinf(out.z) || isinf(out.w) ||
-					//    isbig(out.x) || isbig(out.y) || isbig(out.z) || isbig(out.w))
-					const double sum     = weights.x + weights.y + weights.z + weights.w;
-					const double epsilon = 0.01;
-					if ((sum > 1. + epsilon) || (sum < 1. - epsilon) || isnan(sum))
-					{
-						// TODO: don't emit these
-						obj_str += "# bad weights, defaulting to first bone\n";
-						out = {
-							dot(a, bone_mats[0][0]),
-							dot(a, bone_mats[0][1]),
-							dot(a, bone_mats[0][2]),
-							1};
-					}
-				}
-				else
+				//auto isbig = [](double x)
+				//{
+				//	return fabs(x) > FLT_MAX;
+				//};
+				//if (isnan(out.x) || isnan(out.y) || isnan(out.z) || isnan(out.w) ||
+				//	isinf(out.x) || isinf(out.y) || isinf(out.z) || isinf(out.w) ||
+				//    isbig(out.x) || isbig(out.y) || isbig(out.z) || isbig(out.w))
+				const double sum     = weights.x + weights.y + weights.z + weights.w;
+				const double epsilon = 0.01;
+				if ((sum > 1. + epsilon) || (sum < 1. - epsilon) || isnan(sum))
 				{
-					obj_str += fmt::format("# warning: weights out of bounds\n");
-					//__debugbreak();
+					// TODO: don't emit these
+					obj_str += "# bad weights, defaulting to first bone\n";
+					out = {
+						dot(a, bone_mats[0][0]),
+						dot(a, bone_mats[0][1]),
+						dot(a, bone_mats[0][2]),
+						1};
 				}
 				out = mul(out, xform_mat);
 #else
@@ -597,7 +609,7 @@ void mesh_dumper::dump()
 			//return {out.x * 0.01f, out.y * 0.01f, out.z * 0.01f};
 
 #if MESHDUMP_SLY_VERSION == 3
-			if (!is_skydome)
+			if (use_inv_view)
 				out = mul(out, inv_view_mat);
 			// xform_mat = linalg::mul(xform_mat, inv_view_mat);
 #endif
@@ -605,19 +617,9 @@ void mesh_dumper::dump()
 			return {out.x, out.y, out.z};
 		};
 #endif
-
 		size_t vertex_count = 0;
 
-		enum class vertex_format_t
-		{
-			none,
-			_28,
-			_30,
-			_36,
-			sly4_14,
-			sly4_18,
-			sly4_24,
-		} vertex_format{};
+		bool has_normals{};
 
 #if MESHDUMP_SLY_VERSION != 4
 
@@ -637,14 +639,17 @@ void mesh_dumper::dump()
 
 		if (block_count > 0)
 		{
-			const auto& block0         = d.blocks[0];
+			const auto& block0 = d.blocks[0];
+			if (has_bones && block_count < 2)
+				__debugbreak();
 			const auto* block1_weights = has_bones ? &d.blocks[1] : nullptr;
 
 			if (block0.interleaved_range_info.interleaved)
 			{
-#if MESHDUMP_NOCLIP
-				//if (block0.interleaved_range_info.attribute_stride == 36 && block_count == 3) {
-				if (draw_type == sly3_normal || draw_type == sly3_nospec || draw_type == sly3_skeletal)
+				// if (block0.interleaved_range_info.attribute_stride == 36 && block_count == 3) {
+				if (draw_type == draw_type_e::sly3_normal || draw_type == draw_type_e::sly3_skydome ||
+					draw_type == draw_type_e::sly3_nospec || draw_type == draw_type_e::sly3_skeletal ||
+					draw_type == draw_type_e::sly3_water)
 				{
 					emit_vc_data((int)draw_type);
 
@@ -665,13 +670,14 @@ void mesh_dumper::dump()
 						const auto& v  = vertex_data[i];
 						const vec3 pos = transform_pos(i, v.pos, block1_weights);
 
-						const u32 diff = ((u32*)d.blocks[1 + has_bones].vertex_data.data())[i];
-
-						const bool has_spec = (draw_type != sly3_nospec);
+#if MESHDUMP_NOCLIP
+						const bool has_4_blocks = (block_count == 4); // HACKY
+						const u32 diff          = ((u32*)d.blocks[1 + has_4_blocks].vertex_data.data())[i];
 
 						if (has_spec)
 						{
-							const u32 spec = ((u32*)d.blocks[2 + has_bones].vertex_data.data())[i];
+							ensure(d.blocks.size() > 2 + has_4_blocks);
+							const u32 spec = ((u32*)d.blocks[2 + has_4_blocks].vertex_data.data())[i];
 
 							obj_str += fmt::format("v36s %f %f %f %f %f %X %X\n",
 								pos.x, pos.y, pos.z, (float)v.uv.u, (float)v.uv.v, diff, spec);
@@ -681,11 +687,16 @@ void mesh_dumper::dump()
 							obj_str += fmt::format("v36 %f %f %f %f %f %X\n",
 								pos.x, pos.y, pos.z, (float)v.uv.u, (float)v.uv.v, diff);
 						}
+#else
+						obj_str += fmt::format("v %f %f %f\n", pos.x, pos.y, pos.z);
+						obj_str += fmt::format("vn %f %f %f\n", (float)v.normal.x, (float)v.normal.y, (float)v.normal.z);
+						obj_str += fmt::format("vt %f %f\n", (float)v.uv.u, (float)v.uv.v);
+#endif
 					}
 
-					vertex_format = vertex_format_t::_36;
+					has_normals = true;
 				}
-				else if (draw_type == sly3_normal2)
+				else if (draw_type == draw_type_e::sly3_normal2)
 				{
 					emit_vc_data((int)draw_type);
 
@@ -705,90 +716,42 @@ void mesh_dumper::dump()
 					{
 						const auto& v  = vertex_data[i];
 						const vec3 pos = transform_pos(i, v.pos, block1_weights);
+
+#if MESHDUMP_NOCLIP
 						obj_str += fmt::format("v36s %f %f %f %f %f %X %X\n",
 							pos.x, pos.y, pos.z, (float)v.uv.u, (float)v.uv.v, v.diff, v.spec);
-					}
-
-					vertex_format = vertex_format_t::_28;
-				}
-
 #else
-				if (block0.interleaved_range_info.attribute_stride == 36)
-				{
-					static bool b1{true};
-					if (b1)
-					{
-						struct mesh_draw_vertex_36
-						{
-							vec3be pos;
-							vec3be normal;
-							vec2be uv;
-							u32 unk0;
-						};
-						static_assert(sizeof(mesh_draw_vertex_36) == 36);
-
-						const mesh_draw_vertex_36* vertex_data = (mesh_draw_vertex_36*)block0.vertex_data.data();
-						vertex_count                           = block0.vertex_data.size() / sizeof(mesh_draw_vertex_36);
-
-						for (auto i = 0; i < vertex_count; ++i)
-						{
-							const auto& v  = vertex_data[i];
-							const vec3 pos = transform_pos(i, v.pos, block1_weights);
-							// const auto posu = *(uvec3*)(&v.pos);
-							obj_str += fmt::format("v %f %f %f\n", pos.x, pos.y, pos.z);
-							obj_str += fmt::format("vn %f %f %f\n", (float)v.normal.x, (float)v.normal.y, (float)v.normal.z);
-							obj_str += fmt::format("vt %f %f\n", (float)v.uv.u, (float)v.uv.v);
-						}
-						vertex_format = vertex_format_t::_36;
-					}
-				}
-				else if (block0.interleaved_range_info.attribute_stride == 28)
-				{
-					static bool b2{true};
-					if (b2)
-					{
-						struct mesh_draw_vertex_28
-						{
-							vec3be pos;
-							u32 vertex_color_maybe;
-							u32 unk0;
-							vec2be uv;
-						};
-						static_assert(sizeof(mesh_draw_vertex_28) == 28);
-
-						const mesh_draw_vertex_28* vertex_data = (mesh_draw_vertex_28*)block0.vertex_data.data();
-						vertex_count                           = block0.vertex_data.size() / sizeof(mesh_draw_vertex_28);
-
-						for (auto i = 0; i < vertex_count; ++i)
-						{
-							const auto& v  = vertex_data[i];
-							const vec3 pos = transform_pos(i, v.pos, block1_weights);
-							// const auto posu = *(uvec3*)(&v.pos);
-							obj_str += fmt::format("v %f %f %f\n", pos.x, pos.y, pos.z);
-							obj_str += fmt::format("vt %f %f\n", (float)v.uv.u, (float)v.uv.v);
-						}
-
-#if !MESHDUMP_NOCLIP
-						vertex_index_base_normal_offset += vertex_count;
+						obj_str += fmt::format("v %f %f %f\n", pos.x, pos.y, pos.z);
+						obj_str += fmt::format("vt %f %f\n", (float)v.uv.u, (float)v.uv.v);
 #endif
-						vertex_format = vertex_format_t::_28;
 					}
+
+					vertex_index_base_normal_offset += vertex_count;
+					has_normals = false;
 				}
+				else if (draw_type == draw_type_e::sly3_particle)
+				{
+					obj_str += fmt::format("# skipping sly3_particle\n");
+				}
+				else if (draw_type == draw_type_e::sly3_particle2)
+				{
+					obj_str += fmt::format("# skipping sly3_particle2\n");
+				}
+				else
+				{
+					obj_str += fmt::format("# unrecognized dump %s\n", dump_name);
+#if MESHDUMP_DEBUG
+					//__debugbreak();
 #endif
+				}
+			}
+			else
+			{
+				obj_str += fmt::format("# unrecognized non interleaved dump %s\n", dump_name);
 			}
 		}
 
-#if 0
-				for (auto& v : d.vertices)
-				{
-					obj_str += fmt::format("v %f %f %f\n", v.pos.x, v.pos.y, v.pos.z);
-					obj_str += fmt::format("vt %f %f\n", v.uv.u, v.uv.v);
-				}
-#endif
-
 #if MESHDUMP_DEBUG
-		obj_str += fmt::format("# transform_branch_bits: 0x%08X\n", rsx::method_registers.transform_branch_bits());
-
 		if (d.vertex_constants_buffer.size() >= 4)
 		{
 			obj_str += fmt::format("# xform matrix at 0:\n%s\n",
@@ -814,17 +777,16 @@ void mesh_dumper::dump()
 #endif
 
 #if MESHDUMP_DEBUG
+		obj_str += fmt::format("# transform_branch_bits: 0x%08X\n", d.transform_branch_bits);
+
 		obj_str += "# VertexConstantsBuffer:\n";
 		for (auto i = 0; i < 60; i++)
 			obj_str += fmt::format(" # %02d: %s\n", i, print_vec4(d.vertex_constants_buffer[i]));
 #endif
 
-#if 1
 #if MESHDUMP_SLY_VERSION == 4
 
 #if MESHDUMP_DEBUG
-		obj_str += fmt::format("# transform_branch_bits: 0x%08X\n", rsx::method_registers.transform_branch_bits());
-
 		if (d.vertex_constants_buffer.size() >= 4)
 			obj_str += fmt::format("# xform matrix at 0:\n%s\n",
 				print_mat4(d.vertex_constants_buffer[0], d.vertex_constants_buffer[1], d.vertex_constants_buffer[2], d.vertex_constants_buffer[3]));
@@ -979,7 +941,6 @@ void mesh_dumper::dump()
 			}
 		}
 #endif
-#endif
 
 		if (vertex_count > 0 && index_count > 0)
 		{
@@ -998,20 +959,7 @@ void mesh_dumper::dump()
 				obj_str += fmt::format("# warning: min_idx is %d\n", min_idx);
 #endif
 
-			if (vertex_format == vertex_format_t::_28)
-			{
-				for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
-				{
-					const auto f0 = vertex_index_base + d.indices[tri_idx * 3 + 0] - min_idx;
-					const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx;
-					const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx;
-					obj_str += fmt::format("f %d/%d %d/%d %d/%d\n",
-						f0, f0,
-						f1, f1,
-						f2, f2);
-				}
-			}
-			else if (vertex_format == vertex_format_t::_36)
+			if (has_normals)
 			{
 				for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
 				{
@@ -1024,7 +972,7 @@ void mesh_dumper::dump()
 						f2, f2, f2 - vertex_index_base_normal_offset);
 				}
 			}
-			else if (vertex_format == vertex_format_t::sly4_14 || vertex_format == vertex_format_t::sly4_18 || vertex_format == vertex_format_t::sly4_24)
+			else
 			{
 				for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
 				{
@@ -1037,6 +985,7 @@ void mesh_dumper::dump()
 						f2, f2);
 				}
 			}
+
 #if !MESHDUMP_NOCLIP || MESHDUMP_BATCH_DUMPS
 			vertex_index_base += vertex_count;
 #endif
@@ -1046,6 +995,7 @@ void mesh_dumper::dump()
 			obj_str += fmt::format("# warning: unsupported, no vertices will be emitted\n");
 		}
 	}
+
 
 	file_obj.write(obj_str.c_str(), obj_str.size());
 
