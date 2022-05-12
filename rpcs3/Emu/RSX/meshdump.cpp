@@ -14,9 +14,9 @@
 
 #define MESHDUMP_DEBUG true
 #define MESHDUMP_DEBUG_OLD false
-#define MESHDUMP_POSED true
+#define MESHDUMP_POSED false
 #define MESHDUMP_SLY_VERSION 3
-#define MESHDUMP_NOCLIP true
+#define MESHDUMP_NOCLIP false
 #define MESHDUMP_BATCH_DUMPS false
 
 #pragma optimize("", off)
@@ -398,14 +398,6 @@ void mesh_dumper::dump()
 				i, block.interleaved_range_info.to_str().c_str(),
 				interleaved_attribute_array_str(block.interleaved_range_info.locations),
 				block.vertex_data.size() / block.interleaved_range_info.attribute_stride, block.vertex_data.size());
-
-#if MESHDUMP_SLY_VERSION != 4
-			//if (i == 0 && (block.interleaved_range_info.attribute_stride == 36 || block.interleaved_range_info.attribute_stride == 28))
-			//{
-			//hex_str += " # skipping block data log\n";
-			//}
-			//else
-#endif
 			{
 				auto dst_ptr = block.vertex_data.data();
 				std::stringstream hex_ss;
@@ -476,11 +468,11 @@ void mesh_dumper::dump()
 		enum class draw_type_e
 		{
 			sly3_normal,
-			sly3_skydome, // todo remove?
+			sly3_skydome,
 			sly3_nospec,
-			sly3_water,
-			sly3_skeletal,
-			sly3_normal2,
+			sly3_water,    // Sly3_RenderList_2_Lit_Skin_V.vpo and Sly3_RenderList_2_Lit_Skin.fpo
+			sly3_skeletal, // ditto
+			sly3_normal2,   // 
 			sly3_particle,  // fire?
 			sly3_particle2, // embers?
 			sly3_particle3, // bubbles?
@@ -497,13 +489,13 @@ void mesh_dumper::dump()
 		else if (d.vert_shader_hash == 0x31C70E3B && d.frag_shader_hash == 0x76A79373) draw_type = draw_type_e::sly3_particle2;
 		else if (d.vert_shader_hash == 0xE2310449 && d.frag_shader_hash == 0x76A79373) draw_type = draw_type_e::sly3_particle3;
 
-		const bool use_no_xform = (
+		bool use_no_xform = (
 			draw_type == draw_type_e::sly3_normal2 ||
 			draw_type == draw_type_e::sly3_particle ||
 			draw_type == draw_type_e::sly3_particle2 ||
 			draw_type == draw_type_e::sly3_particle3);
 
-		const bool has_bones = (
+		bool is_skinned = (
 			draw_type == draw_type_e::sly3_skeletal &&
 			d.transform_branch_bits & 0x100);
 
@@ -514,6 +506,11 @@ void mesh_dumper::dump()
 			draw_type != draw_type_e::sly3_nospec &&
 			draw_type != draw_type_e::sly3_skydome);
 
+#if !MESHDUMP_POSED
+		is_skinned   = false;
+		use_no_xform = use_no_xform || (draw_type == draw_type_e::sly3_water || draw_type == draw_type_e::sly3_skeletal);
+#endif
+
 		mat4 xform_mat       = linalg::identity;
 		mat4 xform_mat0 = linalg::identity;
 		mat4 bone_mats[4];
@@ -523,12 +520,8 @@ void mesh_dumper::dump()
 			xform_mat0 = {vcb[0], vcb[1], vcb[2], vcb[3]};
 			xform_mat  = {vcb[13], vcb[14], vcb[15], vcb[16]};
 
-			if (has_bones)
+			if (is_skinned)
 			{
-				//bone_mats[0] = {vcb[32], vcb[33], vcb[34], {0, 0, 0, 1}};
-				//bone_mats[1] = {vcb[35], vcb[36], vcb[37], {0, 0, 0, 1}};
-				//bone_mats[2] = {vcb[38], vcb[39], vcb[40], {0, 0, 0, 1}};
-				//bone_mats[3] = {vcb[41], vcb[42], vcb[43], {0, 0, 0, 1}};
 				u32 j = 32;
 				bone_mats[0] = {vcb[j++], vcb[j++], vcb[j++], {0, 0, 0, 1}};
 				bone_mats[1] = {vcb[j++], vcb[j++], vcb[j++], {0, 0, 0, 1}};
@@ -546,9 +539,8 @@ void mesh_dumper::dump()
 		auto transform_pos = [&](u32 idx, const vec3be& pos, const mesh_draw_dump_block* weights_block) -> vec3 {
 			vec4 out;
 			vec4 a = {pos.x, pos.y, pos.z, 1};
-			if (has_bones)
+			if (is_skinned)
 			{
-#if MESHDUMP_POSED
 				const vec4be* weight_array = (vec4be*)weights_block->vertex_data.data();
 				ensure(idx * 16 < weights_block->vertex_data.size());
 
@@ -590,9 +582,6 @@ void mesh_dumper::dump()
 						1};
 				}
 				out = mul(out, xform_mat);
-#else
-				out = mul(a, xform_mat);
-#endif
 			}
 			else if (use_no_xform)
 			//else
@@ -624,9 +613,11 @@ void mesh_dumper::dump()
 #if MESHDUMP_SLY_VERSION != 4
 
 		auto emit_vc_data = [&](int draw_type) {
+#if MESHDUMP_NOCLIP
 			// todo: emit binary
-			obj_str += fmt::format("vc %d %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
+			obj_str += fmt::format("vc %d %x %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
 				draw_type,
+				d.transform_branch_bits,
 				vcb[17].x, vcb[17].y, vcb[17].z, vcb[17].w,
 				vcb[18].x, vcb[18].y, vcb[18].z, vcb[18].w,
 				vcb[19].x, vcb[19].y, vcb[19].z, vcb[19].w,
@@ -635,14 +626,14 @@ void mesh_dumper::dump()
 				vcb[1].x, vcb[1].y, vcb[1].z, vcb[1].w,
 				vcb[2].x, vcb[2].y, vcb[2].z, vcb[2].w,
 				vcb[3].x, vcb[3].y, vcb[3].z, vcb[3].w);
+#endif
 		};
-
 		if (block_count > 0)
 		{
 			const auto& block0 = d.blocks[0];
-			if (has_bones && block_count < 2)
+			if (is_skinned && block_count < 2)
 				__debugbreak();
-			const auto* block1_weights = has_bones ? &d.blocks[1] : nullptr;
+			const auto* block1_weights = is_skinned ? &d.blocks[1] : nullptr;
 
 			if (block0.interleaved_range_info.interleaved)
 			{
@@ -671,13 +662,14 @@ void mesh_dumper::dump()
 						const vec3 pos = transform_pos(i, v.pos, block1_weights);
 
 #if MESHDUMP_NOCLIP
-						const bool has_4_blocks = (block_count == 4); // HACKY
-						const u32 diff          = ((u32*)d.blocks[1 + has_4_blocks].vertex_data.data())[i];
+						//const bool has_4_blocks = (block_count == 4); // HACKY
+						const u32 block_increment    = (draw_type == draw_type_e::sly3_skeletal) ? 1 : 0;
+						const u32 diff          = ((u32*)d.blocks[1 + block_increment].vertex_data.data())[i];
 
 						if (has_spec)
 						{
-							ensure(d.blocks.size() > 2 + has_4_blocks);
-							const u32 spec = ((u32*)d.blocks[2 + has_4_blocks].vertex_data.data())[i];
+							ensure(d.blocks.size() > 2 + block_increment);
+							const u32 spec = ((u32*)d.blocks[2 + block_increment].vertex_data.data())[i];
 
 							obj_str += fmt::format("v36s %f %f %f %f %f %X %X\n",
 								pos.x, pos.y, pos.z, (float)v.uv.u, (float)v.uv.v, diff, spec);
