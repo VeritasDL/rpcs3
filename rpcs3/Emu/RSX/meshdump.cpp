@@ -502,9 +502,13 @@ void mesh_dumper::dump()
 			draw_type == draw_type_e::sly3_particle2 ||
 			draw_type == draw_type_e::sly3_particle3);
 
+		const bool is_skinned_only = d.transform_branch_bits & 0x100;
+
 		bool is_skinned = (
 			draw_type == draw_type_e::sly3_skeletal &&
-			d.transform_branch_bits & 0x100);
+			is_skinned_only);
+
+		const bool is_lighting = d.transform_branch_bits & 0x10;
 
 		const bool use_inv_view = (
 			draw_type != draw_type_e::sly3_skydome);
@@ -543,31 +547,37 @@ void mesh_dumper::dump()
 			xform_mat = linalg::scaling_matrix(vec3(5, 5, 5));
 #endif
 
+		auto get_skeleton_r_vecs = [&](u32 idx, const mesh_draw_dump_block* weights_block) -> std::tuple<vec4, vec4, vec4>
+		{
+			const vec4be* weight_array = (vec4be*)weights_block->vertex_data.data();
+			ensure(idx * 16 < weights_block->vertex_data.size());
+			const vec4be weights_be = weight_array[idx];
+			const vec4 weights      = {weights_be.x, weights_be.y, weights_be.z, weights_be.w};
+
+			const vec4 r0 = weights.x * bone_mats[0][0] + weights.y * bone_mats[1][0] + weights.z * bone_mats[2][0] + weights.w * bone_mats[3][0];
+			const vec4 r1 = weights.x * bone_mats[0][1] + weights.y * bone_mats[1][1] + weights.z * bone_mats[2][1] + weights.w * bone_mats[3][1];
+			const vec4 r2 = weights.x * bone_mats[0][2] + weights.y * bone_mats[1][2] + weights.z * bone_mats[2][2] + weights.w * bone_mats[3][2];
+
+#if MESHDUMP_DEBUG
+			obj_str += fmt::format("# weights: %f %f %f %f, rvecs:\n%s\n%s\n%s\n",
+				weights[0], weights[1], weights[2], weights[3], print_vec4(r0), print_vec4(r1), print_vec4(r2));
+#endif
+
+			return {r0, r1, r2};
+		};
+
 		auto transform_pos = [&](u32 idx, const vec3be& pos, const mesh_draw_dump_block* weights_block) -> vec3 {
 			vec4 out;
 			vec4 a = {pos.x, pos.y, pos.z, 1};
 			if (is_skinned)
 			{
-				const vec4be* weight_array = (vec4be*)weights_block->vertex_data.data();
-				ensure(idx * 16 < weights_block->vertex_data.size());
-
-				const vec4be weights_be = weight_array[idx];
-				const vec4 weights      = {weights_be.x, weights_be.y, weights_be.z, weights_be.w};
-
-				const vec4 r0 = weights.x * bone_mats[0][0] + weights.y * bone_mats[1][0] + weights.z * bone_mats[2][0] + weights.w * bone_mats[3][0];
-				const vec4 r1 = weights.x * bone_mats[0][1] + weights.y * bone_mats[1][1] + weights.z * bone_mats[2][1] + weights.w * bone_mats[3][1];
-				const vec4 r2 = weights.x * bone_mats[0][2] + weights.y * bone_mats[1][2] + weights.z * bone_mats[2][2] + weights.w * bone_mats[3][2];
+				const auto &[r0, r1, r2] = get_skeleton_r_vecs(idx, weights_block);
 
 				out = {
 					dot(a, r0),
 					dot(a, r1),
 					dot(r2, a),
 					1};
-
-#if MESHDUMP_DEBUG
-				obj_str += fmt::format("# weights: %f %f %f %f, rvecs:\n%s\n%s\n%s\n# out: %s\n",
-					weights[0], weights[1], weights[2], weights[3], print_vec4(r0), print_vec4(r1), print_vec4(r2), print_vec4(out));
-#endif
 
 				//auto isbig = [](double x)
 				//{
@@ -576,18 +586,18 @@ void mesh_dumper::dump()
 				//if (isnan(out.x) || isnan(out.y) || isnan(out.z) || isnan(out.w) ||
 				//	isinf(out.x) || isinf(out.y) || isinf(out.z) || isinf(out.w) ||
 				//    isbig(out.x) || isbig(out.y) || isbig(out.z) || isbig(out.w))
-				const double sum     = weights.x + weights.y + weights.z + weights.w;
-				const double epsilon = 0.01;
-				if ((sum > 1. + epsilon) || (sum < 1. - epsilon) || isnan(sum))
-				{
-					// TODO: don't emit these
-					obj_str += "# bad weights, defaulting to first bone\n";
-					out = {
-						dot(a, bone_mats[0][0]),
-						dot(a, bone_mats[0][1]),
-						dot(a, bone_mats[0][2]),
-						1};
-				}
+				//const double sum     = weights.x + weights.y + weights.z + weights.w;
+				//const double epsilon = 0.01;
+				//if ((sum > 1. + epsilon) || (sum < 1. - epsilon) || isnan(sum))
+				//{
+				//	// TODO: don't emit these
+				//	obj_str += "# bad weights, defaulting to first bone\n";
+				//	out = {
+				//		dot(a, bone_mats[0][0]),
+				//		dot(a, bone_mats[0][1]),
+				//		dot(a, bone_mats[0][2]),
+				//		1};
+				//}
 				out = mul(out, xform_mat);
 			}
 			else if (use_no_xform)
@@ -613,6 +623,30 @@ void mesh_dumper::dump()
 			return {out.x, out.y, out.z};
 		};
 #endif
+
+		auto transform_normal = [&](u32 idx, const vec3be& normal, const mesh_draw_dump_block* weights_block) -> vec3
+		{
+			vec4 out;
+			vec3 a = {normal.x, normal.y, normal.z};
+			if (is_skinned)
+			{
+				const auto& [r0, r1, r2] = get_skeleton_r_vecs(idx, weights_block);
+
+				const auto r0_3 = vec3(r0.x, r0.y, r0.z);
+				const auto r1_3 = vec3(r1.x, r1.y, r1.z);
+				const auto r2_3 = vec3(r2.x, r2.y, r2.z);
+
+				return {
+					dot(r0_3, a),
+					dot(r1_3, a),
+					dot(r2_3, a)};
+			}
+			else
+			{
+				return {normal.x, normal.y, normal.z};
+			}
+		};
+
 		size_t vertex_count = 0;
 
 		bool has_normals{};
@@ -684,8 +718,20 @@ void mesh_dumper::dump()
 							ensure(d.blocks.size() > 2 + block_increment);
 							const u32 spec = ((u32*)d.blocks[2 + block_increment].vertex_data.data())[i];
 
-							obj_str += fmt::format("v36s %f %f %f %f %f %X %X\n",
-								pos.x, pos.y, pos.z, (float)v.uv.u, (float)v.uv.v, diff, spec);
+							const bool needs_transformed_normal = (is_skinned_only && is_lighting);
+							//const bool needs_transformed_normal = (is_skinned_only);
+							if (needs_transformed_normal)
+							{
+								const vec3 normal = transform_normal(i, v.normal, block1_weights);
+
+								obj_str += fmt::format("v36sn %f %f %f %f %f %f %f %f %X %X\n",
+									pos.x, pos.y, pos.z, normal.x, normal.y, normal.z, (float)v.uv.u, (float)v.uv.v, diff, spec);
+							}
+							else
+							{
+								obj_str += fmt::format("v36s %f %f %f %f %f %X %X\n",
+									pos.x, pos.y, pos.z, (float)v.uv.u, (float)v.uv.v, diff, spec);
+							}
 						}
 						else
 						{
