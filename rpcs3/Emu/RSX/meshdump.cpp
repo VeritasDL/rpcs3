@@ -14,9 +14,9 @@
 
 #define MESHDUMP_DEBUG true
 #define MESHDUMP_DEBUG_OLD false
-#define MESHDUMP_POSED false
+#define MESHDUMP_POSED true
 #define MESHDUMP_SLY_VERSION 3
-#define MESHDUMP_NOCLIP false
+#define MESHDUMP_NOCLIP true
 #define MESHDUMP_BATCH_DUMPS false
 
 #pragma optimize("", off)
@@ -96,6 +96,11 @@ void mesh_dumper::push_dump(mesh_draw_dump& dump)
 	dump.index = dumps.size() + 1;
 	dump.clear_count = g_clears_this_frame;
 	dumps.push_back(dump);
+}
+
+mesh_draw_dump& mesh_dumper::get_prev_dump()
+{
+	return dumps.at(dumps.size() - 2);
 }
 
 mesh_draw_dump& mesh_dumper::get_dump()
@@ -465,6 +470,8 @@ void mesh_dumper::dump()
 		const auto& vcb = d.vertex_constants_buffer;
 
 #if MESHDUMP_SLY_VERSION != 4
+		// TODO: would be cleaner to base things on just transform bits and not block count, also simplify related logic
+
 		enum class draw_type_e
 		{
 			sly3_normal,
@@ -612,7 +619,7 @@ void mesh_dumper::dump()
 
 #if MESHDUMP_SLY_VERSION != 4
 
-		auto emit_vc_data = [&](int draw_type) {
+		auto emit_uniforms = [&](int draw_type) {
 #if MESHDUMP_NOCLIP
 			// todo: emit binary
 			obj_str += fmt::format("vc %d %x %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
@@ -626,6 +633,13 @@ void mesh_dumper::dump()
 				vcb[1].x, vcb[1].y, vcb[1].z, vcb[1].w,
 				vcb[2].x, vcb[2].y, vcb[2].z, vcb[2].w,
 				vcb[3].x, vcb[3].y, vcb[3].z, vcb[3].w);
+
+			for (u32 i = 0; i < d.fragment_constants_buffer.size(); ++i)
+			{
+				const usz offs = d.fragment_constants_offsets[i];
+				const auto& fc = d.fragment_constants_buffer[i];
+				obj_str += fmt::format("fc %d %f %f %f %f\n", offs, fc.x, fc.y, fc.z, fc.w);
+			}
 #endif
 		};
 		if (block_count > 0)
@@ -642,7 +656,7 @@ void mesh_dumper::dump()
 					draw_type == draw_type_e::sly3_nospec || draw_type == draw_type_e::sly3_skeletal ||
 					draw_type == draw_type_e::sly3_water)
 				{
-					emit_vc_data((int)draw_type);
+					emit_uniforms((int)draw_type);
 
 					struct mesh_draw_vertex_36
 					{
@@ -662,7 +676,6 @@ void mesh_dumper::dump()
 						const vec3 pos = transform_pos(i, v.pos, block1_weights);
 
 #if MESHDUMP_NOCLIP
-						//const bool has_4_blocks = (block_count == 4); // HACKY
 						const u32 block_increment    = (draw_type == draw_type_e::sly3_skeletal) ? 1 : 0;
 						const u32 diff          = ((u32*)d.blocks[1 + block_increment].vertex_data.data())[i];
 
@@ -690,7 +703,7 @@ void mesh_dumper::dump()
 				}
 				else if (draw_type == draw_type_e::sly3_normal2)
 				{
-					emit_vc_data((int)draw_type);
+					emit_uniforms((int)draw_type);
 
 					struct mesh_draw_vertex_28
 					{

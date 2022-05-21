@@ -22,6 +22,8 @@
 
 #include "util/asm.hpp"
 
+#pragma optimize("", off)
+
 namespace vk
 {
 	VkCompareOp get_compare_func(rsx::comparison_function op, bool reverse_direction = false);
@@ -1972,6 +1974,8 @@ void VKGSRender::load_program_env()
 		}
 	}
 
+	static u32 s_prev_fragment_constants_size{};
+
 	if (update_fragment_constants && !update_instruction_buffers)
 	{
 		check_heap_status(VK_HEAP_CHECK_FRAGMENT_CONSTANTS_STORAGE);
@@ -1985,6 +1989,15 @@ void VKGSRender::load_program_env()
 			m_prog_buffer->fill_fragment_constants_buffer({ reinterpret_cast<float*>(buf), fragment_constants_size },
 				*ensure(m_fragment_prog), current_fragment_program, true);
 
+			if (g_mesh_dumper.enabled)
+			{
+				auto& dump = g_mesh_dumper.get_dump();
+
+				dump.fragment_constants_buffer.resize(fragment_constants_size / 16);
+				std::memcpy((void*)dump.fragment_constants_buffer.data(), buf, fragment_constants_size);
+				dump.fragment_constants_offsets = m_fragment_prog->FragmentConstantOffsetCache;
+			}
+			
 			m_fragment_constants_ring_info.unmap();
 			m_fragment_constants_buffer_info = { m_fragment_constants_ring_info.heap->value, mem, fragment_constants_size };
 		}
@@ -1993,6 +2006,19 @@ void VKGSRender::load_program_env()
 			m_fragment_constants_buffer_info = { m_fragment_constants_ring_info.heap->value, 0, 32 };
 		}
 	}
+	else if (fragment_constants_size && fragment_constants_size == s_prev_fragment_constants_size)
+	{
+		// Fragment constants weren't updated so assume they're the same as the last draw
+		if (g_mesh_dumper.enabled)
+		{
+			auto& dump = g_mesh_dumper.get_dump();
+			auto& prev_dump = g_mesh_dumper.get_prev_dump();
+
+			dump.fragment_constants_buffer = prev_dump.fragment_constants_buffer;
+			dump.fragment_constants_offsets = prev_dump.fragment_constants_offsets;
+		}
+	}
+	s_prev_fragment_constants_size = fragment_constants_size;
 
 	if (update_fragment_env)
 	{

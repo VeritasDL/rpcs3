@@ -750,6 +750,7 @@
     <ClInclude Include="Emu\RSX\rsx_decode.h" />
     <ClInclude Include="Emu\RSX\s3tc.h" />
     <ClInclude Include="Emu\RSX\umHalf.h" />
+    <ClInclude Include="util\linalg_stuff.hpp" />
     <ClInclude Include="Emu\VFS.h" />
     <ClInclude Include="Emu\GameInfo.h" />
     <ClInclude Include="Emu\IdManager.h" />

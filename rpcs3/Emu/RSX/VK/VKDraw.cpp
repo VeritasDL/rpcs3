@@ -2,7 +2,7 @@
 #include "../Common/BufferUtils.h"
 #include "../rsx_methods.h"
 
-//#pragma optimize("", off)
+#pragma optimize("", off)
 
 #include "VKAsyncScheduler.h"
 #include "VKGSRender.h"
@@ -10,6 +10,7 @@
 
 #include <Emu/RSX/RSXThread.h>
 #include <Emu/RSX/meshdump.h>
+#include <util/linalg_stuff.hpp>
 
 namespace vk
 {
@@ -1137,6 +1138,8 @@ void VKGSRender::end()
 		dump.frag_shader_hash = (u32)program_hash_util::fragment_program_utils::get_fragment_program_ucode_hash(current_fragment_program);
 
 		memcpy(dump.vertex_constants_buffer.data(), rsx::method_registers.transform_constants.data(), 468 * sizeof(vec4));
+
+		//m_fragment_constants_ring_info
 	}
 	for (int binding_attempts = 0; binding_attempts < 3; binding_attempts++)
 	{

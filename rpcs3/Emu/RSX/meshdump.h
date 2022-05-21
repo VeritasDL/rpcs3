@@ -7,31 +7,7 @@
 #include <mutex>
 
 #include <Emu/RSX/RSXThread.h>
-#include <Emu/RSX/linalg.h>
-
-using namespace linalg::aliases;
-
-struct vec2be
-{
-	be_t<float> u, v;
-};
-struct vec3be
-{
-	be_t<float> x, y, z;
-};
-struct uvec3
-{
-	u32 x_u, y_u, z_u;
-};
-struct vec4be
-{
-	be_t<float> x, y, z, w;
-};
-using vec2 = float2;
-using vec3 = float3;
-using vec4 = float4;
-using mat4 = float4x4;
-using mat4 = float4x4;
+#include <util/linalg_stuff.hpp>
 
 struct mesh_draw_dump_block
 {
@@ -52,6 +28,8 @@ struct mesh_draw_dump
 	std::vector<mesh_draw_dump_block> blocks;
 	std::vector<u32> indices;
 	std::array<float4, 468> vertex_constants_buffer;
+	std::vector<vec4> fragment_constants_buffer;
+	std::vector<usz> fragment_constants_offsets;
 	u32 vert_shader_hash;
 	u32 frag_shader_hash;
 	u32 transform_branch_bits;
@@ -67,6 +45,7 @@ struct mesh_dumper
 
 	void push_block(const mesh_draw_dump_block& block);
 	void push_dump(mesh_draw_dump& dump);
+	mesh_draw_dump& get_prev_dump();
 	mesh_draw_dump& get_dump();
 	void dump();
 };
