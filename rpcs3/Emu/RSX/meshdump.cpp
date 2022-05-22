@@ -435,7 +435,8 @@ void mesh_dumper::dump()
 		//	return v0.x * v1.x + v0.y * v1.y + v0.z * v1.z + v0.w * v1.w;
 		//};
 
-		auto mul = [&](const float4& v0, const mat4& v1) -> float4 {
+		auto mul_inv = [&](const float4& v0, const mat4& v1) -> float4
+		{
 			return {
 				dot(v0, v1[0]),
 				dot(v0, v1[1]),
@@ -531,7 +532,7 @@ void mesh_dumper::dump()
 			xform_mat0 = {vcb[0], vcb[1], vcb[2], vcb[3]};
 			xform_mat  = {vcb[13], vcb[14], vcb[15], vcb[16]};
 
-			if (is_skinned)
+			if (is_skinned_only)
 			{
 				u32 j = 32;
 				bone_mats[0] = {vcb[j++], vcb[j++], vcb[j++], {0, 0, 0, 1}};
@@ -559,8 +560,8 @@ void mesh_dumper::dump()
 			const vec4 r2 = weights.x * bone_mats[0][2] + weights.y * bone_mats[1][2] + weights.z * bone_mats[2][2] + weights.w * bone_mats[3][2];
 
 #if MESHDUMP_DEBUG
-			obj_str += fmt::format("# weights: %f %f %f %f, rvecs:\n%s\n%s\n%s\n",
-				weights[0], weights[1], weights[2], weights[3], print_vec4(r0), print_vec4(r1), print_vec4(r2));
+			//obj_str += fmt::format("# weights: %f %f %f %f, rvecs:\n%s\n%s\n%s\n",
+				//weights[0], weights[1], weights[2], weights[3], print_vec4(r0), print_vec4(r1), print_vec4(r2));
 #endif
 
 			return {r0, r1, r2};
@@ -598,25 +599,25 @@ void mesh_dumper::dump()
 				//		dot(a, bone_mats[0][2]),
 				//		1};
 				//}
-				out = mul(out, xform_mat);
+				out = mul_inv(out, xform_mat);
 			}
 			else if (use_no_xform)
-			//else
+			// else
 			{
-				//out = mul(a, xform_mat_first);
+				// out = mul_inv(a, xform_mat_first);
 				//__debugbreak();
 				obj_str += "# using no xform\n";
 				out = a;
 			}
 			else
 			{
-				out = mul(a, xform_mat);
+				out = mul_inv(a, xform_mat);
 			}
-			//return {out.x * 0.01f, out.y * 0.01f, out.z * 0.01f};
+			// return {out.x * 0.01f, out.y * 0.01f, out.z * 0.01f};
 
 #if MESHDUMP_SLY_VERSION == 3
 			if (use_inv_view)
-				out = mul(out, inv_view_mat);
+				out = mul_inv(out, inv_view_mat);
 			// xform_mat = linalg::mul(xform_mat, inv_view_mat);
 #endif
 
@@ -628,7 +629,7 @@ void mesh_dumper::dump()
 		{
 			vec4 out;
 			vec3 a = {normal.x, normal.y, normal.z};
-			if (is_skinned)
+			if (is_skinned_only && weights_block)
 			{
 				const auto& [r0, r1, r2] = get_skeleton_r_vecs(idx, weights_block);
 
@@ -711,24 +712,82 @@ void mesh_dumper::dump()
 
 #if MESHDUMP_NOCLIP
 						const u32 block_increment    = (draw_type == draw_type_e::sly3_skeletal) ? 1 : 0;
-						const u32 diff          = ((u32*)d.blocks[1 + block_increment].vertex_data.data())[i];
+						u32 diff          = ((u32*)d.blocks[1 + block_increment].vertex_data.data())[i];
+						
+						auto u32_to_vec4 = [](u32 u) -> vec4
+						{
+							return {
+								((u & 0x000000FF) >>  0) / 255.0f,
+								((u & 0x0000FF00) >>  8) / 255.0f,
+								((u & 0x00FF0000) >> 16) / 255.0f,
+								((u & 0xFF000000) >> 24) / 255.0f,
+							};
+						};
+						auto vec4_to_u32 = [](vec4 v) -> u32
+						{
+							return
+								u32(v[0] * 255) << 0  |
+								u32(v[1] * 255) << 8  |
+								u32(v[2] * 255) << 16 |
+								u32(v[3] * 255) << 24;
+							;
+						};
 
 						if (has_spec)
 						{
 							ensure(d.blocks.size() > 2 + block_increment);
-							const u32 spec = ((u32*)d.blocks[2 + block_increment].vertex_data.data())[i];
+							u32 spec = ((u32*)d.blocks[2 + block_increment].vertex_data.data())[i];
 
-							const bool needs_transformed_normal = (is_skinned_only && is_lighting);
-							//const bool needs_transformed_normal = (is_skinned_only);
-							if (needs_transformed_normal)
+							if (is_lighting)
 							{
-								const vec3 normal = transform_normal(i, v.normal, block1_weights);
+								using std::min;
+								using std::max;
+							
+								vec4 diff_vec          = u32_to_vec4(diff);
+								const vec4 in_spec_vec = u32_to_vec4(spec);
+								vec4 spec_vec          = in_spec_vec;
 
-								obj_str += fmt::format("v36sn %f %f %f %f %f %f %f %f %X %X\n",
-									pos.x, pos.y, pos.z, normal.x, normal.y, normal.z, (float)v.uv.u, (float)v.uv.v, diff, spec);
+								const vec3 normal = transform_normal(i, v.normal, block1_weights);
+								// change diff and spec
+
+								const mat4 gvs_matNormalsTrans = {vcb[48], vcb[49], vcb[50], vcb[51]};
+								const mat4 gvs_matColors       = {vcb[52], vcb[53], vcb[54], vcb[55]};
+								const vec4 gvs_vecOffset       = vcb[56];
+								const vec4 gvs_vecMax          = vcb[57];
+								const vec4 gvs_lsd          = vcb[58];
+								const float gvs_vms          = vcb[59].x;
+
+								vec4 r1 = vec4(normal.x, normal.y, normal.z, 0.0);
+								vec4 r0 = mul_inv(r1, gvs_matNormalsTrans);
+								r0 = r0 * r0 * r0 + r0;
+
+								const float r4x = gvs_vms + gvs_lsd.w;
+								vec4 r3 = vec4(gvs_vecOffset.x, gvs_vecOffset.y, gvs_vecOffset.z, r4x * 2.0 + gvs_vecOffset.w);
+								r1 = min(r0, gvs_vecMax);
+								r0 = mul_inv(r1, gvs_matColors);
+								r3 += r0;
+								r0.x = 2.0 - max(max(r3.x, r3.y), r3.z);
+								r0.x = max(r0.x, 0.0f);
+								r3   = min(r3, vec4(2.0, 2.0, 2.0, r0.x));
+								r0.x -= r3.w;
+								const vec3 gvs_lsd_3 = vec3(gvs_lsd.x, gvs_lsd.y, gvs_lsd.z);
+								const vec3 r0_xxx          = vec3(r0.x, r0.x, r0.x);
+								r0.xyz()                   = r0_xxx * gvs_lsd_3 + r3.xyz();
+								const vec3 diff_www        = vec3(diff_vec.w, diff_vec.w, diff_vec.w);
+								diff_vec.xyz()             = diff_www * r0.xyz();
+								float r1x = (2.01575 - r0.x) / 2.0;
+								spec_vec.w    = r1x;
+								r1x                        = r3.w * in_spec_vec.w / r1x;
+								spec_vec.xyz()             = in_spec_vec.xyz() * vec3(r1x, r1x, r1x);
+								diff_vec.w                 = in_spec_vec.w;
+
+								obj_str += fmt::format("v36sn %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
+									pos.x, pos.y, pos.z, (float)v.uv.u, (float)v.uv.v, diff_vec.x, diff_vec.y,
+									diff_vec.z, diff_vec.w, spec_vec.x, spec_vec.y, spec_vec.z, spec_vec.w);
 							}
 							else
 							{
+
 								obj_str += fmt::format("v36s %f %f %f %f %f %X %X\n",
 									pos.x, pos.y, pos.z, (float)v.uv.u, (float)v.uv.v, diff, spec);
 							}

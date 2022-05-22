@@ -25,5 +25,5 @@ struct vec4be
 using vec2 = float2;
 using vec3 = float3;
 using vec4 = float4;
-using mat4 = float4x4;
+using mat3 = float3x3;
 using mat4 = float4x4;
