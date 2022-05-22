@@ -17,7 +17,7 @@
 #define MESHDUMP_POSED true
 #define MESHDUMP_SLY_VERSION 3
 #define MESHDUMP_NOCLIP true
-#define MESHDUMP_BATCH_DUMPS false
+#define MESHDUMP_BATCH_DUMPS true
 
 #pragma optimize("", off)
 
@@ -318,8 +318,13 @@ void mesh_dumper::dump()
 		hmm[(u32)d.texture_raw_data_ptr]++;
 	}
 
-#if MESHDUMP_BATCH_DUMPS
-	std::sort(g_mesh_dumper.dumps.begin(), g_mesh_dumper.dumps.end(), [](const mesh_draw_dump& d0, const mesh_draw_dump& d1) {
+#if false && MESHDUMP_BATCH_DUMPS
+	// todo figure out how to keep opaque ones first?
+
+	std::stable_sort(g_mesh_dumper.dumps.begin(), g_mesh_dumper.dumps.end(), [](const mesh_draw_dump& d0, const mesh_draw_dump& d1) {
+		//if (g_dump_texture_info[(u64)d1.texture_raw_data_ptr].is_opaque)
+			//return true;
+
 		return (u64)d0.texture_raw_data_ptr < (u64)d1.texture_raw_data_ptr;
 	});
 #endif
@@ -328,20 +333,78 @@ void mesh_dumper::dump()
 	for (auto dump_idx = 0; dump_idx < g_mesh_dumper.dumps.size(); ++dump_idx)
 	{
 		auto& d = g_mesh_dumper.dumps[dump_idx];
-		
+
 		const auto block_count = d.blocks.size();
 		const auto index_count = d.indices.size();
 
 		if (block_count == 0 || index_count == 0)
 			continue;
 
-#if MESHDUMP_BATCH_DUMPS
-		if (dump_idx > 0)
-			new_dump = ((u64)d.texture_raw_data_ptr != (u64)g_mesh_dumper.dumps[dump_idx - 1].texture_raw_data_ptr);
-#endif
-
 		const auto dump_name = fmt::format("%d_%X_vshd:%08X_fshd:%08X_tex:%X_clr:%d_blk:%d",
 			d.index, session_id, d.vert_shader_hash, d.frag_shader_hash, (u32)d.texture_raw_data_ptr, d.clear_count, d.blocks.size());
+
+		// Skip if dump is identical to previous (Sly does this for some reason, one draw writes to depth, the other not)
+		if (dump_idx > 0)
+		{
+			const auto& d_prev = g_mesh_dumper.dumps[dump_idx - 1];
+
+			bool is_identical_dump = true;
+			if (d.vert_shader_hash != d_prev.vert_shader_hash ||
+				d.frag_shader_hash != d_prev.frag_shader_hash ||
+				d.blocks.size() != d_prev.blocks.size())
+			{
+				is_identical_dump = false;
+			}
+			else
+			{
+				if (d.indices.size() != d_prev.indices.size() ||
+					!memcmp(d.indices.data(), d_prev.indices.data(), d.indices.size()))
+				{
+					is_identical_dump = false;
+				}
+				else
+				{
+					for (int i = 0; i < d.blocks.size(); ++i)
+					{
+						const auto& b0 = d.blocks[i];
+						const auto& b1 = d_prev.blocks[i];
+
+						if ((b0.vertex_data.size() != b1.vertex_data.size()) ||
+							!memcmp(b0.vertex_data.data(), b1.vertex_data.data(), b0.vertex_data.size()))
+						{
+							is_identical_dump = false;
+							break;
+						}
+					}
+					if (is_identical_dump)
+					{
+						if (!memcmp(d.vertex_constants_buffer.data(), d_prev.vertex_constants_buffer.data(), d.vertex_constants_buffer.size()))
+						{
+							is_identical_dump = false;
+						}
+					}
+				}
+			}
+			if (is_identical_dump)
+			{
+#if MESHDUMP_DEBUG
+				obj_str += fmt::format("# skipping identical dump: %s\n", dump_name);
+#endif
+				continue;
+			}
+		}
+
+#if MESHDUMP_BATCH_DUMPS
+		if (dump_idx > 0)
+		{
+			const auto& d_prev = g_mesh_dumper.dumps[dump_idx - 1];
+			new_dump = ((u64)d.texture_raw_data_ptr != (u64)d_prev.texture_raw_data_ptr);
+			// force new drawcall if texture has transparency to reduce visual bugs
+			//new_dump = new_dump || !g_dump_texture_info[(u64)d.texture_raw_data_ptr].is_opaque;
+			//new_dump = new_dump || (d.vert_shader_hash == 0xAB2CD1A9);
+		}
+#endif
+
 		obj_str += fmt::format("%s %s\n", new_dump ? "o" : "g", dump_name);
 
 #if MESHDUMP_DEBUG
@@ -504,10 +567,13 @@ void mesh_dumper::dump()
 			draw_type == draw_type_e::sly3_particle3);
 
 		const bool is_skinned_only = d.transform_branch_bits & 0x100;
-
+		
 		bool is_skinned = (
 			draw_type == draw_type_e::sly3_skeletal &&
 			is_skinned_only);
+
+		bool is_skin_shader = (draw_type == draw_type_e::sly3_skeletal ||
+							   draw_type == draw_type_e::sly3_water);
 
 		const bool is_lighting = d.transform_branch_bits & 0x10;
 
@@ -545,7 +611,12 @@ void mesh_dumper::dump()
 		
 #if MESHDUMP_SLY_VERSION == 3
 		if (draw_type == draw_type_e::sly3_skydome)
-			xform_mat = linalg::scaling_matrix(vec3(5, 5, 5));
+		{
+			//const vec3 cam_pos = vec3(inv_view_mat[3][0], inv_view_mat[3][1], inv_view_mat[3][2]);
+			// xform_mat    = linalg::translation_matrix(cam_pos); // linalg::scaling_matrix(vec3(5, 5, 5));
+			// xform_mat = linalg::scaling_matrix(vec3(5, 5, 5));
+			//xform_mat = linalg::identity;
+		}
 #endif
 
 		auto get_skeleton_r_vecs = [&](u32 idx, const mesh_draw_dump_block* weights_block) -> std::tuple<vec4, vec4, vec4>
@@ -611,7 +682,19 @@ void mesh_dumper::dump()
 			}
 			else
 			{
-				out = mul_inv(a, xform_mat);
+				if (draw_type == draw_type_e::sly3_skydome)
+				{
+					//out = linalg::mul(linalg::scaling_matrix(vec3(5, 5, 5)), a);
+					out = linalg::mul(linalg::scaling_matrix(vec3(5, 5, 5)), a);
+
+					//const vec3 cam_pos = -vec3(inv_view_mat[3][0], inv_view_mat[3][1], inv_view_mat[3][2]);
+					//const vec3 cam_pos = vec3(xform_mat[0][3], xform_mat[1][3], xform_mat[2][3]);
+					//out = linalg::mul(linalg::translation_matrix(cam_pos), out);
+				}
+				else
+				{
+					out = mul_inv(a, xform_mat);
+				}
 			}
 			// return {out.x * 0.01f, out.y * 0.01f, out.z * 0.01f};
 
@@ -738,7 +821,7 @@ void mesh_dumper::dump()
 							ensure(d.blocks.size() > 2 + block_increment);
 							u32 spec = ((u32*)d.blocks[2 + block_increment].vertex_data.data())[i];
 
-							if (is_lighting)
+							if (is_skin_shader && is_lighting && block1_weights)
 							{
 								using std::min;
 								using std::max;
@@ -804,7 +887,8 @@ void mesh_dumper::dump()
 #endif
 					}
 
-					has_normals = true;
+					has_normals = false; // we don't emit them
+					//has_normals = true;
 				}
 				else if (draw_type == draw_type_e::sly3_normal2)
 				{
