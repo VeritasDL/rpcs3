@@ -220,8 +220,17 @@ void gs_frame::keyPressEvent(QKeyEvent *keyEvent)
 
 	// NOTE: needs to be updated with keyboard_pad_handler::processKeyEvent
 
+	auto get_sly_cam_mat = []() -> be_t<float>* {
+		const u64 emu_mem_base         = 0x300000000;
+		const uint32_t* cam_struct_ptr = (uint32_t*)(emu_mem_base + 0x005EC6D4);
+		const u8* cam_struct_addr      = (u8*)emu_mem_base + _byteswap_ulong(*cam_struct_ptr);
+		be_t<float>* cam_matrix_addr   = (be_t<float>*)((u8*)cam_struct_addr + 0x50);
+		return cam_matrix_addr;       
+	};
+
 	switch (keyEvent->key())
 	{
+#if 0
 	case Qt::Key_L:
 		if (keyEvent->modifiers() == Qt::AltModifier)
 		{
@@ -235,6 +244,7 @@ void gs_frame::keyPressEvent(QKeyEvent *keyEvent)
 			return;
 		}
 		break;
+#endif
 	case Qt::Key_Return:
 		if (keyEvent->modifiers() == Qt::AltModifier)
 		{
@@ -310,6 +320,12 @@ void gs_frame::keyPressEvent(QKeyEvent *keyEvent)
 		g_mesh_dumper.enabled = true;
 		break;
 	}
+	case Qt::Key_5: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[12] -= 4000; break;
+	case Qt::Key_8: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[12] += 4000; break;
+	case Qt::Key_6: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[13] -= 4000; break;
+	case Qt::Key_4: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[13] += 4000; break;
+	case Qt::Key_7: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[14] -= 1000; break;
+	case Qt::Key_9: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[14] += 1000; break;
 	default:
 		break;
 	}
