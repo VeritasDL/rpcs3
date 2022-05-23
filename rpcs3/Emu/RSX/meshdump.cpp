@@ -357,30 +357,47 @@ void mesh_dumper::dump()
 			}
 			else
 			{
-				if (d.indices.size() != d_prev.indices.size() ||
-					!memcmp(d.indices.data(), d_prev.indices.data(), d.indices.size()))
+				if (d.indices.size() != d_prev.indices.size())
 				{
 					is_identical_dump = false;
 				}
 				else
 				{
-					for (int i = 0; i < d.blocks.size(); ++i)
-					{
-						const auto& b0 = d.blocks[i];
-						const auto& b1 = d_prev.blocks[i];
+					auto rebase_indices = [](const std::vector<u32>& v) -> std::vector<u32> {
+						const auto v_base = *std::min_element(v.begin(), v.end());
+						auto v_rebased    = v;
+						for (auto& i : v_rebased)
+							i -= v_base;
+						return v_rebased;
+					};
 
-						if ((b0.vertex_data.size() != b1.vertex_data.size()) ||
-							!memcmp(b0.vertex_data.data(), b1.vertex_data.data(), b0.vertex_data.size()))
-						{
-							is_identical_dump = false;
-							break;
-						}
-					}
-					if (is_identical_dump)
+					auto d_rebased = rebase_indices(d.indices);
+					auto d_prev_rebased = rebase_indices(d_prev.indices);
+
+					if (!memcmp(d_rebased.data(), d_prev_rebased.data(), d_rebased.size()))
 					{
-						if (!memcmp(d.vertex_constants_buffer.data(), d_prev.vertex_constants_buffer.data(), d.vertex_constants_buffer.size()))
+						is_identical_dump = false;
+					}
+					else
+					{
+						for (int i = 0; i < d.blocks.size(); ++i)
 						{
-							is_identical_dump = false;
+							const auto& b0 = d.blocks[i];
+							const auto& b1 = d_prev.blocks[i];
+
+							if ((b0.vertex_data.size() != b1.vertex_data.size()) ||
+								!memcmp(b0.vertex_data.data(), b1.vertex_data.data(), b0.vertex_data.size()))
+							{
+								is_identical_dump = false;
+								break;
+							}
+						}
+						if (is_identical_dump)
+						{
+							if (!memcmp(d.vertex_constants_buffer.data(), d_prev.vertex_constants_buffer.data(), d.vertex_constants_buffer.size()))
+							{
+								is_identical_dump = false;
+							}
 						}
 					}
 				}
@@ -589,7 +606,7 @@ void mesh_dumper::dump()
 		use_no_xform = use_no_xform || (draw_type == draw_type_e::sly3_water || draw_type == draw_type_e::sly3_skeletal);
 #endif
 
-		mat4 xform_mat       = linalg::identity;
+		mat4 xform_mat  = linalg::identity;
 		mat4 xform_mat0 = linalg::identity;
 		mat4 bone_mats[4];
 
@@ -608,14 +625,20 @@ void mesh_dumper::dump()
 			}
 		}
 
+		vec3 pos_offset{};
 		
 #if MESHDUMP_SLY_VERSION == 3
 		if (draw_type == draw_type_e::sly3_skydome)
 		{
 			//const vec3 cam_pos = vec3(inv_view_mat[3][0], inv_view_mat[3][1], inv_view_mat[3][2]);
 			// xform_mat    = linalg::translation_matrix(cam_pos); // linalg::scaling_matrix(vec3(5, 5, 5));
-			// xform_mat = linalg::scaling_matrix(vec3(5, 5, 5));
+			xform_mat = linalg::transpose(linalg::scaling_matrix(vec3(2, 2, 2)));
 			//xform_mat = linalg::identity;
+		}
+		else
+		{
+			be_t<float>* cam_pos = (be_t<float>*)vm::base(0x007da8c0);
+			pos_offset           = vec3(cam_pos[0], cam_pos[1], cam_pos[2]);
 		}
 #endif
 
@@ -682,19 +705,7 @@ void mesh_dumper::dump()
 			}
 			else
 			{
-				if (draw_type == draw_type_e::sly3_skydome)
-				{
-					//out = linalg::mul(linalg::scaling_matrix(vec3(5, 5, 5)), a);
-					out = linalg::mul(linalg::scaling_matrix(vec3(5, 5, 5)), a);
-
-					//const vec3 cam_pos = -vec3(inv_view_mat[3][0], inv_view_mat[3][1], inv_view_mat[3][2]);
-					//const vec3 cam_pos = vec3(xform_mat[0][3], xform_mat[1][3], xform_mat[2][3]);
-					//out = linalg::mul(linalg::translation_matrix(cam_pos), out);
-				}
-				else
-				{
-					out = mul_inv(a, xform_mat);
-				}
+				out = mul_inv(a, xform_mat);
 			}
 			// return {out.x * 0.01f, out.y * 0.01f, out.z * 0.01f};
 
@@ -704,7 +715,7 @@ void mesh_dumper::dump()
 			// xform_mat = linalg::mul(xform_mat, inv_view_mat);
 #endif
 
-			return {out.x, out.y, out.z};
+			return {out.x + pos_offset.x, out.y + pos_offset.y, out.z + pos_offset.z};
 		};
 #endif
 
