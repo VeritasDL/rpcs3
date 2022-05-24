@@ -19,6 +19,7 @@
 #define MESHDUMP_NOCLIP true
 #define MESHDUMP_BATCH_DUMPS true
 #define MESHDUMP_GENERIC_FILENAMES false
+#define MESHDUMP_OVERWRITE true
 
 #pragma optimize("", off)
 
@@ -149,7 +150,7 @@ void mesh_dumper::dump()
 	}
 
 	const std::string dump_file   = fmt::format("%d", next_dump_index);
-	const std::string tex_dir_rel = fmt::format("textures_%s", next_dump_index);
+	const std::string tex_dir_rel = fmt::format("%d", next_dump_index);
 
 #else
 	#error unimplemented game
@@ -358,13 +359,16 @@ void mesh_dumper::dump()
 		hmm[(u32)d.texture_raw_data_ptr]++;
 	}
 
-#if false && MESHDUMP_BATCH_DUMPS
+#if MESHDUMP_BATCH_DUMPS
 	// todo figure out how to keep opaque ones first?
 
 	std::stable_sort(g_mesh_dumper.dumps.begin(), g_mesh_dumper.dumps.end(), [](const mesh_draw_dump& d0, const mesh_draw_dump& d1) {
-		//if (g_dump_texture_info[(u64)d1.texture_raw_data_ptr].is_opaque)
-			//return true;
-
+		// if (g_dump_texture_info[(u64)d1.texture_raw_data_ptr].is_opaque)
+		//	  return true;
+		//const bool shaders_same = (d0.vert_shader_hash == d1.vert_shader_hash && d0.frag_shader_hash == d1.frag_shader_hash);
+		//if (!shaders_same)
+			//return d0.vert_shader_hash < d1.vert_shader_hash;
+		//else
 		return (u64)d0.texture_raw_data_ptr < (u64)d1.texture_raw_data_ptr;
 	});
 #endif
@@ -414,7 +418,7 @@ void mesh_dumper::dump()
 					auto d_rebased = rebase_indices(d.indices);
 					auto d_prev_rebased = rebase_indices(d_prev.indices);
 
-					if (!memcmp(d_rebased.data(), d_prev_rebased.data(), d_rebased.size()))
+					if (memcmp(d_rebased.data(), d_prev_rebased.data(), d_rebased.size() * 4))
 					{
 						is_identical_dump = false;
 					}
@@ -426,7 +430,7 @@ void mesh_dumper::dump()
 							const auto& b1 = d_prev.blocks[i];
 
 							if ((b0.vertex_data.size() != b1.vertex_data.size()) ||
-								!memcmp(b0.vertex_data.data(), b1.vertex_data.data(), b0.vertex_data.size()))
+								memcmp(b0.vertex_data.data(), b1.vertex_data.data(), b0.vertex_data.size()))
 							{
 								is_identical_dump = false;
 								break;
@@ -434,7 +438,7 @@ void mesh_dumper::dump()
 						}
 						if (is_identical_dump)
 						{
-							if (!memcmp(d.vertex_constants_buffer.data(), d_prev.vertex_constants_buffer.data(), d.vertex_constants_buffer.size()))
+							if (memcmp(d.vertex_constants_buffer.data(), d_prev.vertex_constants_buffer.data(), d.vertex_constants_buffer.size() * 16))
 							{
 								is_identical_dump = false;
 							}
@@ -455,10 +459,14 @@ void mesh_dumper::dump()
 		if (dump_idx > 0)
 		{
 			const auto& d_prev = g_mesh_dumper.dumps[dump_idx - 1];
+			// force new drawcall if shaders are different
+			new_dump = new_dump || (d.vert_shader_hash != d_prev.vert_shader_hash || d.frag_shader_hash != d_prev.frag_shader_hash);
+			// force new drawcall if texture is different
 			new_dump = ((u64)d.texture_raw_data_ptr != (u64)d_prev.texture_raw_data_ptr);
 			// force new drawcall if texture has transparency to reduce visual bugs
-			//new_dump = new_dump || !g_dump_texture_info[(u64)d.texture_raw_data_ptr].is_opaque;
+			new_dump = new_dump || !g_dump_texture_info[(u64)d.texture_raw_data_ptr].is_opaque;
 			//new_dump = new_dump || (d.vert_shader_hash == 0xAB2CD1A9);
+			//new_dump = true;
 		}
 #endif
 
