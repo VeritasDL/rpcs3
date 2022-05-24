@@ -18,6 +18,7 @@
 #define MESHDUMP_SLY_VERSION 3
 #define MESHDUMP_NOCLIP true
 #define MESHDUMP_BATCH_DUMPS true
+#define MESHDUMP_GENERIC_FILENAMES false
 
 #pragma optimize("", off)
 
@@ -112,14 +113,51 @@ void mesh_dumper::dump()
 {
 	Emu.Pause();
 
-	static int session_id = time(NULL) & 0xFFFFFF;
 	static u32 dump_index{};
 
-	const std::string dump_dir = fmt::format("meshdump_%X", session_id);
-	std::filesystem::create_directory(dump_dir);
+	static int session_id = time(NULL) & 0xFFFFFF;
 
-	const std::string tex_dir_name = fmt::format("%s/textures_%d", dump_dir.c_str(), dump_index);
-	std::filesystem::create_directory(tex_dir_name);
+#if MESHDUMP_GENERIC_FILENAMES
+
+	const std::string dump_dir = fmt::format("meshdump_%X", session_id);
+	const std::string dump_file   = fmt::format("meshdump_%X_%d", session_id, dump_index);
+
+	const std::string tex_dir_rel = fmt::format("textures_%d", dump_index);
+
+#elif MESHDUMP_SLY_VERSION == 3
+
+	const auto map_name         = std::string((char*)vm::base(0x00788B4C));
+	const bool is_job           = (vm::read32(0x005EB494) != -1u);
+	const u32 world_id          = vm::read32(0x006CC750);
+	std::string map_details;
+	if (is_job)
+		map_details = fmt::format("job%d", vm::read32(0x005EB484));
+	else
+		map_details = "hub";
+	const std::string dump_dir  = fmt::format("sly3_%d_%s_%s", world_id, map_name, map_details);
+
+	u32 next_dump_index = 0;
+	if (std::filesystem::exists(dump_dir))
+	{
+		for (const auto& entry : std::filesystem::directory_iterator(dump_dir))
+			if (entry.is_regular_file())
+				next_dump_index++;
+	}
+	else
+	{
+		std::filesystem::create_directory(dump_dir);
+	}
+
+	const std::string dump_file   = fmt::format("%d", next_dump_index);
+	const std::string tex_dir_rel = fmt::format("textures_%s", next_dump_index);
+
+#else
+	#error unimplemented game
+#endif
+
+	const std::string tex_dir     = fmt::format("%s/%s", dump_dir, tex_dir_rel);
+
+	std::filesystem::create_directory(tex_dir);
 
 	//
 	// DUMP MATERIALS
@@ -136,9 +174,12 @@ void mesh_dumper::dump()
 			g_dump_texture_info[(u64)d.texture_raw_data_ptr].is_used = true;
 	}
 
-	const std::string mtl_file_name = fmt::format("%s/meshdump_%X_%d.mtl", dump_dir.c_str(), session_id, dump_index);
+	const std::string mtl_file_name = fmt::format("%s/%s.mtl", dump_dir.c_str(), dump_file);
 
+#if !MESHDUMP_NOCLIP
 	std::ofstream file_mtl(mtl_file_name);
+#endif
+
 	std::string mtl_str;
 
 	std::vector<u8> work_buf;
@@ -148,9 +189,8 @@ void mesh_dumper::dump()
 		if (!info_.is_used)
 			continue;
 
-		const std::string tex_dir_name_rel = fmt::format("textures_%d", dump_index);
-		const std::string tex_file_name     = fmt::format("%s/0x%X.png", tex_dir_name, (u64)raw_data_ptr);
-		const std::string tex_file_name_rel = fmt::format("%s/0x%X.png", tex_dir_name_rel, (u64)raw_data_ptr);
+		const std::string tex_file_name     = fmt::format("%s/0x%X.png", tex_dir, (u64)raw_data_ptr);
+		const std::string tex_file_name_rel = fmt::format("%s/0x%X.png", tex_dir_rel, (u64)raw_data_ptr);
 
 		const auto src = (const unsigned char*)((tex_raw_data_ptr_t)raw_data_ptr)->data();
 
@@ -274,7 +314,7 @@ void mesh_dumper::dump()
 	work_buf[1] = 0x00;
 	work_buf[2] = 0x00;
 	work_buf[3] = 0x00;
-	const std::string tex_file_name = fmt::format("%s/0x0.png", tex_dir_name);
+	const std::string tex_file_name = fmt::format("%s/0x0.png", tex_dir);
 	if (!stbi_write_png(tex_file_name.c_str(), 1, 1, 4, work_buf.data(), 1 * 4))
 		__debugbreak();
 #endif
@@ -287,10 +327,10 @@ void mesh_dumper::dump()
 	// DUMP MESHES
 	//
 
-	std::ofstream file_obj(fmt::format("%s/meshdump_%X_%d.obj", dump_dir.c_str(), session_id, dump_index));
+	std::ofstream file_obj(fmt::format("%s/%s.obj", dump_dir.c_str(), dump_file));
 	std::string obj_str;
 
-	obj_str += fmt::format("mtllib meshdump_%X_%d.mtl\n", session_id, dump_index);
+	obj_str += fmt::format("mtllib %s.mtl\n", dump_file);
 
 	u32 vertex_index_base{1};
 #if MESHDUMP_NOCLIP
@@ -807,7 +847,7 @@ void mesh_dumper::dump()
 #if MESHDUMP_NOCLIP
 						const u32 block_increment    = (draw_type == draw_type_e::sly3_skeletal) ? 1 : 0;
 						u32 diff          = ((u32*)d.blocks[1 + block_increment].vertex_data.data())[i];
-						
+
 						auto u32_to_vec4 = [](u32 u) -> vec4
 						{
 							return {
