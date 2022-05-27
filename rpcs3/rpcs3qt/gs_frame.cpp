@@ -219,6 +219,14 @@ void gs_frame::keyPressEvent(QKeyEvent *keyEvent)
 		return cam_matrix_addr;       
 	};
 
+	float speed_mod = 1.0;
+	if (keyEvent->modifiers() & Qt::AltModifier)
+		speed_mod = 0.2;
+	else if (keyEvent->modifiers() & Qt::ShiftModifier)
+		speed_mod = 3.0;
+	else if (keyEvent->modifiers() & Qt::ControlModifier)
+		speed_mod = 0.03;
+
 	switch (keyEvent->key())
 	{
 #if 0
@@ -307,12 +315,14 @@ void gs_frame::keyPressEvent(QKeyEvent *keyEvent)
 		g_mesh_dumper.enabled = true;
 		break;
 	}
-	case Qt::Key_5: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[12] -= 4000; break;
-	case Qt::Key_8: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[12] += 4000; break;
-	case Qt::Key_6: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[13] -= 4000; break;
-	case Qt::Key_4: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[13] += 4000; break;
-	case Qt::Key_7: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[14] -= 1000; break;
-	case Qt::Key_9: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[14] += 1000; break;
+#if 0
+	case Qt::Key_5: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[12] -= 2000 * speed_mod; break;
+	case Qt::Key_8: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[12] += 2000 * speed_mod; break;
+	case Qt::Key_6: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[13] -= 2000 * speed_mod; break;
+	case Qt::Key_4: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[13] += 2000 * speed_mod; break;
+	case Qt::Key_7: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[14] -= 1000 * speed_mod; break;
+	case Qt::Key_9: if (keyEvent->modifiers() == Qt::KeypadModifier) get_sly_cam_mat()[14] += 1000 * speed_mod; break;
+#endif
 	default:
 		break;
 	}
