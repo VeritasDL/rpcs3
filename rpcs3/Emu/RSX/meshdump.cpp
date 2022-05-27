@@ -19,9 +19,9 @@
 #define MESHDUMP_NOCLIP true
 #define MESHDUMP_BATCH_DUMPS true
 #define MESHDUMP_GENERIC_FILENAMES false
-#define MESHDUMP_OVERWRITE true
+#define MESHDUMP_OVERWRITE false
 
-#pragma optimize("", off)
+//#pragma optimize("", off)
 
 using namespace rsx;
 
@@ -135,9 +135,11 @@ void mesh_dumper::dump()
 		map_details = fmt::format("job%d", vm::read32(0x005EB484));
 	else
 		map_details = "hub";
-	const std::string dump_dir  = fmt::format("sly3_%d_%s_%s", world_id, map_name, map_details);
+	const std::string dump_dir  = fmt::format("C:/Code/cpp/noclip.website/data/SlyDump/" "sly3_%d_%s_%s", world_id, map_name, map_details);
 
 	u32 next_dump_index = 0;
+
+#if !MESHDUMP_OVERWRITE
 	if (std::filesystem::exists(dump_dir))
 	{
 		for (const auto& entry : std::filesystem::directory_iterator(dump_dir))
@@ -148,6 +150,7 @@ void mesh_dumper::dump()
 	{
 		std::filesystem::create_directory(dump_dir);
 	}
+#endif
 
 	const std::string dump_file   = fmt::format("%d", next_dump_index);
 	const std::string tex_dir_rel = fmt::format("%d", next_dump_index);
@@ -157,6 +160,11 @@ void mesh_dumper::dump()
 #endif
 
 	const std::string tex_dir     = fmt::format("%s/%s", dump_dir, tex_dir_rel);
+
+#if MESHDUMP_OVERWRITE
+	std::filesystem::remove_all(dump_dir);
+	std::filesystem::create_directory(dump_dir);
+#endif
 
 	std::filesystem::create_directory(tex_dir);
 
@@ -462,11 +470,13 @@ void mesh_dumper::dump()
 			// force new drawcall if shaders are different
 			new_dump = new_dump || (d.vert_shader_hash != d_prev.vert_shader_hash || d.frag_shader_hash != d_prev.frag_shader_hash);
 			// force new drawcall if texture is different
-			new_dump = ((u64)d.texture_raw_data_ptr != (u64)d_prev.texture_raw_data_ptr);
+			new_dump = new_dump || ((u64)d.texture_raw_data_ptr != (u64)d_prev.texture_raw_data_ptr);
 			// force new drawcall if texture has transparency to reduce visual bugs
 			new_dump = new_dump || !g_dump_texture_info[(u64)d.texture_raw_data_ptr].is_opaque;
-			//new_dump = new_dump || (d.vert_shader_hash == 0xAB2CD1A9);
-			//new_dump = true;
+#if MESHDUMP_SLY_VERSION == 3
+			// force new draw call if skeletal shader because of reasons
+			new_dump = new_dump || (d.vert_shader_hash == 0xAB2CD1A9);
+#endif
 		}
 #endif
 
@@ -631,16 +641,11 @@ void mesh_dumper::dump()
 			draw_type == draw_type_e::sly3_particle2 ||
 			draw_type == draw_type_e::sly3_particle3);
 
-		const bool is_skinned_only = d.transform_branch_bits & 0x100;
-		
-		bool is_skinned = (
-			draw_type == draw_type_e::sly3_skeletal &&
-			is_skinned_only);
-
 		bool is_skin_shader = (draw_type == draw_type_e::sly3_skeletal ||
 							   draw_type == draw_type_e::sly3_water);
+		bool is_skinned = is_skin_shader && (d.transform_branch_bits & 0x100);
 
-		const bool is_lighting = d.transform_branch_bits & 0x10;
+		const bool is_lighting = is_skin_shader && (d.transform_branch_bits & 0x10);
 
 		const bool use_inv_view = (
 			draw_type != draw_type_e::sly3_skydome);
@@ -663,7 +668,7 @@ void mesh_dumper::dump()
 			xform_mat0 = {vcb[0], vcb[1], vcb[2], vcb[3]};
 			xform_mat  = {vcb[13], vcb[14], vcb[15], vcb[16]};
 
-			if (is_skinned_only)
+			if (is_skinned)
 			{
 				u32 j = 32;
 				bone_mats[0] = {vcb[j++], vcb[j++], vcb[j++], {0, 0, 0, 1}};
@@ -771,7 +776,7 @@ void mesh_dumper::dump()
 		{
 			vec4 out;
 			vec3 a = {normal.x, normal.y, normal.z};
-			if (is_skinned_only && weights_block)
+			if (is_skinned)
 			{
 				const auto& [r0, r1, r2] = get_skeleton_r_vecs(idx, weights_block);
 
@@ -880,7 +885,7 @@ void mesh_dumper::dump()
 							ensure(d.blocks.size() > 2 + block_increment);
 							u32 spec = ((u32*)d.blocks[2 + block_increment].vertex_data.data())[i];
 
-							if (is_skin_shader && is_lighting && block1_weights)
+							if (is_lighting)
 							{
 								using std::min;
 								using std::max;
@@ -1212,6 +1217,15 @@ void mesh_dumper::dump()
 				obj_str += fmt::format("# warning: min_idx is %d\n", min_idx);
 #endif
 
+#if MESHDUMP_NOCLIP
+			for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
+			{
+				const auto f0 = vertex_index_base + d.indices[tri_idx * 3 + 0] - min_idx;
+				const auto f1 = vertex_index_base + d.indices[tri_idx * 3 + 2] - min_idx;
+				const auto f2 = vertex_index_base + d.indices[tri_idx * 3 + 1] - min_idx;
+				obj_str += fmt::format("f %d %d %d\n", f0, f1, f2);
+			}
+#else
 			if (has_normals)
 			{
 				for (auto tri_idx = 0; tri_idx < d.indices.size() / 3; tri_idx++)
@@ -1238,6 +1252,7 @@ void mesh_dumper::dump()
 						f2, f2);
 				}
 			}
+#endif
 
 #if !MESHDUMP_NOCLIP || MESHDUMP_BATCH_DUMPS
 			vertex_index_base += vertex_count;
