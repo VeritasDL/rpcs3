@@ -12,14 +12,14 @@
 #include <Emu/RSX/RSXThread.h>
 #include <Emu/System.h>
 
-#define MESHDUMP_DEBUG true
+#define MESHDUMP_DEBUG false
 #define MESHDUMP_DEBUG_OLD false
 #define MESHDUMP_POSED true
 #define MESHDUMP_SLY_VERSION 3
 #define MESHDUMP_NOCLIP true
 #define MESHDUMP_BATCH_DUMPS true
 #define MESHDUMP_GENERIC_FILENAMES false
-#define MESHDUMP_OVERWRITE false
+#define MESHDUMP_OVERWRITE true
 
 //#pragma optimize("", off)
 
@@ -468,7 +468,7 @@ void mesh_dumper::dump()
 		{
 			const auto& d_prev = g_mesh_dumper.dumps[dump_idx - 1];
 			// force new drawcall if shaders are different
-			new_dump = new_dump || (d.vert_shader_hash != d_prev.vert_shader_hash || d.frag_shader_hash != d_prev.frag_shader_hash);
+			new_dump = (d.vert_shader_hash != d_prev.vert_shader_hash || d.frag_shader_hash != d_prev.frag_shader_hash);
 			// force new drawcall if texture is different
 			new_dump = new_dump || ((u64)d.texture_raw_data_ptr != (u64)d_prev.texture_raw_data_ptr);
 			// force new drawcall if texture has transparency to reduce visual bugs
