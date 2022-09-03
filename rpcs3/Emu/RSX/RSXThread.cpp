@@ -3539,15 +3539,6 @@ namespace rsx
 			}
 
 			flip_notification_count = 1;
-
-		if (!isHLE)
-		{
-			sys_rsx_context_attribute(0x55555555, 0xFEC, buffer, 0, 0, 0);
-			g_mesh_dumper_mtx.unlock();
-			for (auto i = 0; i < 100; ++i) // lol
-				std::this_thread::yield();
-			g_mesh_dumper_mtx.lock();
-			return;
 		}
 		else if (frame_limit == frame_limit_type::_ps3)
 		{
@@ -3593,6 +3584,11 @@ namespace rsx
 			if (!isHLE)
 			{
 				sys_rsx_context_attribute(0x55555555, 0xFEC, buffer, 0, 0, 0);
+
+				g_mesh_dumper_mtx.unlock();
+				for (auto i = 0; i < 100; ++i) // lol
+					std::this_thread::yield();
+				g_mesh_dumper_mtx.lock();
 
 				if (unsent_gcm_events)
 				{
