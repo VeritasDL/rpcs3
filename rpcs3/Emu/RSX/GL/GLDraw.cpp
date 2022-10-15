@@ -335,21 +335,8 @@ void GLGSRender::load_texture_env()
 			m_textures_dirty[i] = false;
 		}
 
-		if (g_mesh_dumper.enabled &&
-			i == 0 &&
-			sampler_state->upload_context == rsx::texture_upload_context::shader_read &&
-		    sampler_state->image_type == rsx::texture_dimension_extended::texture_dimension_2d &&
-		    sampler_state->format_class == rsx::format_class::RSX_FORMAT_CLASS_COLOR)
-		{
-			auto& dump = g_mesh_dumper.get_dump();
-			dump.texture_raw_data_ptr = &sampler_state->image_handle->image()->raw_data;
-
-			texture_info_t tex_info{};
-			tex_info.width = tex.width();
-			tex_info.height = tex.height();
-			tex_info.format = tex.format();
-			g_dump_texture_info[(u64)dump.texture_raw_data_ptr] = tex_info;
-		}
+		if (g_mesh_dumper.enabled)
+			g_mesh_dumper.save_texture(sampler_state, i, tex);
 	}
 
 	for (u32 textures_ref = current_vp_metadata.referenced_textures_mask, i = 0; textures_ref; textures_ref >>= 1, ++i)
