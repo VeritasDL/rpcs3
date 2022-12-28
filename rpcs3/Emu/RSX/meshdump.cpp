@@ -13,10 +13,16 @@
 #include <Emu/System.h>
 #include "Common/TextureUtils.h"
 
+#define SLY_1 1
+#define SLY_2 2
+#define SLY_3 3
+#define SLY_4 4
+#define COD_BO 5
+#define MESHDUMP_GAME COD_BO
+
 #define MESHDUMP_DEBUG true
 #define MESHDUMP_DEBUG_OLD false
 #define MESHDUMP_POSED true
-#define MESHDUMP_SLY_VERSION 2
 #define MESHDUMP_NOCLIP false
 #define MESHDUMP_NOCLIP_BATCH_DUMPS true
 #define MESHDUMP_GENERIC_FILENAMES true
@@ -126,7 +132,7 @@ void mesh_dumper::dump()
 
 	const std::string tex_dir_rel = fmt::format("textures_%d", dump_index);
 
-#elif MESHDUMP_SLY_VERSION == 3
+#elif MESHDUMP_GAME == SLY_3
 
 	const auto map_name         = std::string((char*)vm::base(0x00788B4C));
 	const bool is_job           = (vm::read32(0x005EB494) != -1u);
@@ -355,7 +361,7 @@ void mesh_dumper::dump()
 	//g_mesh_dumper.dumps[4].vertex_constants_buffer
 
 	mat4 inv_view_mat = linalg::identity;
-#if MESHDUMP_SLY_VERSION == 3
+#if MESHDUMP_GAME == SLY_3
 	auto& v      = inv_view_mat;
 	auto m       = (be_t<float>*)vm::base(0x007DA920);
 	int i        = 0;
@@ -402,7 +408,7 @@ void mesh_dumper::dump()
 		// todo put this logic in the earlier in the is_used thing so that we don't dump unused textures
 		const u32 tex_count = d.texture_raw_data_ptrs.size();
 		u64 tex_raw_idx = 0;
-#if MESHDUMP_SLY_VERSION == 1
+#if MESHDUMP_GAME == SLY_1
 		if (tex_count == 3)
 			tex_raw_idx = 1;
 #endif
@@ -492,7 +498,7 @@ void mesh_dumper::dump()
 			new_dump = new_dump || ((u64)texture_raw_data_ptr != (u64)d_prev.texture_raw_data_ptr);
 			// force new drawcall if texture has transparency to reduce visual bugs
 			new_dump = new_dump || !g_dump_texture_info[(u64)texture_raw_data_ptr].is_opaque;
-#if MESHDUMP_SLY_VERSION == 3
+#if MESHDUMP_GAME == SLY_3
 			// force new draw call if skeletal shader because of reasons
 			new_dump = new_dump || (d.vert_shader_hash == 0xAB2CD1A9);
 #endif
@@ -627,7 +633,7 @@ void mesh_dumper::dump()
 
 		const auto& vcb = d.vertex_constants_buffer;
 
-#if MESHDUMP_SLY_VERSION != 4
+#if MESHDUMP_GAME < SLY_4
 		// TODO: would be cleaner to base things on just transform bits and not block count, also simplify related logic
 
 		enum class draw_type_e
@@ -661,7 +667,7 @@ void mesh_dumper::dump()
 		if (!d.blocks.empty())
 			stride0 = d.blocks[0].interleaved_range_info.attribute_stride;
 
-		if (MESHDUMP_SLY_VERSION == 1)
+		if (MESHDUMP_GAME == SLY_1)
 		{
 			static bool has_skydome1 = false;
 			if (last_dump)
@@ -682,10 +688,10 @@ void mesh_dumper::dump()
 			else if (d.vert_shader_hash == 0xE2310449 && d.frag_shader_hash == 0x76A79373) draw_type = draw_type_e::sly1_particle2;
 			else if (d.vert_shader_hash == 0x31C70E3B && d.frag_shader_hash == 0x76A79373) draw_type = draw_type_e::sly1_particle2;
 		}
-		else if ((MESHDUMP_SLY_VERSION == 2) || (MESHDUMP_SLY_VERSION == 3))
+		else if ((MESHDUMP_GAME == SLY_2) || (MESHDUMP_GAME == SLY_3))
 		{
-			     if (MESHDUMP_SLY_VERSION == 3 && d.clear_count == 1)
-					 if (stride0 == 28) draw_type = draw_type_e::sly3_skydome2;
+			if (MESHDUMP_GAME == SLY_3 && d.clear_count == 1)
+				 if (stride0 == 28) draw_type = draw_type_e::sly3_skydome2;
 					 else draw_type = draw_type_e::sly3_skydome;
 			else if (d.vert_shader_hash == 0x47DA8B28 && d.frag_shader_hash == 0x0BBE0FF4) draw_type = draw_type_e::sly3_normal;
 			else if (d.vert_shader_hash == 0x73783E15 && d.frag_shader_hash == 0xFFA26447) draw_type = draw_type_e::sly3_nospec;
@@ -746,7 +752,7 @@ void mesh_dumper::dump()
 
 		vec3 pos_offset{};
 		
-#if MESHDUMP_SLY_VERSION == 3
+#if MESHDUMP_GAME == SLY_3
 		if (is_skydome)
 		{
 			//const vec3 cam_pos = vec3(inv_view_mat[3][0], inv_view_mat[3][1], inv_view_mat[3][2]);
@@ -833,12 +839,12 @@ void mesh_dumper::dump()
 			}
 			// return {out.x * 0.01f, out.y * 0.01f, out.z * 0.01f};
 
-#if MESHDUMP_SLY_VERSION == 3
+#if MESHDUMP_GAME == SLY_3
 			if (use_inv_view)
 				out = mul_inv(out, inv_view_mat);
 			// xform_mat = linalg::mul(xform_mat, inv_view_mat);
 #endif
-#if MESHDUMP_SLY_VERSION == 3
+#if MESHDUMP_GAME == SLY_3
 			return vec3(-out.x + pos_offset.x, out.z + pos_offset.z, out.y + pos_offset.y) * scale_mult;
 #else
 			return vec3(out.x + pos_offset.x, out.y + pos_offset.y, out.z + pos_offset.z) * scale_mult;
@@ -850,6 +856,8 @@ void mesh_dumper::dump()
 		{
 			vec4 out;
 			vec3 a = {normal.x, normal.y, normal.z};
+
+#if MESHDUMP_GAME <= SLY_4
 			if (is_skinned)
 			{
 				const auto& [r0, r1, r2] = get_skeleton_r_vecs(idx, weights_block);
@@ -864,6 +872,7 @@ void mesh_dumper::dump()
 					dot(r2_3, a)};
 			}
 			else
+#endif
 			{
 				return {normal.x, normal.y, normal.z};
 			}
@@ -873,7 +882,7 @@ void mesh_dumper::dump()
 
 		bool has_normals{};
 
-#if MESHDUMP_SLY_VERSION != 4
+#if MESHDUMP_GAME < 4
 
 		auto emit_uniforms = [&](int draw_type) {
 #if MESHDUMP_NOCLIP
@@ -1210,7 +1219,9 @@ void mesh_dumper::dump()
 #endif
 
 #if MESHDUMP_DEBUG
+#if MESHDUMP_GAME <= SLY_4
 		obj_str += fmt::format("# draw_type: %d\n", (int)draw_type);
+#endif
 		obj_str += fmt::format("# tex_count: %d\n", tex_count);
 		obj_str += fmt::format("# transform_branch_bits: 0x%X\n", d.transform_branch_bits);
 
@@ -1219,7 +1230,7 @@ void mesh_dumper::dump()
 			obj_str += fmt::format(" # %02d: %s\n", i, print_vec4(d.vertex_constants_buffer[i]));
 #endif
 
-#if MESHDUMP_SLY_VERSION == 4
+#if MESHDUMP_GAME == SLY_4
 
 #if MESHDUMP_DEBUG
 		if (d.vertex_constants_buffer.size() >= 4)
