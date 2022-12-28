@@ -1649,9 +1649,11 @@ bool ppu_load_exec(const ppu_exec_object& elf, utils::serial* ar)
 	Emu.SetExecutableHash(hash);
 
 	// Apply the patch
-	auto applied = g_fxo->get<patch_engine>().apply(!ar ? hash : std::string{}, vm::g_base_addr);
+	//auto applied = g_fxo->get<patch_engine>().apply(!ar ? hash : std::string{}, vm::g_base_addr);
+	auto applied = g_fxo->get<patch_engine>().apply(hash, vm::g_base_addr);
 
-	if (!ar && !Emu.GetTitleID().empty())
+	//if (!ar && !Emu.GetTitleID().empty())
+	if (!Emu.GetTitleID().empty())
 	{
 		// Alternative patch
 		applied += g_fxo->get<patch_engine>().apply(Emu.GetTitleID() + '-' + hash, vm::g_base_addr);
