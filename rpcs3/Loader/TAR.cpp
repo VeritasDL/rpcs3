@@ -294,7 +294,7 @@ std::vector<u8> tar_object::save_directory(const std::string& src_dir, std::vect
 			return;
 		}
 
-		ptr += utils::aligned_div(std::bit_width(i), 3) - 1;
+		ptr += utils::aligned_div(unsigned(std::bit_width(i)), 3) - 1;
 
 		for (; i; ptr--, i /= 8)
 		{

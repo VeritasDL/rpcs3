@@ -265,7 +265,8 @@ void mesh_dumper::dump()
 				       (((v & 0x000000FF) * 2) << 24));
 			}
 		}
-		else if ((info_.format & CELL_GCM_TEXTURE_A8R8G8B8) == CELL_GCM_TEXTURE_A8R8G8B8)
+		else if ((info_.format == (CELL_GCM_TEXTURE_A8R8G8B8 | CELL_GCM_TEXTURE_LN)) ||
+				 (info_.format == (CELL_GCM_TEXTURE_A8R8G8B8 | CELL_GCM_TEXTURE_UN)))
 		{
 			memcpy(final_data.data(), src, info_.width * info_.height * 4);
 
@@ -413,7 +414,7 @@ void mesh_dumper::dump()
 			tex_raw_idx = 1;
 #endif
 
-		const tex_raw_data_ptr_t texture_raw_data_ptr = d.texture_raw_data_ptrs[tex_raw_idx];
+		const tex_raw_data_ptr_t texture_raw_data_ptr = tex_count > 0 ? d.texture_raw_data_ptrs[tex_raw_idx] : nullptr;
 
 		const bool last_dump = (dump_idx == g_mesh_dumper.dumps.size() - 1);
 

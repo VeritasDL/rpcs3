@@ -603,9 +603,13 @@ namespace gl
 							dst->raw_data.resize(compr_size);
 							memcpy(dst->raw_data.data(), staging_buffer.data(), compr_size);
 						}
-						else
+						else if (format == CELL_GCM_TEXTURE_COMPRESSED_DXT23)
 						{
-							__debugbreak();
+							// TODO
+							//__debugbreak();
+							const auto compr_size = staging_buffer.size();
+							dst->raw_data.resize(compr_size);
+							memcpy(dst->raw_data.data(), staging_buffer.data(), compr_size);
 						}
 
 						// && !dumped.contains((u64)dst->raw_data.data()) */)
